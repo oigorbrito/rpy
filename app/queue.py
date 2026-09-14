@@ -52,7 +52,10 @@ RETURNING id;
 
 FAIL_SQL = """
 UPDATE jobs
-SET status = CASE WHEN attempts >= max_attempts THEN 'dead' ELSE 'pending' END,
+SET status = CASE
+        WHEN attempts >= max_attempts THEN 'dead'::job_status
+        ELSE 'pending'::job_status
+    END,
     run_at = CASE WHEN attempts >= max_attempts THEN run_at ELSE $3 END,
     worker_id = NULL,
     last_heartbeat = NULL,
@@ -71,7 +74,10 @@ WITH stale AS (
     FOR UPDATE SKIP LOCKED
 )
 UPDATE jobs j
-SET status = CASE WHEN attempts >= max_attempts THEN 'dead' ELSE 'pending' END,
+SET status = CASE
+        WHEN attempts >= max_attempts THEN 'dead'::job_status
+        ELSE 'pending'::job_status
+    END,
     worker_id = NULL,
     last_heartbeat = NULL,
     error_log = COALESCE(error_log, '') || E'\nWorker heartbeat timed out.',
