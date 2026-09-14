@@ -167,6 +167,57 @@ async def _generate(
     return _message_text(message)
 
 
+async def _persist_summary(
+    conn: asyncpg.Connection,
+    *,
+    process_id: UUID,
+    version_id: UUID,
+    text: str,
+    validation: dict[str, Any],
+    generation_ms: int,
+    model: str = MODEL,
+    prompt_version: str = PROMPT_VERSION,
+) -> bool:
+    """Persist without allowing duplicate/stale executions to degrade a valid summary.
+
+    Invalid summaries may be replaced by later attempts. Once a valid summary exists,
+    only a valid result from a different prompt/model revision may replace it. An
+    invalid duplicate can therefore never overwrite content already accepted by the
+    validator.
+    """
+    row = await conn.fetchrow(
+        """
+        INSERT INTO process_summaries (
+            process_id, version_id, markdown, validation, model, prompt_version, generation_ms
+        ) VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)
+        ON CONFLICT (process_id, version_id)
+        DO UPDATE SET markdown = EXCLUDED.markdown,
+                      validation = EXCLUDED.validation,
+                      model = EXCLUDED.model,
+                      prompt_version = EXCLUDED.prompt_version,
+                      generation_ms = EXCLUDED.generation_ms,
+                      created_at = NOW()
+        WHERE COALESCE((process_summaries.validation->>'passed')::boolean, false) = false
+           OR (
+                COALESCE((EXCLUDED.validation->>'passed')::boolean, false) = true
+                AND (
+                    process_summaries.prompt_version IS DISTINCT FROM EXCLUDED.prompt_version
+                    OR process_summaries.model IS DISTINCT FROM EXCLUDED.model
+                )
+           )
+        RETURNING id
+        """,
+        process_id,
+        version_id,
+        text,
+        validation,
+        model,
+        prompt_version,
+        generation_ms,
+    )
+    return row is not None
+
+
 async def generate_summary(
     pool: asyncpg.Pool,
     process_id: UUID,
@@ -197,28 +248,22 @@ async def generate_summary(
     generation_ms = max(0, round((perf_counter() - started) * 1000))
     validation = {"passed": result.passed, "errors": result.errors}
     async with pool.acquire() as conn:
-        await conn.execute(
-            """
-            INSERT INTO process_summaries (
-                process_id, version_id, markdown, validation, model, prompt_version, generation_ms
-            ) VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)
-            ON CONFLICT (process_id, version_id)
-            DO UPDATE SET markdown = EXCLUDED.markdown,
-                          validation = EXCLUDED.validation,
-                          model = EXCLUDED.model,
-                          prompt_version = EXCLUDED.prompt_version,
-                          generation_ms = EXCLUDED.generation_ms,
-                          created_at = NOW()
-            """,
-            process_id,
-            version_id,
-            text,
-            validation,
-            MODEL,
-            PROMPT_VERSION,
-            generation_ms,
+        persisted = await _persist_summary(
+            conn,
+            process_id=process_id,
+            version_id=version_id,
+            text=text,
+            validation=validation,
+            model=MODEL,
+            prompt_version=PROMPT_VERSION,
+            generation_ms=generation_ms,
         )
-    return {"validation": validation, "model": MODEL, "generation_ms": generation_ms}
+    return {
+        "validation": validation,
+        "model": MODEL,
+        "generation_ms": generation_ms,
+        "persisted": persisted,
+    }
 
 
 @task("generate_process_summary")
