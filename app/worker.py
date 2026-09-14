@@ -16,6 +16,7 @@ import app.judit_tasks  # noqa: F401 - imports task registrations
 import app.rag  # noqa: F401 - imports task registrations
 from app.db import create_pool
 from app.json_utils import decode_json_object
+from app.log_safety import sanitize_error_message
 from app.queue import claim, complete, fail, heartbeat, reclaim_stale
 from app.tasks import PermanentTaskError, resolve_task
 
@@ -100,10 +101,17 @@ class Worker:
             raise
         except Exception as exc:
             permanent = isinstance(exc, PermanentTaskError)
-            logger.exception(
-                "job %s failed%s",
+            safe_detail = sanitize_error_message(exc)
+            # Job failures are expected operational events. Do not emit the raw
+            # traceback because its exception tail can include provider request
+            # fragments, database URLs or credentials. Durable diagnostics retain
+            # the exception class and a bounded, redacted message instead.
+            logger.error(
+                "job %s failed%s (%s): %s",
                 job_id,
                 " permanently" if permanent else "",
+                type(exc).__name__,
+                safe_detail,
             )
             async with self.pool.acquire() as conn:
                 await fail(
@@ -111,7 +119,7 @@ class Worker:
                     job_id,
                     self.worker_id,
                     attempts=int(row["attempts"]),
-                    error=f"{type(exc).__name__}: {exc}",
+                    error=f"{type(exc).__name__}: {safe_detail}",
                     permanent=permanent,
                 )
         finally:
