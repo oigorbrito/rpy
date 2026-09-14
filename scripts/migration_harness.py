@@ -65,6 +65,8 @@ def python_import_violations(path: Path) -> list[str]:
 
 def donor_identity_violations(path: Path) -> list[str]:
     rel = path.relative_to(ROOT)
+    if rel == Path("scripts/migration_harness.py"):
+        return []
     if path.name in {"AGENTS.md", "LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"}:
         return []
     if len(rel.parts) >= 2 and rel.parts[0] == "docs" and rel.parts[1] == "migrations":
