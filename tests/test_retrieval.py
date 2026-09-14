@@ -39,3 +39,19 @@ def test_recency_boost_favors_later_equal_hits() -> None:
     ranked = rank_steps(query="penhora", steps=steps, limit=10)
     scores = {item.step.id: item.score for item in ranked}
     assert scores[late.id] > scores[early.id]
+
+
+def test_vector_signal_contributes_half_of_base_score() -> None:
+    steps = [_step(i, "movimento neutro") for i in range(1, 51)]
+    semantic_hit = steps[20]
+    vector_scores = {semantic_hit.id: 1.0}
+    ranked = rank_steps(
+        query="termo ausente",
+        steps=steps,
+        vector_scores=vector_scores,
+        limit=10,
+    )
+    by_id = {item.step.id: item for item in ranked}
+    assert semantic_hit.id in by_id
+    assert by_id[semantic_hit.id].vector == 1.0
+    assert by_id[semantic_hit.id].score > 0.5
