@@ -52,11 +52,13 @@ docker run --rm --network host \
   "$PG_CLIENT_IMAGE" \
   sh scripts/backup_database.sh "$backup"
 
-# Simulate the operational contract: the dump and sidecar leave their creation
-# directory/host. Verification and restore must not depend on the original path.
-cp "$backup" "$relocated_backup"
-cp "$backup.sha256" "$relocated_backup.sha256"
-rm -rf "$(dirname "$backup")"
+# The backup container writes with umask 077 as its own uid. Perform the simulated
+# off-host copy through the same client image rather than weakening backup modes.
+docker run --rm \
+  -v "$PWD:/work" -w /work \
+  "$PG_CLIENT_IMAGE" \
+  sh -c 'cp "$1" "$2" && cp "$1.sha256" "$2.sha256" && rm -rf "$(dirname "$1")"' \
+  sh "$backup" "$relocated_backup"
 
 docker run --rm \
   -v "$PWD:/work" -w /work \
