@@ -52,6 +52,7 @@ jobs:
           BACKUP_DATABASE_URL: postgresql://rpy_backup:ci-backup-password@postgres:5432/rpy
           ANTHROPIC_API_KEY: ci-anthropic-key
           OPENAI_API_KEY: ci-openai-key
+          JUDIT_API_KEY: ci-judit-api-key
           JUDIT_WEBHOOK_TOKEN: ci-judit-token
           RPY_BEARER_TOKENS: '{"ci-bearer-token":"00000000-0000-0000-0000-000000000001"}'
           RPY_OPS_TOKEN: ci-ops-token
