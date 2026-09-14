@@ -130,28 +130,32 @@ async def judit_webhook(token: str, request: Request) -> dict[str, bool]:
 
     pool: asyncpg.Pool = request.app.state.pool
     async with pool.acquire() as conn:
-        if not await _record_delivery(conn, event):
-            return {"ok": True}
+        # Delivery dedupe and its corresponding durable side effect are one unit.
+        # If staging/enqueue fails, the delivery row rolls back so Judit can retry
+        # the same callback_id without the event being discarded as a duplicate.
+        async with conn.transaction():
+            if not await _record_delivery(conn, event):
+                return {"ok": True}
 
-        if event.is_lawsuit_response:
-            source_id = event.response_id or event.callback_id
-            await stage_version(
-                conn,
-                code=str(event.code),
-                source_request_id=source_id,
-                cached_response=event.cached_response,
-                payload=event.raw,
-                judit_request_id=event.request_id,
-                judit_response_id=event.response_id,
-                judit_callback_id=event.callback_id,
-            )
+            if event.is_lawsuit_response:
+                source_id = event.response_id or event.callback_id
+                await stage_version(
+                    conn,
+                    code=str(event.code),
+                    source_request_id=source_id,
+                    cached_response=event.cached_response,
+                    payload=event.raw,
+                    judit_request_id=event.request_id,
+                    judit_response_id=event.response_id,
+                    judit_callback_id=event.callback_id,
+                )
 
-        elif event.request_completed and event.request_id:
-            await enqueue(
-                conn,
-                task_name="finalize_judit_request",
-                payload={"request_id": event.request_id},
-                idempotency_key=f"judit-finalize:{event.request_id}",
-            )
+            elif event.request_completed and event.request_id:
+                await enqueue(
+                    conn,
+                    task_name="finalize_judit_request",
+                    payload={"request_id": event.request_id},
+                    idempotency_key=f"judit-finalize:{event.request_id}",
+                )
 
     return {"ok": True}
