@@ -35,7 +35,14 @@ CREATE TABLE backup_restore_probe (
 INSERT INTO backup_restore_probe (id, value) VALUES (1, 'rpy-backup-restore-ok');
 SQL
 
-source_migrations=$(run_client psql "$TEST_DATABASE_URL" -Atc "SELECT count(*) FROM schema_migrations;")
+source_probe=$(run_client psql "$TEST_DATABASE_URL" -Atc \
+  "SELECT value FROM backup_restore_probe WHERE id = 1;")
+[ "$source_probe" = "rpy-backup-restore-ok" ] || {
+  echo "restore drill setup failed: sentinel row missing from source" >&2
+  exit 1
+}
+source_migrations=$(run_client psql "$TEST_DATABASE_URL" -Atc \
+  "SELECT count(*) FROM schema_migrations;")
 
 # Run the same operational scripts using PostgreSQL 16 client binaries from the
 # pgvector image, avoiding assumptions about pg_dump availability on the runner.
@@ -44,6 +51,16 @@ docker run --rm --network host \
   -v "$PWD:/work" -w /work \
   "$PG_CLIENT_IMAGE" \
   sh scripts/backup_database.sh "$backup"
+
+# The archive must contain both the sentinel table definition and its data before
+# any restore is attempted. This localizes failures to dump vs. restore behavior.
+docker run --rm \
+  -v "$PWD:/work" -w /work \
+  "$PG_CLIENT_IMAGE" \
+  pg_restore --list "$backup" | grep -q "backup_restore_probe" || {
+    echo "restore drill failed: sentinel table missing from backup TOC" >&2
+    exit 1
+  }
 
 run_client psql "$TEST_ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 \
   -c "DROP DATABASE IF EXISTS $restore_db WITH (FORCE);" \
