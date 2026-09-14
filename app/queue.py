@@ -7,6 +7,8 @@ from uuid import UUID
 
 import asyncpg
 
+WAKE_CHANNEL = "rpy_jobs"
+
 CLAIM_JOB_SQL = """
 UPDATE jobs
 SET status = 'processing',
@@ -98,7 +100,7 @@ async def enqueue(
     max_attempts: int = 3,
     idempotency_key: str | None = None,
 ) -> asyncpg.Record | None:
-    return await conn.fetchrow(
+    row = await conn.fetchrow(
         ENQUEUE_SQL,
         task_name,
         json.dumps(payload),
@@ -107,6 +109,11 @@ async def enqueue(
         max_attempts,
         idempotency_key,
     )
+    if row is not None:
+        # PostgreSQL delivers NOTIFY only after the surrounding transaction commits.
+        # The UUID payload is only a wake-up hint; SKIP LOCKED remains authoritative.
+        await conn.execute("SELECT pg_notify($1, $2)", WAKE_CHANNEL, str(row["id"]))
+    return row
 
 
 async def claim(conn: asyncpg.Connection, worker_id: UUID) -> asyncpg.Record | None:
