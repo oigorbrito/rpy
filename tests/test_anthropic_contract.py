@@ -100,3 +100,51 @@ async def test_validation_errors_are_sent_only_in_dynamic_user_content() -> None
         assert error not in system_text
         assert error in user_content
     assert "<validation_errors>" in user_content
+
+
+@pytest.mark.asyncio
+async def test_secret_case_sends_only_class_and_allowed_header_to_provider() -> None:
+    client = _Client()
+    context = {
+        "code": "9999999-99.9999.9.99.9999",
+        "class_name": "Procedimento Sigiloso",
+        "court": "TRIBUNAL-NAO-ENVIAR",
+        "header": {
+            "instance": 1,
+            "area": "Cível",
+            "state": "RS",
+        },
+        "parties": [{"name": "PARTE-SECRETA"}],
+        "subjects": [{"name": "ASSUNTO-SECRETO"}],
+        "secrecy_level": 1,
+        "steps": [
+            {
+                "step_number": 1,
+                "title": "MOVIMENTO-SECRETO",
+                "text": "CONTEUDO-SECRETO",
+            }
+        ],
+    }
+
+    await _generate(client, context)
+
+    user_content = client.messages.calls[0]["messages"][0]["content"]
+    assert '"class_name": "Procedimento Sigiloso"' in user_content
+    assert '"instance": 1' in user_content
+    assert '"area": "Cível"' in user_content
+    assert '"state": "RS"' in user_content
+    assert "<movimentos>\n[]\n</movimentos>" in user_content
+
+    for forbidden in (
+        context["code"],
+        "TRIBUNAL-NAO-ENVIAR",
+        "PARTE-SECRETA",
+        "ASSUNTO-SECRETO",
+        "MOVIMENTO-SECRETO",
+        "CONTEUDO-SECRETO",
+        "secrecy_level",
+        "parties",
+        "subjects",
+        "court",
+    ):
+        assert forbidden not in user_content
