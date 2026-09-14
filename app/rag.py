@@ -213,7 +213,7 @@ async def generate_summary(
             process_id,
             version_id,
             text,
-            json.dumps(validation),
+            validation,
             MODEL,
             PROMPT_VERSION,
             generation_ms,
