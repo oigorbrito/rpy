@@ -11,6 +11,7 @@ from fastapi import FastAPI, HTTPException, Request
 
 from app.auth import configured_bearer_tokens, tenant_from_request
 from app.db import create_pool
+from app.http_auth_config import validate_http_auth_config
 from app.http_limits import JuditWebhookBodyLimitMiddleware, judit_webhook_max_body_bytes
 from app.json_utils import decode_json_object
 from app.judit import parse_event
@@ -32,6 +33,7 @@ async def lifespan(app: FastAPI):
     # discovering it only after the first production request arrives.
     judit_webhook_max_body_bytes()
     operational_thresholds()
+    validate_http_auth_config()
     app.state.bearer_tokens = configured_bearer_tokens()
     app.state.pool = await create_pool(database_url)
     try:
