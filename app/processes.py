@@ -54,6 +54,9 @@ async def stage_version(
     source_request_id: str | None,
     cached_response: bool,
     payload: dict[str, Any],
+    judit_request_id: str | None = None,
+    judit_response_id: str | None = None,
+    judit_callback_id: str | None = None,
 ) -> tuple[UUID, UUID]:
     async with conn.transaction():
         process_id = await conn.fetchval(
@@ -68,21 +71,57 @@ async def stage_version(
         version_id = await conn.fetchval(
             """
             INSERT INTO process_versions (
-                process_id, source_request_id, source_cached_response, source_payload
+                process_id,
+                source_request_id,
+                source_cached_response,
+                source_payload,
+                judit_request_id,
+                judit_response_id,
+                judit_callback_id
             )
-            VALUES ($1, $2, $3, $4::jsonb)
+            VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)
             ON CONFLICT (process_id, source_request_id)
             DO UPDATE SET
                 source_cached_response = EXCLUDED.source_cached_response,
-                source_payload = EXCLUDED.source_payload
+                source_payload = EXCLUDED.source_payload,
+                judit_request_id = COALESCE(EXCLUDED.judit_request_id, process_versions.judit_request_id),
+                judit_response_id = COALESCE(EXCLUDED.judit_response_id, process_versions.judit_response_id),
+                judit_callback_id = COALESCE(EXCLUDED.judit_callback_id, process_versions.judit_callback_id)
             RETURNING id
             """,
             process_id,
             source_request_id,
             cached_response,
             json.dumps(payload),
+            judit_request_id,
+            judit_response_id,
+            judit_callback_id,
         )
     return process_id, version_id
+
+
+async def preferred_judit_version(
+    conn: asyncpg.Connection,
+    *,
+    request_id: str,
+) -> asyncpg.Record | None:
+    """Return fresh tribunal data when present, otherwise the latest cached response."""
+    return await conn.fetchrow(
+        """
+        SELECT pv.id AS version_id,
+               pv.process_id,
+               pv.source_cached_response,
+               pv.source_payload,
+               p.code
+        FROM process_versions pv
+        JOIN processes p ON p.id = pv.process_id
+        WHERE pv.judit_request_id = $1
+          AND pv.judit_response_id IS NOT NULL
+        ORDER BY pv.source_cached_response ASC, pv.created_at DESC
+        LIMIT 1
+        """,
+        request_id,
+    )
 
 
 async def finalize_version(
