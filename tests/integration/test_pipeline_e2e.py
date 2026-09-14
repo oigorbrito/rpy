@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from uuid import uuid4
 
@@ -9,6 +10,7 @@ import pytest
 import app.rag as rag
 from app.api import app
 from app.db import create_pool
+from app.json_utils import decode_json_object
 from app.migrations import migrate
 from app.worker import Worker, WorkerSettings
 
@@ -34,7 +36,8 @@ async def test_judit_to_summary_end_to_end(monkeypatch: pytest.MonkeyPatch) -> N
         await conn.execute(
             """
             TRUNCATE jobs, judit_deliveries, process_summaries, process_steps,
-                     tenant_processes, access_log, process_versions, processes
+                     tenant_processes, access_log, process_versions, processes,
+                     tenants
             RESTART IDENTITY CASCADE
             """
         )
@@ -155,6 +158,10 @@ O último movimento fornecido é uma sentença.
         assert generation_attempts[0] is None
         assert generation_attempts[1]
 
+        tenant_id = uuid4()
+        bearer_token = "e2e-tenant-token"
+        monkeypatch.setenv("RPY_BEARER_TOKENS", json.dumps({bearer_token: str(tenant_id)}))
+
         async with pool.acquire() as conn:
             process = await conn.fetchrow(
                 "SELECT id, current_version_id, class_name, court FROM processes WHERE code = $1",
@@ -182,9 +189,20 @@ O último movimento fornecido é uma sentença.
             )
             assert summary is not None
             assert code in summary["markdown"]
-            assert summary["validation"]["passed"] is True
+            validation = decode_json_object(summary["validation"], label="summary validation")
+            assert validation["passed"] is True
             assert summary["model"] == "claude-sonnet-5"
             assert summary["prompt_version"] == "process-summary-v1"
+
+            await conn.execute(
+                "INSERT INTO tenants (id, name) VALUES ($1, 'e2e tenant')",
+                tenant_id,
+            )
+            await conn.execute(
+                "INSERT INTO tenant_processes (tenant_id, process_id) VALUES ($1, $2)",
+                tenant_id,
+                process["id"],
+            )
 
             states = await conn.fetch(
                 """
@@ -200,5 +218,27 @@ O último movimento fornecido é uma sentença.
                 "finalize_judit_request": "completed",
                 "generate_process_summary": "completed",
             }
+
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.get(
+                f"/processes/{code}",
+                headers={"Authorization": f"Bearer {bearer_token}"},
+            )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["code"] == code
+        assert body["summary"]["validation"]["passed"] is True
+        assert body["summary"]["model"] == "claude-sonnet-5"
+
+        async with pool.acquire() as conn:
+            assert await conn.fetchval(
+                """
+                SELECT count(*) FROM access_log
+                WHERE tenant_id = $1 AND process_code = $2
+                  AND action = 'read_process_summary'
+                """,
+                tenant_id,
+                code,
+            ) == 1
     finally:
         await pool.close()
