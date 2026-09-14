@@ -9,12 +9,17 @@ import asyncpg
 from anthropic import AsyncAnthropic
 
 from app.db import create_pool
-from app.retrieval import load_steps, rank_steps
+from app.embeddings import embed_query, ensure_step_embeddings
+from app.retrieval import load_steps, rank_steps, vector_search
 from app.tasks import task
 from app.validation import ValidationResult, validar
 
 MODEL = "claude-sonnet-5"
 PROMPT_VERSION = "process-summary-v1"
+RETRIEVAL_QUERY = (
+    "sentença acórdão citação decisão audiência pedido objeto situação atual "
+    "trânsito em julgado"
+)
 
 SYSTEM_PROMPT = """
 Você é um assistente jurídico responsável por produzir RESUMOS PROCESSUAIS factuais, auditáveis e estritamente fundamentados nos dados fornecidos.
@@ -87,20 +92,25 @@ def _serialize_steps(ranked: list[Any]) -> list[dict[str, Any]]:
     ]
 
 
-async def _load_context(conn: asyncpg.Connection, process_id: UUID, version_id: UUID) -> dict[str, Any]:
-    process = await conn.fetchrow(
-        """
-        SELECT id, code, court, class_name, subjects, parties, secrecy_level, header
-        FROM processes
-        WHERE id = $1 AND current_version_id = $2
-        """,
-        process_id,
-        version_id,
-    )
+async def _load_process(
+    pool: asyncpg.Pool,
+    process_id: UUID,
+    version_id: UUID,
+) -> dict[str, Any]:
+    async with pool.acquire() as conn:
+        process = await conn.fetchrow(
+            """
+            SELECT id, code, court, class_name, subjects, parties, secrecy_level, header
+            FROM processes
+            WHERE id = $1 AND current_version_id = $2
+            """,
+            process_id,
+            version_id,
+        )
     if process is None:
         raise LookupError("process/version is not current or does not exist")
 
-    base = {
+    return {
         "code": process["code"],
         "court": process["court"],
         "class_name": process["class_name"],
@@ -109,6 +119,17 @@ async def _load_context(conn: asyncpg.Connection, process_id: UUID, version_id: 
         "secrecy_level": int(process["secrecy_level"] or 0),
         "header": dict(process["header"] or {}),
     }
+
+
+async def _load_context(
+    pool: asyncpg.Pool,
+    process_id: UUID,
+    version_id: UUID,
+) -> dict[str, Any]:
+    base = await _load_process(pool, process_id, version_id)
+
+    # LGPD blocker: no parties, subjects, movement text or embeddings leave the database
+    # for secret proceedings.
     if base["secrecy_level"] > 0:
         return {
             "code": base["code"],
@@ -120,14 +141,37 @@ async def _load_context(conn: asyncpg.Connection, process_id: UUID, version_id: 
             "steps": [],
         }
 
-    steps = await load_steps(conn, version_id=version_id)
-    query = "sentença acórdão citação decisão audiência pedido objeto situação atual trânsito em julgado"
-    ranked = rank_steps(query=query, steps=steps, vector_scores=None, limit=20)
+    async with pool.acquire() as conn:
+        steps = await load_steps(conn, version_id=version_id)
+
+    vector_scores: dict[UUID, float] | None = None
+    if len(steps) > 40:
+        # Embeddings are conditional: short proceedings never pay the vector cost.
+        await ensure_step_embeddings(pool, version_id=version_id)
+        query_vector = await embed_query(RETRIEVAL_QUERY)
+        async with pool.acquire() as conn:
+            vector_scores = await vector_search(
+                conn,
+                version_id=version_id,
+                embedding=query_vector,
+                limit=40,
+            )
+
+    ranked = rank_steps(
+        query=RETRIEVAL_QUERY,
+        steps=steps,
+        vector_scores=vector_scores,
+        limit=20,
+    )
     base["steps"] = _serialize_steps(ranked)
     return base
 
 
-async def _generate(client: AsyncAnthropic, context: dict[str, Any], validation_errors: list[str] | None = None) -> str:
+async def _generate(
+    client: AsyncAnthropic,
+    context: dict[str, Any],
+    validation_errors: list[str] | None = None,
+) -> str:
     correction = ""
     if validation_errors:
         correction = (
@@ -137,7 +181,11 @@ async def _generate(client: AsyncAnthropic, context: dict[str, Any], validation_
         )
     user_prompt = (
         "<processo>\n"
-        + json.dumps({key: value for key, value in context.items() if key != "steps"}, ensure_ascii=False, default=str)
+        + json.dumps(
+            {key: value for key, value in context.items() if key != "steps"},
+            ensure_ascii=False,
+            default=str,
+        )
         + "\n</processo>\n<movimentos>\n"
         + json.dumps(context.get("steps", []), ensure_ascii=False, default=str)
         + "\n</movimentos>\n"
@@ -160,9 +208,12 @@ async def _generate(client: AsyncAnthropic, context: dict[str, Any], validation_
     return _message_text(message)
 
 
-async def generate_summary(pool: asyncpg.Pool, process_id: UUID, version_id: UUID) -> dict[str, Any]:
-    async with pool.acquire() as conn:
-        context = await _load_context(conn, process_id, version_id)
+async def generate_summary(
+    pool: asyncpg.Pool,
+    process_id: UUID,
+    version_id: UUID,
+) -> dict[str, Any]:
+    context = await _load_context(pool, process_id, version_id)
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
@@ -170,10 +221,18 @@ async def generate_summary(pool: asyncpg.Pool, process_id: UUID, version_id: UUI
     client = AsyncAnthropic(api_key=api_key)
 
     text = await _generate(client, context)
-    result: ValidationResult = validar(text=text, code=context["code"], parties=context.get("parties", []))
+    result: ValidationResult = validar(
+        text=text,
+        code=context["code"],
+        parties=context.get("parties", []),
+    )
     if not result.passed:
         text = await _generate(client, context, result.errors)
-        result = validar(text=text, code=context["code"], parties=context.get("parties", []))
+        result = validar(
+            text=text,
+            code=context["code"],
+            parties=context.get("parties", []),
+        )
 
     validation = {"passed": result.passed, "errors": result.errors}
     async with pool.acquire() as conn:
@@ -206,7 +265,7 @@ async def generate_process_summary_task(payload: dict[str, Any]) -> dict[str, An
         raise RuntimeError("DATABASE_URL is required")
     process_id = UUID(str(payload["process_id"]))
     version_id = UUID(str(payload["version_id"]))
-    pool = await create_pool(database_url, min_size=1, max_size=3)
+    pool = await create_pool(database_url, min_size=1, max_size=4)
     try:
         return await generate_summary(pool, process_id, version_id)
     finally:
