@@ -138,7 +138,7 @@ async def test_completion_before_lawsuit_reaches_authenticated_summary_with_work
             assert failed_summary["status"] == "pending"
             assert int(failed_summary["attempts"]) == 1
             await conn.execute(
-                "UPDATE jobs SET available_at = NOW() WHERE id = $1",
+                "UPDATE jobs SET run_at = NOW() WHERE id = $1",
                 failed_summary["id"],
             )
 
