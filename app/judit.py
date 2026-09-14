@@ -5,7 +5,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-_CNJ_INPUT_RE = re.compile(r"^\d{7}-?\d{2}\.?\d{4}\.?\d\.?\d{2}\.?\d{4}$")
+_CNJ_CANONICAL_RE = re.compile(r"^\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}$")
+_CNJ_DIGITS_RE = re.compile(r"^\d{20}$")
 
 
 @dataclass(slots=True)
@@ -41,7 +42,10 @@ class JuditEvent:
 
 def normalize_cnj(value: str) -> str:
     candidate = value.strip()
-    if not _CNJ_INPUT_RE.fullmatch(candidate):
+    if not (
+        _CNJ_CANONICAL_RE.fullmatch(candidate)
+        or _CNJ_DIGITS_RE.fullmatch(candidate)
+    ):
         raise ValueError("invalid CNJ process code")
     digits = "".join(character for character in candidate if character.isdigit())
     return (
