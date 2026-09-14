@@ -7,9 +7,10 @@ from contextlib import asynccontextmanager
 import asyncpg
 from fastapi import FastAPI, HTTPException, Request
 
+from app.auth import tenant_from_request
 from app.db import create_pool
 from app.judit import extract_promotable_fields, parse_event
-from app.processes import finalize_version, stage_version
+from app.processes import finalize_version, get_authorized_process, log_access, stage_version
 from app.queue import enqueue
 
 
@@ -36,6 +37,38 @@ def _valid_webhook_token(token: str) -> bool:
 @app.get("/health")
 async def health() -> dict[str, bool]:
     return {"ok": True}
+
+
+@app.get("/processes/{code}")
+async def get_process_summary(code: str, request: Request) -> dict:
+    tenant_id = tenant_from_request(request)
+    pool: asyncpg.Pool = request.app.state.pool
+    async with pool.acquire() as conn:
+        process = await get_authorized_process(conn, tenant_id=tenant_id, code=code)
+        if process is None:
+            raise HTTPException(status_code=404, detail="process not found")
+        await log_access(
+            conn,
+            tenant_id=tenant_id,
+            process_id=process["id"],
+            process_code=code,
+            action="read_process_summary",
+        )
+        summary = await conn.fetchrow(
+            """
+            SELECT markdown, validation, model, prompt_version, created_at
+            FROM process_summaries
+            WHERE process_id = $1 AND version_id = $2
+            """,
+            process["id"],
+            process["current_version_id"],
+        )
+    return {
+        "code": process["code"],
+        "class_name": process["class_name"],
+        "court": process["court"],
+        "summary": dict(summary) if summary else None,
+    }
 
 
 @app.post("/webhooks/judit/{token}")
