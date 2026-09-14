@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 from uuid import uuid4
 
-import asyncpg
 import httpx
 import pytest
 
@@ -30,6 +29,15 @@ async def test_judit_to_summary_end_to_end(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setenv("JUDIT_WEBHOOK_TOKEN", "e2e-webhook")
     monkeypatch.setenv("DATABASE_URL", TEST_DATABASE_URL)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            TRUNCATE jobs, judit_deliveries, process_summaries, process_steps,
+                     tenant_processes, access_log, process_versions, processes
+            RESTART IDENTITY CASCADE
+            """
+        )
 
     request_id = f"req-e2e-{uuid4()}"
     response_id = f"resp-e2e-{uuid4()}"
@@ -165,7 +173,7 @@ O último movimento fornecido é uma sentença.
             )
             assert summary is not None
             assert code in summary["markdown"]
-            assert dict(summary["validation"])["passed"] is True
+            assert summary["validation"]["passed"] is True
             assert summary["model"] == "claude-sonnet-5"
             assert summary["prompt_version"] == "process-summary-v1"
 
