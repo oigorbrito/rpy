@@ -74,6 +74,19 @@ def _decode_payload(value: Any) -> dict[str, Any]:
     return decode_json_object(value, label="job payload")
 
 
+def _resolve_job_contract(row: asyncpg.Record) -> tuple[Any, dict[str, Any]]:
+    """Resolve a claimed job without allowing poison data to escape the slot loop."""
+    try:
+        handler = resolve_task(str(row["task_name"]))
+        payload = _decode_payload(row["payload"])
+    except (KeyError, LookupError, TypeError, ValueError) as exc:
+        detail = sanitize_error_message(exc)
+        raise PermanentTaskError(
+            f"invalid job contract ({type(exc).__name__}): {detail}"
+        ) from None
+    return handler, payload
+
+
 class Worker:
     def __init__(self, pool: asyncpg.Pool, settings: WorkerSettings, worker_id: UUID | None = None):
         self.pool = pool
@@ -93,10 +106,10 @@ class Worker:
 
     async def _run_job(self, row: asyncpg.Record) -> None:
         job_id = row["id"]
-        handler = resolve_task(str(row["task_name"]))
-        payload = _decode_payload(row["payload"])
-        heartbeat_task = asyncio.create_task(self._heartbeat_loop(job_id))
+        heartbeat_task: asyncio.Task[None] | None = None
         try:
+            handler, payload = _resolve_job_contract(row)
+            heartbeat_task = asyncio.create_task(self._heartbeat_loop(job_id))
             result = await asyncio.wait_for(
                 handler(payload), timeout=self.settings.task_timeout_seconds
             )
@@ -124,9 +137,10 @@ class Worker:
                     permanent=permanent,
                 )
         finally:
-            heartbeat_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await heartbeat_task
+            if heartbeat_task is not None:
+                heartbeat_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await heartbeat_task
 
     async def process_one(self) -> bool:
         if self.stop_event.is_set():
