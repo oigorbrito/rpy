@@ -10,7 +10,7 @@ import pytest
 
 from app.db import create_pool
 from app.migrations import migrate
-from app.queue import claim, enqueue, reclaim_stale
+from app.queue import claim, enqueue, fail, reclaim_stale
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(
@@ -110,5 +110,45 @@ async def test_reclaimer_returns_stale_job_to_pending() -> None:
 
         assert any(item["id"] == row["id"] for item in reclaimed)
         assert str(status) == "pending"
+    finally:
+        await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_fail_retries_then_dead_letters_at_max_attempts() -> None:
+    assert TEST_DATABASE_URL is not None
+    pool = await create_pool(TEST_DATABASE_URL, min_size=1, max_size=2)
+    worker_id = uuid4()
+    try:
+        async with pool.acquire() as conn:
+            await enqueue(
+                conn,
+                task_name="integration-test",
+                payload={"value": 4},
+                idempotency_key="integration:fail",
+                max_attempts=2,
+            )
+            first = await claim(conn, worker_id)
+            assert first is not None
+            first_status = await fail(
+                conn,
+                first["id"],
+                worker_id,
+                attempts=int(first["attempts"]),
+                error="first failure",
+            )
+            assert first_status == "pending"
+
+            await conn.execute("UPDATE jobs SET run_at = NOW() WHERE id = $1", first["id"])
+            second = await claim(conn, worker_id)
+            assert second is not None
+            second_status = await fail(
+                conn,
+                second["id"],
+                worker_id,
+                attempts=int(second["attempts"]),
+                error="second failure",
+            )
+            assert second_status == "dead"
     finally:
         await pool.close()
