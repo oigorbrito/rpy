@@ -11,68 +11,21 @@ from anthropic import AsyncAnthropic
 from app.db import create_pool
 from app.embeddings import embed_query, ensure_step_embeddings
 from app.json_utils import decode_json_list, decode_json_object
+from app.prompts import PROCESS_SUMMARY_SYSTEM_PROMPT
 from app.retrieval import load_steps, rank_steps, vector_search
 from app.tasks import task
 from app.validation import ValidationResult, validar
 
 MODEL = "claude-sonnet-5"
-PROMPT_VERSION = "process-summary-v1"
+PROMPT_VERSION = "process-summary-v2"
+REQUESTED_TEMPERATURE = 0.2
+# Historical design intent is temperature=0.2. Claude Sonnet 5 currently rejects
+# non-default sampling parameters, so the production request must omit temperature.
+SONNET_5_SUPPORTS_CUSTOM_TEMPERATURE = False
 RETRIEVAL_QUERY = (
     "sentença acórdão citação decisão audiência pedido objeto situação atual "
     "trânsito em julgado"
 )
-
-SYSTEM_PROMPT = """
-Você é um assistente jurídico responsável por produzir RESUMOS PROCESSUAIS factuais, auditáveis e estritamente fundamentados nos dados fornecidos.
-
-OBJETIVO
-Produza um resumo útil para leitura rápida do processo, preservando precisão cronológica e separando fatos processuais de inferências. O texto não é parecer jurídico e não deve fazer prognóstico de resultado.
-
-REGRAS DE FUNDAMENTAÇÃO
-1. Use somente os dados presentes em <processo> e <movimentos>. Não invente fatos, partes, pedidos, decisões, datas, valores ou fundamentos.
-2. Se uma informação relevante estiver ausente ou ambígua, diga de forma curta que ela não consta no contexto fornecido.
-3. Nomes de partes somente podem ser reproduzidos quando constarem exatamente na lista de partes fornecida. Ao apresentar uma parte em campo estruturado, use <Party name="NOME EXATO" />.
-4. Nunca exponha CPF ou CNPJ em sequência limpa de 11 ou 14 dígitos. Se o dado vier sem máscara, omita ou masque.
-5. O número CNJ deve ser exatamente o número informado no campo code. Não crie, corrija ou substitua o CNJ.
-6. Não use linguagem prognóstica. São proibidas formulações como "provavelmente será condenado", "chances de", "tende a ganhar" ou "recomendo que".
-7. Descreva decisão judicial apenas pelo que consta nos movimentos. Não transforme despacho em sentença nem inferira trânsito em julgado sem registro explícito.
-8. Preserve a ordem temporal ao narrar os principais acontecimentos. Dê destaque a citação, audiência, decisão, sentença, acórdão e trânsito em julgado quando existirem.
-9. Não mencione que houve busca vetorial, BM25, RAG, seleção de chunks ou qualquer mecanismo interno.
-
-FORMATO
-A resposta deve ser Markdown e pode conter componentes JSX. Em JSX, sempre use className= e nunca class=. Tags JSX devem estar balanceadas.
-
-Use esta estrutura, omitindo seções sem informação:
-
-# Resumo do processo
-
-<ProcessHeader className="process-header">
-- Processo: [CNJ exato]
-- Classe: [classe]
-- Tribunal: [tribunal]
-</ProcessHeader>
-
-## Partes
-Liste apenas as partes recebidas. Para cada nome use <Party name="NOME EXATO" /> e, se disponível, seu papel processual.
-
-## Síntese
-Explique em poucos parágrafos o objeto aparente do processo e seu estado atual, apenas a partir do contexto.
-
-## Linha do tempo relevante
-Apresente os acontecimentos processuais mais relevantes em ordem cronológica. Prefira data + evento + consequência processual explícita.
-
-## Situação atual
-Indique o último estado processual observável. Não faça previsão.
-
-## Pontos de atenção
-Registre lacunas documentais, eventos relevantes ou inconsistências objetivas do material fornecido. Não dê recomendação jurídica.
-
-CASOS SOB SIGILO
-Se <processo secrecy_level> for maior que zero, você receberá somente cabeçalho sanitizado e classe processual. Não tente inferir nomes, movimentos, objeto, pedidos ou resultado. Produza apenas um resumo mínimo dizendo que os detalhes foram restringidos por sigilo.
-
-CRITÉRIO DE QUALIDADE
-Prefira afirmações curtas e verificáveis. Não aumente o texto com explicações jurídicas genéricas. Cada afirmação material deve ser rastreável ao conteúdo fornecido. Se houver conflito entre campos, reporte a inconsistência em vez de escolher uma versão por conta própria.
-""".strip()
 
 
 def _message_text(message: Any) -> str:
@@ -193,19 +146,23 @@ async def _generate(
         + correction
         + "\nProduza o resumo processual agora."
     )
-    message = await client.messages.create(
-        model=MODEL,
-        max_tokens=5000,
-        temperature=0.2,
-        system=[
+
+    request: dict[str, Any] = {
+        "model": MODEL,
+        "max_tokens": 5000,
+        "system": [
             {
                 "type": "text",
-                "text": SYSTEM_PROMPT,
+                "text": PROCESS_SUMMARY_SYSTEM_PROMPT,
                 "cache_control": {"type": "ephemeral"},
             }
         ],
-        messages=[{"role": "user", "content": user_prompt}],
-    )
+        "messages": [{"role": "user", "content": user_prompt}],
+    }
+    if SONNET_5_SUPPORTS_CUSTOM_TEMPERATURE:
+        request["temperature"] = REQUESTED_TEMPERATURE
+
+    message = await client.messages.create(**request)
     return _message_text(message)
 
 
