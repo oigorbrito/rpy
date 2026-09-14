@@ -64,8 +64,11 @@ def python_import_violations(path: Path) -> list[str]:
 
 
 def donor_identity_violations(path: Path) -> list[str]:
-    # Attribution and operating docs may legitimately mention donor names.
+    rel = path.relative_to(ROOT)
+    # Attribution, agent policy and migration records may legitimately mention donor names.
     if path.name in {"AGENTS.md", "LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"}:
+        return []
+    if len(rel.parts) >= 2 and rel.parts[0] == "docs" and rel.parts[1] == "migrations":
         return []
     try:
         text = path.read_text(encoding="utf-8", errors="ignore").lower()
@@ -74,19 +77,59 @@ def donor_identity_violations(path: Path) -> list[str]:
     return [f"donor identity leaked into runtime/project file: {term}" for term in FORBIDDEN_RUNTIME_TERMS if term in text]
 
 
-def queue_invariant_violations(files: list[Path]) -> list[str]:
-    queue_files = [p for p in files if p.name == "queue.py"]
-    if not queue_files:
+def queue_invariant_violations() -> list[str]:
+    path = ROOT / "app" / "queue.py"
+    if not path.exists():
         return ["missing app/queue.py"]
-
-    text = "\n".join(p.read_text(encoding="utf-8", errors="ignore") for p in queue_files).lower()
+    text = path.read_text(encoding="utf-8", errors="ignore").lower()
+    compact = re.sub(r"\s+", " ", text)
     errors: list[str] = []
-    if "for update skip locked" not in re.sub(r"\s+", " ", text):
+    if "for update skip locked" not in compact:
         errors.append("queue claim must contain FOR UPDATE SKIP LOCKED")
     if "worker_id" not in text:
         errors.append("queue operations must enforce worker ownership")
     if "idempotency_key" not in text:
         errors.append("queue must support idempotent enqueue")
+    return errors
+
+
+def rag_invariant_violations() -> list[str]:
+    errors: list[str] = []
+    rag = ROOT / "app" / "rag.py"
+    validation = ROOT / "app" / "validation.py"
+    if not rag.exists():
+        return ["missing app/rag.py"]
+    if not validation.exists():
+        return ["missing app/validation.py"]
+    rag_text = rag.read_text(encoding="utf-8", errors="ignore")
+    validation_text = validation.read_text(encoding="utf-8", errors="ignore")
+    if "validar(" not in rag_text:
+        errors.append("RAG publishing path must call validar()")
+    if 'MODEL = "claude-sonnet-5"' not in rag_text:
+        errors.append("RAG must use Claude Sonnet 5")
+    if 'temperature=0.2' not in rag_text.replace(" ", ""):
+        errors.append("RAG must use temperature 0.2")
+    if '"cache_control"' not in rag_text:
+        errors.append("system prompt must use Anthropic cache_control")
+    if "secrecy_level" not in rag_text or 'base["secrecy_level"] > 0' not in rag_text:
+        errors.append("secret cases must be truncated before generation")
+    if "class\\s*=" not in validation_text:
+        errors.append("validator must reject class= in JSX")
+    return errors
+
+
+def webhook_invariant_violations() -> list[str]:
+    path = ROOT / "app" / "api.py"
+    if not path.exists():
+        return ["missing app/api.py"]
+    text = path.read_text(encoding="utf-8", errors="ignore")
+    errors: list[str] = []
+    if "status_code=404" not in text:
+        errors.append("invalid webhook token must return 404")
+    if "cached_response" not in text:
+        errors.append("webhook must branch on cached_response")
+    if "request_completed" not in text:
+        errors.append("webhook must only promote completed requests")
     return errors
 
 
@@ -111,8 +154,12 @@ def main() -> int:
 
     for msg in dependency_violations():
         violations.append(("pyproject.toml", msg))
-    for msg in queue_invariant_violations(files):
+    for msg in queue_invariant_violations():
         violations.append(("app/queue.py", msg))
+    for msg in rag_invariant_violations():
+        violations.append(("app/rag.py", msg))
+    for msg in webhook_invariant_violations():
+        violations.append(("app/api.py", msg))
 
     if violations:
         print("Migration harness: FAILED")
