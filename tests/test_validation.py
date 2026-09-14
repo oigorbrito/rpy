@@ -28,6 +28,60 @@ def test_rejects_unknown_party() -> None:
     assert any("hallucinated parties" in error for error in result.errors)
 
 
+def test_rejects_unknown_party_in_free_prose_after_role() -> None:
+    result = validar(
+        text="O autor Pessoa Inventada ajuizou a demanda.",
+        code=CODE,
+        parties=PARTIES,
+    )
+    assert any("pessoa inventada" in error for error in result.errors)
+
+
+def test_rejects_unknown_party_with_copula() -> None:
+    result = validar(
+        text="A requerida é Empresa Fantasma Ltda.",
+        code=CODE,
+        parties=PARTIES,
+    )
+    assert any("empresa fantasma ltda" in error for error in result.errors)
+
+
+def test_rejects_unknown_party_when_role_follows_name() -> None:
+    result = validar(
+        text="Pessoa Inventada, na qualidade de autora, apresentou réplica.",
+        code=CODE,
+        parties=PARTIES,
+    )
+    assert any("pessoa inventada" in error for error in result.errors)
+
+
+def test_accepts_known_party_in_free_prose() -> None:
+    result = validar(
+        text="A autora Maria da Silva apresentou manifestação.",
+        code=CODE,
+        parties=PARTIES,
+    )
+    assert result.passed is True
+
+
+def test_party_matching_tolerates_case_and_diacritic_variation() -> None:
+    result = validar(
+        text="O réu Joao de Souza apresentou defesa.",
+        code=CODE,
+        parties=PARTIES,
+    )
+    assert result.passed is True
+
+
+def test_does_not_treat_other_named_people_as_parties() -> None:
+    result = validar(
+        text="O advogado Carlos Pereira falou com a testemunha Ana Ferreira.",
+        code=CODE,
+        parties=PARTIES,
+    )
+    assert result.passed is True
+
+
 def test_rejects_prognostic_language() -> None:
     result = validar(
         text="A parte tende a ganhar a demanda.",
