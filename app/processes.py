@@ -136,30 +136,47 @@ async def finalize_version(
     court: str | None = None,
     class_name: str | None = None,
     secrecy_level: int = 0,
-) -> None:
+) -> bool:
+    """Finalize a version and promote it only when it is not older than current.
+
+    The process row is locked so concurrent Judit requests for the same CNJ cannot
+    let an older response overwrite a newer current version. Historical versions
+    are still finalized and retain their own steps for auditability.
+    """
     async with conn.transaction():
-        await conn.execute(
+        process = await conn.fetchrow(
             """
-            UPDATE processes
-            SET court = $2,
-                class_name = $3,
-                subjects = $4::jsonb,
-                parties = $5::jsonb,
-                secrecy_level = $6,
-                header = $7::jsonb,
-                current_version_id = $8,
-                updated_at = NOW()
+            SELECT current_version_id
+            FROM processes
             WHERE id = $1
+            FOR UPDATE
             """,
             process_id,
-            court,
-            class_name,
-            json.dumps(subjects),
-            json.dumps(parties),
-            secrecy_level,
-            json.dumps(header),
-            version_id,
         )
+        if process is None:
+            raise LookupError("process does not exist")
+
+        candidate = await conn.fetchrow(
+            """
+            SELECT created_at
+            FROM process_versions
+            WHERE id = $1 AND process_id = $2
+            FOR UPDATE
+            """,
+            version_id,
+            process_id,
+        )
+        if candidate is None:
+            raise LookupError("process version does not exist")
+
+        current_created_at = None
+        current_version_id = process["current_version_id"]
+        if current_version_id is not None:
+            current_created_at = await conn.fetchval(
+                "SELECT created_at FROM process_versions WHERE id = $1",
+                current_version_id,
+            )
+
         await conn.execute("DELETE FROM process_steps WHERE version_id = $1", version_id)
         if steps:
             await conn.executemany(
@@ -181,6 +198,7 @@ async def finalize_version(
                     for step in steps
                 ],
             )
+
         await conn.execute(
             """
             UPDATE process_versions
@@ -190,3 +208,30 @@ async def finalize_version(
             version_id,
             process_id,
         )
+
+        promote = current_created_at is None or candidate["created_at"] >= current_created_at
+        if promote:
+            await conn.execute(
+                """
+                UPDATE processes
+                SET court = $2,
+                    class_name = $3,
+                    subjects = $4::jsonb,
+                    parties = $5::jsonb,
+                    secrecy_level = $6,
+                    header = $7::jsonb,
+                    current_version_id = $8,
+                    updated_at = NOW()
+                WHERE id = $1
+                """,
+                process_id,
+                court,
+                class_name,
+                json.dumps(subjects),
+                json.dumps(parties),
+                secrecy_level,
+                json.dumps(header),
+                version_id,
+            )
+
+    return promote
