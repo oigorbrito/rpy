@@ -12,6 +12,7 @@ from uuid import UUID, uuid4
 
 import asyncpg
 
+import app.rag  # noqa: F401 - imports task registrations
 from app.db import create_pool
 from app.queue import claim, complete, fail, heartbeat, reclaim_stale
 from app.tasks import resolve_task
