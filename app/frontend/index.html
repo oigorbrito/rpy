@@ -3,69 +3,98 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Consulta de resumos processuais Rpy">
-  <title>Rpy — Resumo processual</title>
+  <meta name="description" content="Consulta de inteligência processual Rpy">
+  <title>Rpy — Inteligência processual</title>
   <link rel="stylesheet" href="/app.css">
 </head>
 <body>
+  <a class="skip-link" href="#main-content">Ir para o conteúdo</a>
+
   <header class="topbar">
-    <a class="brand" href="/" aria-label="Rpy início">Rpy</a>
-    <span class="product-label">Inteligência processual</span>
+    <div class="topbar-inner">
+      <a class="brand" href="/" aria-label="Rpy — início">Rpy</a>
+      <span class="product-label">Inteligência processual</span>
+      <button id="access-trigger" class="access-trigger" type="button" aria-expanded="true" aria-controls="auth-panel">
+        <span class="access-dot" aria-hidden="true"></span>
+        <span id="access-label">Configurar acesso</span>
+      </button>
+    </div>
   </header>
 
-  <main>
-    <section class="hero" aria-labelledby="page-title">
-      <p class="eyebrow">RESUMO PROCESSUAL</p>
-      <h1 id="page-title">Entenda um processo<br>sem percorrer cada movimento.</h1>
-      <p class="lede">Consulte pelo número CNJ e leia o resumo consolidado da versão mais recente disponível.</p>
+  <main id="main-content" tabindex="-1">
+    <section class="workspace-intro" aria-labelledby="page-title">
+      <p class="eyebrow">CONSULTA PROCESSUAL</p>
+      <h1 id="page-title">O processo, sem o ruído.</h1>
+      <p class="lede">Localize pelo número CNJ e leia a síntese da versão mais recente disponível para seu ambiente.</p>
 
-      <form id="search-form" class="search-card">
+      <form id="search-form" class="search-form" novalidate>
         <label for="process-code">Número do processo</label>
         <div class="search-row">
-          <input id="process-code" name="process-code" inputmode="numeric" autocomplete="off" placeholder="0000000-00.0000.0.00.0000" required>
-          <button type="submit">Consultar</button>
+          <input id="process-code" name="process-code" inputmode="numeric" autocomplete="off" placeholder="0000000-00.0000.0.00.0000" aria-describedby="process-code-hint process-code-error" required>
+          <button id="search-submit" type="submit">Consultar processo</button>
         </div>
-        <p class="hint">Aceita o formato CNJ ou os 20 dígitos.</p>
+        <p id="process-code-hint" class="field-hint">Informe o CNJ formatado ou somente os 20 dígitos.</p>
+        <p id="process-code-error" class="field-error" hidden></p>
       </form>
     </section>
 
     <section id="auth-panel" class="auth-panel" aria-labelledby="access-title">
-      <div>
-        <p class="eyebrow">ACESSO</p>
-        <h2 id="access-title">Credencial do ambiente</h2>
-        <p>O token fica somente nesta aba e é enviado diretamente à API.</p>
+      <div class="auth-copy">
+        <p class="eyebrow">ACESSO AO AMBIENTE</p>
+        <h2 id="access-title">Credencial de consulta</h2>
+        <p>Enquanto não há login de usuário, use a credencial técnica do ambiente. Ela permanece apenas na memória desta página e não é salva no navegador.</p>
       </div>
       <div class="token-control">
         <label for="bearer-token">Bearer token</label>
         <div class="token-row">
-          <input id="bearer-token" type="password" autocomplete="off" placeholder="Cole o token de acesso">
-          <button id="toggle-token" class="secondary" type="button">Mostrar</button>
+          <input id="bearer-token" type="password" autocomplete="off" aria-describedby="token-hint token-error" placeholder="Cole o token de acesso">
+          <button id="toggle-token" class="button-secondary" type="button" aria-pressed="false">Mostrar</button>
         </div>
+        <p id="token-hint" class="field-hint">Enviado somente no cabeçalho de autorização das consultas.</p>
+        <p id="token-error" class="field-error" hidden></p>
       </div>
     </section>
 
-    <section id="status" class="status" role="status" aria-live="polite" hidden></section>
+    <section id="status" class="status-panel" role="status" aria-live="polite" hidden>
+      <p id="status-title" class="status-title"></p>
+      <p id="status-detail" class="status-detail"></p>
+      <button id="retry-search" class="button-secondary status-action" type="button" hidden>Tentar novamente</button>
+    </section>
 
-    <article id="result" class="result" hidden>
-      <header class="result-header">
-        <div>
+    <article id="result" class="process-document" aria-labelledby="result-code" aria-busy="false" hidden>
+      <header class="process-header">
+        <div class="process-identity">
           <p class="eyebrow">PROCESSO</p>
           <h2 id="result-code"></h2>
+          <p id="result-context" class="process-context"></p>
         </div>
         <dl class="metadata">
           <div><dt>Classe</dt><dd id="result-class">—</dd></div>
           <div><dt>Tribunal</dt><dd id="result-court">—</dd></div>
         </dl>
       </header>
-      <div class="summary-heading">
-        <h3>Resumo</h3>
-        <span id="summary-model" class="model"></span>
-      </div>
-      <div id="summary-body" class="summary-body"></div>
+
+      <section class="summary-section" aria-labelledby="summary-title">
+        <div class="summary-toolbar">
+          <div>
+            <p class="eyebrow">SÍNTESE DA VERSÃO ATUAL</p>
+            <h3 id="summary-title">Resumo processual</h3>
+          </div>
+          <div class="summary-actions">
+            <button id="copy-summary" class="button-secondary button-compact" type="button" hidden>Copiar resumo</button>
+            <button id="new-search" class="button-quiet button-compact" type="button">Nova consulta</button>
+          </div>
+        </div>
+        <p id="summary-provenance" class="summary-provenance"></p>
+        <div id="summary-body" class="summary-body"></div>
+      </section>
     </article>
   </main>
 
-  <footer>Rpy · O resumo auxilia a leitura e não substitui a consulta aos autos.</footer>
+  <footer>
+    <span>Rpy</span>
+    <span>O resumo auxilia a leitura e não substitui a consulta aos autos.</span>
+  </footer>
   <script src="/app.js" defer></script>
 </body>
 </html>
