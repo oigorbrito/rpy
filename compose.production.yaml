@@ -1,3 +1,27 @@
+x-api-env: &api-env
+  DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+  JUDIT_WEBHOOK_TOKEN: ${JUDIT_WEBHOOK_TOKEN:?JUDIT_WEBHOOK_TOKEN is required}
+  JUDIT_WEBHOOK_MAX_BODY_BYTES: ${JUDIT_WEBHOOK_MAX_BODY_BYTES:-5242880}
+  RPY_BEARER_TOKENS: ${RPY_BEARER_TOKENS:?RPY_BEARER_TOKENS is required}
+  RPY_OPS_TOKEN: ${RPY_OPS_TOKEN:?RPY_OPS_TOKEN is required}
+
+x-worker-env: &worker-env
+  DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:?OPENAI_API_KEY is required}
+  EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+  ANTHROPIC_TIMEOUT_SECONDS: ${ANTHROPIC_TIMEOUT_SECONDS:-15}
+  EMBEDDING_TIMEOUT_SECONDS: ${EMBEDDING_TIMEOUT_SECONDS:-15}
+  PROVIDER_MAX_ATTEMPTS: ${PROVIDER_MAX_ATTEMPTS:-2}
+  PROVIDER_RETRY_BACKOFF_SECONDS: ${PROVIDER_RETRY_BACKOFF_SECONDS:-0.25}
+  WORKER_TASK_TIMEOUT_SECONDS: ${WORKER_TASK_TIMEOUT_SECONDS:-120}
+
+x-scheduler-env: &scheduler-env
+  DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+  RETENTION_DAYS: ${RETENTION_DAYS:-365}
+  JOB_RETENTION_DAYS: ${JOB_RETENTION_DAYS:-30}
+  EXPUNGE_INTERVAL_SECONDS: ${EXPUNGE_INTERVAL_SECONDS:-86400}
+
 services:
   postgres:
     image: pgvector/pgvector:pg16
@@ -19,22 +43,8 @@ services:
   migrate:
     build: .
     command: ["python", "scripts/migrate.py"]
-    environment: &app-env
+    environment:
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:?OPENAI_API_KEY is required}
-      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
-      ANTHROPIC_TIMEOUT_SECONDS: ${ANTHROPIC_TIMEOUT_SECONDS:-15}
-      EMBEDDING_TIMEOUT_SECONDS: ${EMBEDDING_TIMEOUT_SECONDS:-15}
-      PROVIDER_MAX_ATTEMPTS: ${PROVIDER_MAX_ATTEMPTS:-2}
-      PROVIDER_RETRY_BACKOFF_SECONDS: ${PROVIDER_RETRY_BACKOFF_SECONDS:-0.25}
-      WORKER_TASK_TIMEOUT_SECONDS: ${WORKER_TASK_TIMEOUT_SECONDS:-120}
-      JUDIT_WEBHOOK_TOKEN: ${JUDIT_WEBHOOK_TOKEN:?JUDIT_WEBHOOK_TOKEN is required}
-      JUDIT_WEBHOOK_MAX_BODY_BYTES: ${JUDIT_WEBHOOK_MAX_BODY_BYTES:-5242880}
-      RPY_BEARER_TOKENS: ${RPY_BEARER_TOKENS:?RPY_BEARER_TOKENS is required}
-      RPY_OPS_TOKEN: ${RPY_OPS_TOKEN:?RPY_OPS_TOKEN is required}
-      RETENTION_DAYS: ${RETENTION_DAYS:-365}
-      JOB_RETENTION_DAYS: ${JOB_RETENTION_DAYS:-30}
     depends_on:
       postgres:
         condition: service_healthy
@@ -45,7 +55,7 @@ services:
   api:
     build: .
     command: ["uvicorn", "app.api:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
-    environment: *app-env
+    environment: *api-env
     ports:
       - "${RPY_API_BIND_ADDRESS:-127.0.0.1}:${RPY_API_PORT:-8000}:8000"
     depends_on:
@@ -69,7 +79,7 @@ services:
   worker-1:
     build: .
     command: ["python", "-m", "app.worker"]
-    environment: *app-env
+    environment: *worker-env
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -81,7 +91,7 @@ services:
   worker-2:
     build: .
     command: ["python", "-m", "app.worker"]
-    environment: *app-env
+    environment: *worker-env
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -93,7 +103,7 @@ services:
   scheduler:
     build: .
     command: ["python", "-m", "app.scheduler"]
-    environment: *app-env
+    environment: *scheduler-env
     depends_on:
       migrate:
         condition: service_completed_successfully
