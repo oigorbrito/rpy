@@ -2,6 +2,18 @@
 
 `compose.yaml` remains the developer-oriented stack. Production deployments use `compose.production.yaml` and must preserve the boundaries below.
 
+## Immutable application artifact
+
+Production does not build application source on the deployment host. `RPY_IMAGE` is required and must be a registry reference pinned by a full SHA-256 digest, for example:
+
+`ghcr.io/oigorbrito/rpy@sha256:<64-hex-digest>`
+
+The same exact digest is used by `migrate`, `api`, both workers and `scheduler`. Tags such as `latest`, `main`, semantic-version tags and commit-SHA tags are useful aliases for humans and release automation, but are not accepted as the production deployment identity because a tag can be moved.
+
+Build and publish the image once in trusted CI. Record the resulting registry digest as release metadata. Promote that digest unchanged through environments; do not rebuild for staging or production. This keeps migration code and runtime code on the same artifact revision.
+
+Rollback is artifact selection, not reconstruction: set `RPY_IMAGE` back to a previously known-good digest and execute the normal deployment sequence. Database migrations still determine whether an application rollback is schema-compatible, so destructive migrations require their own explicit rollback plan.
+
 ## Topology
 
 The minimum supported topology is:
@@ -51,12 +63,14 @@ Bearer-token rotation is performed by temporarily mapping both old and new token
 
 ## Deploy sequence
 
-1. Inject required configuration and secrets.
-2. Render and validate the compose file with `docker compose -f compose.production.yaml config`.
-3. Start PostgreSQL or verify the managed PostgreSQL endpoint is healthy.
-4. Run the one-shot `migrate` service to completion.
-5. Start API, both workers, and the singleton scheduler.
-6. Route traffic only after `/ready` succeeds.
+1. Build and publish the application image in trusted CI, then record its immutable registry digest.
+2. Set `RPY_IMAGE` to that digest and inject required configuration and secrets.
+3. Render and validate the compose file with `docker compose -f compose.production.yaml config`.
+4. Pull the exact digest before changing running services.
+5. Start PostgreSQL or verify the managed PostgreSQL endpoint is healthy.
+6. Run the one-shot `migrate` service to completion using the same `RPY_IMAGE` digest.
+7. Start API, both workers, and the singleton scheduler using that digest.
+8. Route traffic only after `/ready` succeeds.
 
 A deploy must stop if migrations fail. Do not start a second scheduler to compensate for scheduler failure; restart or replace the singleton instance instead.
 
@@ -64,6 +78,9 @@ A deploy must stop if migrations fail. Do not start a second scheduler to compen
 
 CI renders `compose.production.yaml` with non-secret fixture values and runs `scripts/validate_production_compose.py`. The validator rejects changes that:
 
+- use `build:` for any application service;
+- use a mutable application image tag instead of a SHA-256 registry digest;
+- use different application digests for migration/API/workers/scheduler;
 - expose PostgreSQL on a host port;
 - remove the internal backend network;
 - change the default API bind away from loopback;
