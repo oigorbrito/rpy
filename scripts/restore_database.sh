@@ -17,20 +17,8 @@ if [ "$#" -ne 1 ]; then
 fi
 
 backup=$1
-checksum="$backup.sha256"
 
-if [ ! -f "$backup" ]; then
-  echo "backup not found: $backup" >&2
-  exit 2
-fi
-
-if [ ! -f "$checksum" ]; then
-  echo "checksum not found: $checksum" >&2
-  exit 2
-fi
-
-sha256sum -c "$checksum"
-pg_restore --list "$backup" >/dev/null
+sh "$(dirname "$0")/verify_backup_bundle.sh" "$backup"
 
 pg_restore \
   --clean \
