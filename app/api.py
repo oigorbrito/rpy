@@ -54,7 +54,7 @@ async def ready(request: Request) -> dict[str, bool]:
 
     try:
         await asyncio.wait_for(_probe(), timeout=2.0)
-    except (asyncpg.PostgresError, OSError, TimeoutError):
+    except (asyncpg.PostgresError, asyncpg.InterfaceError, OSError, TimeoutError):
         raise HTTPException(status_code=503, detail="database unavailable") from None
     return {"ok": True}
 
