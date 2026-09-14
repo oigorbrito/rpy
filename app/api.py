@@ -14,7 +14,7 @@ from app.db import create_pool
 from app.http_limits import JuditWebhookBodyLimitMiddleware, judit_webhook_max_body_bytes
 from app.json_utils import decode_json_object
 from app.judit import parse_event
-from app.observability import collect_operational_metrics
+from app.observability import collect_operational_metrics, operational_thresholds
 from app.processes import get_authorized_process, log_access, stage_version
 from app.queue import enqueue
 from app.webhook_security import (
@@ -31,6 +31,7 @@ async def lifespan(app: FastAPI):
     # Fail deployment startup on invalid security/runtime configuration instead of
     # discovering it only after the first production request arrives.
     judit_webhook_max_body_bytes()
+    operational_thresholds()
     app.state.bearer_tokens = configured_bearer_tokens()
     app.state.pool = await create_pool(database_url)
     try:
