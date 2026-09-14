@@ -59,6 +59,7 @@ class Worker:
         self.worker_id = worker_id or uuid4()
         self.stop_event = asyncio.Event()
         self.wake_event = asyncio.Event()
+        self.listener_ready = asyncio.Event()
 
     async def _heartbeat_loop(self, job_id: UUID) -> None:
         while not self.stop_event.is_set():
@@ -126,6 +127,7 @@ class Worker:
         while not self.stop_event.is_set():
             conn: asyncpg.Connection | None = None
             terminated = asyncio.Event()
+            self.listener_ready.clear()
 
             def on_notification(
                 connection: asyncpg.Connection,
@@ -139,12 +141,14 @@ class Worker:
             def on_termination(connection: asyncpg.Connection) -> None:
                 del connection
                 terminated.set()
+                self.listener_ready.clear()
                 self.wake_event.set()
 
             try:
                 conn = await asyncpg.connect(self.settings.database_url)
                 await conn.add_listener(WAKE_CHANNEL, on_notification)
                 conn.add_termination_listener(on_termination)
+                self.listener_ready.set()
                 logger.info("worker %s listening on %s", self.worker_id, WAKE_CHANNEL)
 
                 stop_wait = asyncio.create_task(self.stop_event.wait())
@@ -167,6 +171,7 @@ class Worker:
                     self.worker_id,
                 )
             finally:
+                self.listener_ready.clear()
                 if conn is not None and not conn.is_closed():
                     with suppress(Exception):
                         await conn.remove_listener(WAKE_CHANNEL, on_notification)
@@ -204,6 +209,7 @@ class Worker:
             await self.stop_event.wait()
         finally:
             self.wake_event.set()
+            self.listener_ready.clear()
             for item in tasks:
                 item.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
