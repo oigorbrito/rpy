@@ -38,6 +38,7 @@ jobs:
 
       - name: Production compose contract
         env:
+          RPY_IMAGE: ghcr.io/oigorbrito/rpy@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
           POSTGRES_PASSWORD: ci-production-password
           DATABASE_URL: postgresql://rpy:ci-production-password@postgres:5432/rpy
           ANTHROPIC_API_KEY: ci-anthropic-key
