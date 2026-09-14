@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from app import rag
+from app.tasks import PermanentTaskError
 
 
 def _ranked(texts: list[str]) -> list[SimpleNamespace]:
@@ -53,7 +54,7 @@ class _NeverCalledClient:
 
 
 @pytest.mark.asyncio
-async def test_oversized_final_prompt_fails_before_provider_call(
+async def test_oversized_final_prompt_fails_permanently_before_provider_call(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("PROVIDER_PROMPT_MAX_CHARS", "200")
@@ -71,5 +72,5 @@ async def test_oversized_final_prompt_fails_before_provider_call(
         "steps": [],
     }
 
-    with pytest.raises(ValueError, match="provider prompt exceeds"):
+    with pytest.raises(PermanentTaskError, match="provider prompt exceeds"):
         await rag._generate(_NeverCalledClient(), context)
