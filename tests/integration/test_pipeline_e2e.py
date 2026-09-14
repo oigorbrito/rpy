@@ -229,6 +229,8 @@ O último movimento fornecido é uma sentença.
         assert body["code"] == code
         assert body["summary"]["validation"]["passed"] is True
         assert body["summary"]["model"] == "claude-sonnet-5"
+        assert body["iaSummary"] == body["summary"]["markdown"]
+        assert code in body["iaSummary"]
 
         async with pool.acquire() as conn:
             assert await conn.fetchval(

@@ -142,11 +142,16 @@ async def get_process_summary(code: str, request: Request) -> dict:
             summary_data.get("validation"), label="summary validation"
         )
 
+    # The external legal dashboard reads the generated markdown as iaSummary;
+    # summary retains the structured envelope for backward compatibility.
+    ia_summary = summary_data["markdown"] if summary_data else None
+
     return {
         "code": process["code"],
         "class_name": process["class_name"],
         "court": process["court"],
         "summary": summary_data,
+        "iaSummary": ia_summary,
     }
 
 
