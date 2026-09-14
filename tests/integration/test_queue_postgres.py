@@ -9,8 +9,8 @@ import asyncpg
 import pytest
 
 from app.db import create_pool
+from app.migrations import migrate
 from app.queue import claim, enqueue, reclaim_stale
-from scripts.migrate import migrate
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(
