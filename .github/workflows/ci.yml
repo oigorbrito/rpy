@@ -36,6 +36,19 @@ jobs:
       - name: Install
         run: pip install -e '.[dev]'
 
+      - name: Production compose contract
+        env:
+          POSTGRES_PASSWORD: ci-production-password
+          DATABASE_URL: postgresql://rpy:ci-production-password@postgres:5432/rpy
+          ANTHROPIC_API_KEY: ci-anthropic-key
+          OPENAI_API_KEY: ci-openai-key
+          JUDIT_WEBHOOK_TOKEN: ci-judit-token
+          RPY_BEARER_TOKENS: '{"ci-bearer-token":"00000000-0000-0000-0000-000000000001"}'
+          RPY_OPS_TOKEN: ci-ops-token
+        run: |
+          docker compose -f compose.production.yaml config --format json > /tmp/rpy-production-compose.json
+          python scripts/validate_production_compose.py /tmp/rpy-production-compose.json
+
       - name: Migration harness
         run: python scripts/migration_harness.py
 
