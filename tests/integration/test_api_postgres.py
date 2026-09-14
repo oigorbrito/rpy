@@ -115,6 +115,45 @@ async def test_request_completed_only_enqueues_finalizer_and_is_idempotent(api_c
 
 
 @pytest.mark.asyncio
+async def test_tracking_application_info_enqueues_finalizer_for_payload_request_id(api_client) -> None:
+    client, pool = api_client
+    request_id = f"req-{uuid4()}"
+    tracking_id = f"tracking-{uuid4()}"
+    callback_id = f"cb-{uuid4()}"
+
+    response = await client.post(
+        "/webhooks/judit/integration-webhook",
+        json={
+            "callback_id": callback_id,
+            "event_type": "response_created",
+            "reference_type": "tracking",
+            "reference_id": tracking_id,
+            "payload": {
+                "request_id": request_id,
+                "response_id": f"resp-{uuid4()}",
+                "response_type": "application_info",
+                "response_data": {"code": 600, "message": "REQUEST_COMPLETED"},
+                "tags": {"cached_response": False},
+            },
+        },
+    )
+    assert response.status_code == 200
+
+    async with pool.acquire() as conn:
+        job = await conn.fetchrow(
+            "SELECT payload, idempotency_key FROM jobs WHERE idempotency_key = $1",
+            f"judit-finalize:{request_id}",
+        )
+        tracking_job_count = await conn.fetchval(
+            "SELECT count(*) FROM jobs WHERE idempotency_key = $1",
+            f"judit-finalize:{tracking_id}",
+        )
+    assert job is not None
+    assert job["idempotency_key"] == f"judit-finalize:{request_id}"
+    assert tracking_job_count == 0
+
+
+@pytest.mark.asyncio
 async def test_process_read_is_tenant_scoped_and_audited(api_client, monkeypatch: pytest.MonkeyPatch) -> None:
     client, pool = api_client
     allowed_tenant = uuid4()
