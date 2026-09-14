@@ -16,7 +16,7 @@ The API is intentionally configured with one Uvicorn worker. Horizontal API scal
 
 ## Network boundary
 
-PostgreSQL does not publish a host port in the production compose file and only joins the internal `backend` network. API and workers join both `backend` and `egress` so they can reach PostgreSQL and external model providers. The scheduler remains backend-only.
+PostgreSQL does not publish a host port in the production compose file and only joins the internal `backend` network. API and workers join both `backend` and `egress` so they can reach PostgreSQL and external services. The scheduler remains backend-only.
 
 The API publishes port 8000 on `127.0.0.1` by default. Put a TLS-terminating reverse proxy or ingress in front of it. If the ingress runs on a different host/network, change `RPY_API_BIND_ADDRESS` deliberately and apply an equivalent network policy/firewall rule instead of exposing PostgreSQL.
 
@@ -35,6 +35,15 @@ Production has no fallback values for:
 - `RPY_OPS_TOKEN`.
 
 Inject them from the deployment platform's secret manager or equivalent environment mechanism. Do not place populated values in the repository or bake them into the image. `.env.production.example` is a shape-only template.
+
+Secrets are scoped by service instead of being copied to the whole stack:
+
+- `api` receives database access plus Judit, bearer-token and ops credentials;
+- `worker-*` receives database access plus Anthropic/OpenAI credentials and provider settings;
+- `scheduler` receives only database access and retention/scheduling settings;
+- `migrate` receives only `DATABASE_URL`;
+- provider keys must not be present in API, scheduler or migration environments;
+- HTTP-facing credentials must not be present in workers, scheduler or migration environments.
 
 If the PostgreSQL password contains reserved URL characters, URL-encode it in `DATABASE_URL`. `POSTGRES_PASSWORD` and the credentials encoded in `DATABASE_URL` must refer to the same database user.
 
@@ -60,6 +69,7 @@ CI renders `compose.production.yaml` with non-secret fixture values and runs `sc
 - change the default API bind away from loopback;
 - change the explicit API worker count;
 - alter the two-worker / one-scheduler topology;
-- remove required production configuration from the API environment.
+- remove required service-specific configuration;
+- distribute provider or HTTP-facing secrets to unrelated services.
 
 This contract is intentionally small. Platform-specific manifests (Kubernetes, ECS, Nomad, Fly.io, Render, etc.) should reproduce these invariants rather than introduce a second application architecture.
