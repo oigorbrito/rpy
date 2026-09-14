@@ -10,7 +10,7 @@ import pytest
 
 from app.api import app
 from app.db import create_pool
-from scripts.migrate import migrate
+from app.migrations import migrate
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(
