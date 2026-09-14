@@ -65,7 +65,6 @@ def python_import_violations(path: Path) -> list[str]:
 
 def donor_identity_violations(path: Path) -> list[str]:
     rel = path.relative_to(ROOT)
-    # Attribution, agent policy and migration records may legitimately mention donor names.
     if path.name in {"AGENTS.md", "LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"}:
         return []
     if len(rel.parts) >= 2 and rel.parts[0] == "docs" and rel.parts[1] == "migrations":
@@ -74,7 +73,11 @@ def donor_identity_violations(path: Path) -> list[str]:
         text = path.read_text(encoding="utf-8", errors="ignore").lower()
     except OSError:
         return []
-    return [f"donor identity leaked into runtime/project file: {term}" for term in FORBIDDEN_RUNTIME_TERMS if term in text]
+    return [
+        f"donor identity leaked into runtime/project file: {term}"
+        for term in FORBIDDEN_RUNTIME_TERMS
+        if term in text
+    ]
 
 
 def queue_invariant_violations() -> list[str]:
@@ -97,17 +100,23 @@ def rag_invariant_violations() -> list[str]:
     errors: list[str] = []
     rag = ROOT / "app" / "rag.py"
     validation = ROOT / "app" / "validation.py"
+    retrieval = ROOT / "app" / "retrieval.py"
+    embeddings = ROOT / "app" / "embeddings.py"
     if not rag.exists():
         return ["missing app/rag.py"]
     if not validation.exists():
         return ["missing app/validation.py"]
+    if not retrieval.exists():
+        return ["missing app/retrieval.py"]
+
     rag_text = rag.read_text(encoding="utf-8", errors="ignore")
     validation_text = validation.read_text(encoding="utf-8", errors="ignore")
+    retrieval_text = retrieval.read_text(encoding="utf-8", errors="ignore")
     if "validar(" not in rag_text:
         errors.append("RAG publishing path must call validar()")
     if 'MODEL = "claude-sonnet-5"' not in rag_text:
         errors.append("RAG must use Claude Sonnet 5")
-    if 'temperature=0.2' not in rag_text.replace(" ", ""):
+    if "temperature=0.2" not in rag_text.replace(" ", ""):
         errors.append("RAG must use temperature 0.2")
     if '"cache_control"' not in rag_text:
         errors.append("system prompt must use Anthropic cache_control")
@@ -115,21 +124,45 @@ def rag_invariant_violations() -> list[str]:
         errors.append("secret cases must be truncated before generation")
     if "class\\s*=" not in validation_text:
         errors.append("validator must reject class= in JSX")
+    if "0.5 * lexical" not in retrieval_text or "0.5 * vector" not in retrieval_text:
+        errors.append("long retrieval must preserve 0.5 BM25 / 0.5 vector weighting")
+    if "len(steps) > 40" in rag_text and not embeddings.exists():
+        errors.append("conditional vector retrieval requires app/embeddings.py")
     return errors
 
 
 def webhook_invariant_violations() -> list[str]:
-    path = ROOT / "app" / "api.py"
-    if not path.exists():
-        return ["missing app/api.py"]
-    text = path.read_text(encoding="utf-8", errors="ignore")
+    api = ROOT / "app" / "api.py"
+    judit = ROOT / "app" / "judit.py"
+    judit_tasks = ROOT / "app" / "judit_tasks.py"
     errors: list[str] = []
-    if "status_code=404" not in text:
+    if not api.exists():
+        return ["missing app/api.py"]
+    if not judit.exists():
+        return ["missing app/judit.py"]
+    if not judit_tasks.exists():
+        return ["missing app/judit_tasks.py"]
+
+    api_text = api.read_text(encoding="utf-8", errors="ignore")
+    judit_text = judit.read_text(encoding="utf-8", errors="ignore")
+    task_text = judit_tasks.read_text(encoding="utf-8", errors="ignore")
+
+    if "status_code=404" not in api_text:
         errors.append("invalid webhook token must return 404")
-    if "cached_response" not in text:
-        errors.append("webhook must branch on cached_response")
-    if "request_completed" not in text:
-        errors.append("webhook must only promote completed requests")
+    if 'task_name="finalize_judit_request"' not in api_text:
+        errors.append("request_completed must enqueue finalization instead of doing heavy work inline")
+    if "finalize_version(" in api_text:
+        errors.append("webhook API must not finalize process data inline")
+    if "callback_id" not in api_text or "judit_deliveries" not in api_text:
+        errors.append("webhook deliveries must be persisted/idempotent by callback_id")
+    if 'event_type == "response_created"' not in judit_text:
+        errors.append("Judit adapter must understand response_created envelope")
+    if 'self.event_type == "request_completed"' not in judit_text:
+        errors.append("Judit adapter must understand request_completed envelope")
+    if "cached_response" not in judit_text or "tags" not in judit_text:
+        errors.append("Judit adapter must read cached_response from current payload/tags shape")
+    if "source_cached_response" not in task_text:
+        errors.append("finalizer must suppress LLM enqueue for cached-only responses")
     return errors
 
 
@@ -138,7 +171,11 @@ def dependency_violations() -> list[str]:
     if not pyproject.exists():
         return ["missing pyproject.toml"]
     text = pyproject.read_text(encoding="utf-8").lower()
-    return [f"forbidden dependency declared: {name}" for name in FORBIDDEN_IMPORTS if re.search(rf"(^|[\"']){re.escape(name)}([\[<>=\"']|$)", text)]
+    return [
+        f"forbidden dependency declared: {name}"
+        for name in FORBIDDEN_IMPORTS
+        if re.search(rf"(^|[\"']){re.escape(name)}([\[<>=\"']|$)", text)
+    ]
 
 
 def main() -> int:
