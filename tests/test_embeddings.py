@@ -43,6 +43,36 @@ async def test_text_embedding_3_request_is_pinned_to_pgvector_dimension(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_legacy_1536_model_does_not_send_dimensions(monkeypatch) -> None:
+    fake = _FakeClient([_item(0)])
+    monkeypatch.setattr(embeddings, "EMBEDDING_MODEL", "text-embedding-ada-002")
+    monkeypatch.setattr(embeddings, "_client", lambda: fake)
+
+    await embeddings.embed_texts(["texto"])
+
+    request = fake.embeddings.calls[0]
+    assert request["model"] == "text-embedding-ada-002"
+    assert "dimensions" not in request
+
+
+@pytest.mark.asyncio
+async def test_unknown_embedding_model_fails_before_provider_call(monkeypatch) -> None:
+    fake = _FakeClient([_item(0)])
+    monkeypatch.setattr(embeddings, "EMBEDDING_MODEL", "future-embedding-model")
+    monkeypatch.setattr(embeddings, "_client", lambda: fake)
+
+    with pytest.raises(RuntimeError, match="unsupported EMBEDDING_MODEL"):
+        await embeddings.embed_texts(["texto"])
+
+    assert fake.embeddings.calls == []
+
+
+def test_vector_dimension_is_schema_constant_not_environment_configuration(monkeypatch) -> None:
+    monkeypatch.setenv("EMBEDDING_DIMENSIONS", "3072")
+    assert embeddings.VECTOR_DIMENSIONS == 1536
+
+
+@pytest.mark.asyncio
 async def test_embedding_dimension_mismatch_fails_before_database_write(monkeypatch) -> None:
     fake = _FakeClient([_item(0, size=3072)])
     monkeypatch.setattr(embeddings, "EMBEDDING_MODEL", "text-embedding-3-large")
