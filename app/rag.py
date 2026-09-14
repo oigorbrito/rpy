@@ -128,14 +128,14 @@ async def _load_context(
 ) -> dict[str, Any]:
     base = await _load_process(pool, process_id, version_id)
 
-    # LGPD blocker: no parties, subjects, movement text or embeddings leave the database
-    # for secret proceedings.
+    # LGPD blocker: secret proceedings expose only the allowed header and class;
+    # no parties, subjects, movement text or embeddings leave the database.
     if base["secrecy_level"] > 0:
         return {
             "code": base["code"],
             "class_name": base["class_name"],
             "secrecy_level": base["secrecy_level"],
-            "header": {},
+            "header": base["header"],
             "parties": [],
             "subjects": [],
             "steps": [],
