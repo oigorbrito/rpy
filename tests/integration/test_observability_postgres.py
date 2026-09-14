@@ -30,6 +30,7 @@ async def test_operational_metrics_are_aggregate_and_protected(monkeypatch: pyte
     process_id = uuid4()
     version_id = uuid4()
     code = "0000000-00.0000.0.00.0301"
+    secret_markdown = "sensitive-summary-body-must-not-leak"
 
     try:
         async with pool.acquire() as conn:
@@ -85,10 +86,11 @@ async def test_operational_metrics_are_aggregate_and_protected(monkeypatch: pyte
                 """
                 INSERT INTO process_summaries (
                     process_id, version_id, markdown, validation, model, prompt_version, generation_ms
-                ) VALUES ($1, $2, 'summary', $3::jsonb, 'model', 'prompt', 250)
+                ) VALUES ($1, $2, $3, $4::jsonb, 'model', 'prompt', 250)
                 """,
                 process_id,
                 version_id,
+                secret_markdown,
                 {"passed": False, "errors": ["x"]},
             )
 
@@ -131,6 +133,6 @@ async def test_operational_metrics_are_aggregate_and_protected(monkeypatch: pyte
         assert "dead_jobs_24h" in signals
         serialized = str(body)
         assert code not in serialized
-        assert "summary" not in serialized
+        assert secret_markdown not in serialized
     finally:
         await pool.close()
