@@ -14,9 +14,8 @@ function setStatus(message, error = false) {
 
 function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
 
-// Minimal Markdown renderer: intentionally supports only headings, unordered lists and
-// paragraphs. Content is always inserted with textContent, never innerHTML, because
-// summaries are model-generated and must not become executable markup.
+// Minimal Markdown renderer: headings, unordered lists and paragraphs only.
+// Model-generated content is inserted as text nodes, never executable markup.
 function renderMarkdown(markdown, target) {
   clear(target);
   let list = null;
