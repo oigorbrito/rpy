@@ -10,7 +10,7 @@ import pytest
 
 from app.db import create_pool
 from app.migrations import migrate
-from app.queue import claim, enqueue, fail, reclaim_stale
+from app.queue import claim, complete, enqueue, fail, heartbeat, reclaim_stale
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(
@@ -115,6 +115,109 @@ async def test_reclaimer_returns_stale_job_to_pending() -> None:
 
         assert any(item["id"] == row["id"] for item in reclaimed)
         assert str(status) == "pending"
+    finally:
+        await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_reclaimed_job_fences_the_stale_worker() -> None:
+    assert TEST_DATABASE_URL is not None
+    pool = await create_pool(TEST_DATABASE_URL, min_size=1, max_size=2)
+    stale_worker = uuid4()
+    replacement_worker = uuid4()
+    try:
+        async with pool.acquire() as conn:
+            enqueued = await enqueue(
+                conn,
+                task_name="integration-test",
+                payload={"value": 33},
+                idempotency_key="integration:crash-fencing",
+                max_attempts=3,
+            )
+            assert enqueued is not None
+
+            first = await claim(conn, stale_worker)
+            assert first is not None
+            assert int(first["attempts"]) == 1
+
+            await conn.execute(
+                "UPDATE jobs SET last_heartbeat = NOW() - interval '10 minutes' WHERE id = $1",
+                first["id"],
+            )
+            reclaimed = await reclaim_stale(conn, timeout_seconds=30)
+            assert any(item["id"] == first["id"] for item in reclaimed)
+
+            second = await claim(conn, replacement_worker)
+            assert second is not None
+            assert second["id"] == first["id"]
+            assert int(second["attempts"]) == 2
+
+            # The crashed worker may wake up late, but ownership has changed. Its
+            # heartbeat/complete/fail operations must be fenced by worker_id.
+            assert await heartbeat(conn, first["id"], stale_worker) is False
+            assert await complete(conn, first["id"], stale_worker, {"owner": "stale"}) is False
+            assert (
+                await fail(
+                    conn,
+                    first["id"],
+                    stale_worker,
+                    attempts=int(first["attempts"]),
+                    error="late stale failure",
+                )
+                is None
+            )
+
+            assert await complete(
+                conn, second["id"], replacement_worker, {"owner": "replacement"}
+            ) is True
+            final = await conn.fetchrow(
+                "SELECT status::text AS status, attempts, worker_id, result FROM jobs WHERE id = $1",
+                first["id"],
+            )
+
+        assert final is not None
+        assert final["status"] == "completed"
+        assert int(final["attempts"]) == 2
+        assert final["worker_id"] == replacement_worker
+        assert final["result"]["owner"] == "replacement"
+    finally:
+        await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_reclaimer_dead_letters_crash_on_last_attempt() -> None:
+    assert TEST_DATABASE_URL is not None
+    pool = await create_pool(TEST_DATABASE_URL, min_size=1, max_size=2)
+    worker_id = uuid4()
+    try:
+        async with pool.acquire() as conn:
+            enqueued = await enqueue(
+                conn,
+                task_name="integration-test",
+                payload={"value": 34},
+                idempotency_key="integration:crash-dead",
+                max_attempts=1,
+            )
+            assert enqueued is not None
+            claimed = await claim(conn, worker_id)
+            assert claimed is not None
+            assert int(claimed["attempts"]) == 1
+
+            await conn.execute(
+                "UPDATE jobs SET last_heartbeat = NOW() - interval '10 minutes' WHERE id = $1",
+                claimed["id"],
+            )
+            reclaimed = await reclaim_stale(conn, timeout_seconds=30)
+            state = await conn.fetchrow(
+                "SELECT status::text AS status, worker_id, last_heartbeat FROM jobs WHERE id = $1",
+                claimed["id"],
+            )
+
+        assert any(item["id"] == claimed["id"] for item in reclaimed)
+        assert state is not None
+        assert state["status"] == "dead"
+        assert state["worker_id"] is None
+        assert state["last_heartbeat"] is None
     finally:
         await pool.close()
 
