@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+import importlib.util
 import os
+from pathlib import Path
 
 import asyncpg
 import pytest
 
 from app.migrations import migrate
-from scripts.provision_db_roles import provision
+
+MODULE_PATH = Path(__file__).resolve().parents[2] / "scripts" / "provision_db_roles.py"
+spec = importlib.util.spec_from_file_location("provision_db_roles", MODULE_PATH)
+assert spec is not None and spec.loader is not None
+roles = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(roles)
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(
@@ -37,7 +44,7 @@ async def test_runtime_database_roles_are_least_privilege(monkeypatch: pytest.Mo
     for name, value in urls.items():
         monkeypatch.setenv(name, value)
 
-    await provision(TEST_DATABASE_URL)
+    await roles.provision(TEST_DATABASE_URL)
 
     admin = await asyncpg.connect(TEST_DATABASE_URL)
     try:
