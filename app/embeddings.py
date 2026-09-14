@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import os
 from collections.abc import Sequence
+from typing import Any
 from uuid import UUID
 
 import asyncpg
 from openai import AsyncOpenAI
 
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+VECTOR_DIMENSIONS = 1536
 EMBEDDING_BATCH_SIZE = 64
 
 
@@ -18,15 +20,46 @@ def _client() -> AsyncOpenAI:
     return AsyncOpenAI(api_key=api_key)
 
 
+def _request_kwargs(texts: Sequence[str]) -> dict[str, Any]:
+    request: dict[str, Any] = {
+        "model": EMBEDDING_MODEL,
+        "input": list(texts),
+    }
+    # OpenAI text-embedding-3 models allow dimensionality reduction. Keep this
+    # aligned with the PostgreSQL vector(1536) schema even if the configured
+    # text-embedding-3 model changes.
+    if EMBEDDING_MODEL.startswith("text-embedding-3"):
+        request["dimensions"] = VECTOR_DIMENSIONS
+    return request
+
+
+def _validate_response(data: Sequence[Any], *, expected_count: int) -> list[list[float]]:
+    if len(data) != expected_count:
+        raise RuntimeError("embedding provider returned an unexpected number of vectors")
+
+    ordered = sorted(data, key=lambda item: int(item.index))
+    expected_indexes = list(range(expected_count))
+    actual_indexes = [int(item.index) for item in ordered]
+    if actual_indexes != expected_indexes:
+        raise RuntimeError("embedding provider returned unexpected vector indexes")
+
+    vectors = [list(item.embedding) for item in ordered]
+    for vector in vectors:
+        if len(vector) != VECTOR_DIMENSIONS:
+            raise RuntimeError(
+                f"embedding dimension mismatch: expected {VECTOR_DIMENSIONS}, got {len(vector)}"
+            )
+    return vectors
+
+
 async def embed_texts(texts: Sequence[str]) -> list[list[float]]:
     if not texts:
         return []
-    response = await _client().embeddings.create(
-        model=EMBEDDING_MODEL,
-        input=list(texts),
-    )
-    ordered = sorted(response.data, key=lambda item: item.index)
-    return [list(item.embedding) for item in ordered]
+    if any(not str(text).strip() for text in texts):
+        raise ValueError("embedding inputs must be non-empty text")
+
+    response = await _client().embeddings.create(**_request_kwargs(texts))
+    return _validate_response(response.data, expected_count=len(texts))
 
 
 async def embed_query(text: str) -> list[float]:
@@ -39,13 +72,18 @@ async def ensure_step_embeddings(
     *,
     version_id: UUID,
 ) -> int:
-    """Embed only movements that do not already have vectors for this version."""
+    """Embed only non-empty movements that do not already have vectors."""
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT id, coalesce(title, '') || CASE WHEN title IS NULL THEN '' ELSE E'\n' END || text AS content
+            SELECT id,
+                   coalesce(title, '')
+                   || CASE WHEN title IS NULL THEN '' ELSE E'\n' END
+                   || text AS content
             FROM process_steps
-            WHERE version_id = $1 AND embedding IS NULL
+            WHERE version_id = $1
+              AND embedding IS NULL
+              AND length(trim(coalesce(title, '') || ' ' || text)) > 0
             ORDER BY step_number ASC
             """,
             version_id,
@@ -58,8 +96,6 @@ async def ensure_step_embeddings(
     for start in range(0, len(rows), EMBEDDING_BATCH_SIZE):
         batch = rows[start : start + EMBEDDING_BATCH_SIZE]
         vectors = await embed_texts([str(row["content"]) for row in batch])
-        if len(vectors) != len(batch):
-            raise RuntimeError("embedding provider returned an unexpected number of vectors")
 
         async with pool.acquire() as conn:
             async with conn.transaction():
