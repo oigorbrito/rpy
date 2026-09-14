@@ -137,8 +137,13 @@ async def collect_operational_metrics(conn: asyncpg.Connection) -> dict[str, Any
         """
         SELECT
             COALESCE(
-                EXTRACT(EPOCH FROM (NOW() - min(run_at)))
-                    FILTER (WHERE status = 'pending' AND run_at <= NOW()),
+                EXTRACT(
+                    EPOCH FROM (
+                        NOW() - min(run_at) FILTER (
+                            WHERE status = 'pending' AND run_at <= NOW()
+                        )
+                    )
+                ),
                 0
             ) AS oldest_runnable_pending_seconds,
             count(*) FILTER (
