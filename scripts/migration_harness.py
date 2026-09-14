@@ -83,10 +83,15 @@ def donor_identity_violations(path: Path) -> list[str]:
 
 
 def queue_invariant_violations() -> list[str]:
-    path = ROOT / "app" / "queue.py"
-    if not path.exists():
+    queue_path = ROOT / "app" / "queue.py"
+    worker_path = ROOT / "app" / "worker.py"
+    if not queue_path.exists():
         return ["missing app/queue.py"]
-    text = path.read_text(encoding="utf-8", errors="ignore").lower()
+    if not worker_path.exists():
+        return ["missing app/worker.py"]
+
+    text = queue_path.read_text(encoding="utf-8", errors="ignore").lower()
+    worker_text = worker_path.read_text(encoding="utf-8", errors="ignore").lower()
     compact = re.sub(r"\s+", " ", text)
     errors: list[str] = []
     if "for update skip locked" not in compact:
@@ -95,6 +100,12 @@ def queue_invariant_violations() -> list[str]:
         errors.append("queue operations must enforce worker ownership")
     if "idempotency_key" not in text:
         errors.append("queue must support idempotent enqueue")
+    if "pg_notify" not in text or "wake_channel" not in text:
+        errors.append("queue enqueue must emit PostgreSQL NOTIFY wake-ups")
+    if "add_listener" not in worker_text or "wake_channel" not in worker_text:
+        errors.append("worker must LISTEN for PostgreSQL queue wake-ups")
+    if "poll_interval_seconds" not in worker_text:
+        errors.append("worker must retain polling fallback for missed notifications")
     return errors
 
 
