@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hmac
+import json
 import os
 from contextlib import asynccontextmanager
 
@@ -9,8 +10,8 @@ from fastapi import FastAPI, HTTPException, Request
 
 from app.auth import tenant_from_request
 from app.db import create_pool
-from app.judit import extract_promotable_fields, parse_event
-from app.processes import finalize_version, get_authorized_process, log_access, stage_version
+from app.judit import parse_event
+from app.processes import get_authorized_process, log_access, stage_version
 from app.queue import enqueue
 
 
@@ -71,46 +72,60 @@ async def get_process_summary(code: str, request: Request) -> dict:
     }
 
 
+async def _record_delivery(conn: asyncpg.Connection, event) -> bool:
+    """Return False when this callback_id has already been persisted."""
+    if not event.callback_id:
+        return True
+    inserted = await conn.fetchval(
+        """
+        INSERT INTO judit_deliveries (callback_id, request_id, event_type, raw_payload)
+        VALUES ($1, $2, $3, $4::jsonb)
+        ON CONFLICT (callback_id) DO NOTHING
+        RETURNING callback_id
+        """,
+        event.callback_id,
+        event.request_id,
+        event.event_type,
+        json.dumps(event.raw),
+    )
+    return inserted is not None
+
+
 @app.post("/webhooks/judit/{token}")
 async def judit_webhook(token: str, request: Request) -> dict[str, bool]:
     if not _valid_webhook_token(token):
         raise HTTPException(status_code=404, detail="not found")
 
     try:
-        payload = await request.json()
-        event = parse_event(payload)
+        body = await request.json()
+        event = parse_event(body)
     except (ValueError, TypeError):
         raise HTTPException(status_code=400, detail="invalid payload") from None
 
     pool: asyncpg.Pool = request.app.state.pool
     async with pool.acquire() as conn:
-        process_id, version_id = await stage_version(
-            conn,
-            code=event.code,
-            source_request_id=event.request_id,
-            cached_response=event.cached_response,
-            payload=event.raw,
-        )
+        if not await _record_delivery(conn, event):
+            return {"ok": True}
 
-        if event.request_completed:
-            fields = extract_promotable_fields(event.raw)
-            await finalize_version(
+        if event.is_lawsuit_response:
+            source_id = event.response_id or event.callback_id
+            await stage_version(
                 conn,
-                process_id=process_id,
-                version_id=version_id,
-                **fields,
+                code=str(event.code),
+                source_request_id=source_id,
+                cached_response=event.cached_response,
+                payload=event.raw,
+                judit_request_id=event.request_id,
+                judit_response_id=event.response_id,
+                judit_callback_id=event.callback_id,
             )
 
-            if not event.cached_response:
-                await enqueue(
-                    conn,
-                    task_name="generate_process_summary",
-                    payload={
-                        "process_id": str(process_id),
-                        "version_id": str(version_id),
-                        "code": event.code,
-                    },
-                    idempotency_key=f"summary:{version_id}",
-                )
+        elif event.request_completed and event.request_id:
+            await enqueue(
+                conn,
+                task_name="finalize_judit_request",
+                payload={"request_id": event.request_id},
+                idempotency_key=f"judit-finalize:{event.request_id}",
+            )
 
     return {"ok": True}
