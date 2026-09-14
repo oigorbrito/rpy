@@ -24,6 +24,8 @@ from app.validation import ValidationResult, validar
 
 MODEL = "claude-sonnet-5"
 PROMPT_VERSION = "process-summary-v2"
+SECRET_MODEL = "local-deterministic"
+SECRET_PROMPT_VERSION = "secret-summary-v1"
 REQUESTED_TEMPERATURE = 0.2
 # Historical design intent is temperature=0.2. Claude Sonnet 5 currently rejects
 # non-default sampling parameters, so the production request must omit temperature.
@@ -31,6 +33,14 @@ SONNET_5_SUPPORTS_CUSTOM_TEMPERATURE = False
 RETRIEVAL_QUERY = (
     "sentença acórdão citação decisão audiência pedido objeto situação atual "
     "trânsito em julgado"
+)
+_SECRET_HEADER_FIELDS = (
+    ("instance", "Instância"),
+    ("area", "Área"),
+    ("justice_description", "Justiça"),
+    ("county", "Comarca"),
+    ("state", "Estado"),
+    ("city", "Cidade"),
 )
 
 
@@ -127,9 +137,42 @@ async def _load_context(
     return base
 
 
+def _is_secret_context(context: dict[str, Any]) -> bool:
+    return int(context.get("secrecy_level") or 0) > 0
+
+
+def _secret_summary(context: dict[str, Any]) -> str:
+    """Build the minimum useful summary without invoking an external model."""
+    lines = [
+        "# Resumo do processo",
+        "",
+        "## Sigilo",
+        "Os detalhes processuais foram restringidos por sigilo.",
+    ]
+
+    allowed_lines: list[str] = []
+    class_name = str(context.get("class_name") or "").strip()
+    if class_name:
+        allowed_lines.append(f"- Classe: {class_name}")
+
+    header = context.get("header") if isinstance(context.get("header"), dict) else {}
+    for key, label in _SECRET_HEADER_FIELDS:
+        value = header.get(key)
+        if value is None:
+            continue
+        rendered = str(value).strip()
+        if rendered:
+            allowed_lines.append(f"- {label}: {rendered}")
+
+    if allowed_lines:
+        lines.extend(["", "## Dados permitidos", *allowed_lines])
+
+    return "\n".join(lines).strip()
+
+
 def _provider_payload(context: dict[str, Any]) -> tuple[dict[str, Any], list[Any]]:
     """Return the exact data boundary allowed to leave the application."""
-    if int(context.get("secrecy_level") or 0) > 0:
+    if _is_secret_context(context):
         return (
             {
                 "class_name": context.get("class_name"),
@@ -253,24 +296,36 @@ async def generate_summary(
     started = perf_counter()
     context = await _load_context(pool, process_id, version_id)
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise RuntimeError("ANTHROPIC_API_KEY is required")
-    client = anthropic_client(api_key)
+    model = MODEL
+    prompt_version = PROMPT_VERSION
+    if _is_secret_context(context):
+        text = _secret_summary(context)
+        result: ValidationResult = validar(
+            text=text,
+            code=context["code"],
+            parties=[],
+        )
+        model = SECRET_MODEL
+        prompt_version = SECRET_PROMPT_VERSION
+    else:
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise RuntimeError("ANTHROPIC_API_KEY is required")
+        client = anthropic_client(api_key)
 
-    text = await _generate(client, context)
-    result: ValidationResult = validar(
-        text=text,
-        code=context["code"],
-        parties=context.get("parties", []),
-    )
-    if not result.passed:
-        text = await _generate(client, context, result.errors)
+        text = await _generate(client, context)
         result = validar(
             text=text,
             code=context["code"],
             parties=context.get("parties", []),
         )
+        if not result.passed:
+            text = await _generate(client, context, result.errors)
+            result = validar(
+                text=text,
+                code=context["code"],
+                parties=context.get("parties", []),
+            )
 
     generation_ms = max(0, round((perf_counter() - started) * 1000))
     validation = {"passed": result.passed, "errors": result.errors}
@@ -281,13 +336,13 @@ async def generate_summary(
             version_id=version_id,
             text=text,
             validation=validation,
-            model=MODEL,
-            prompt_version=PROMPT_VERSION,
+            model=model,
+            prompt_version=prompt_version,
             generation_ms=generation_ms,
         )
     return {
         "validation": validation,
-        "model": MODEL,
+        "model": model,
         "generation_ms": generation_ms,
         "persisted": persisted,
     }
