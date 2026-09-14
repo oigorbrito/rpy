@@ -39,6 +39,9 @@ def test_parse_event_persists_canonical_cnj_shape() -> None:
         "0000000/00/2026/8/21/0001",
         "0000000-00.2026.X.21.0001",
         "000000000202682100011",
+        "0000000-0020268210001",
+        "000000000.2026.8.21.0001",
+        "0000000-00.20268210001",
     ],
 )
 def test_invalid_cnj_shape_is_rejected(value: str) -> None:
