@@ -17,7 +17,7 @@ import app.rag  # noqa: F401 - imports task registrations
 from app.db import create_pool
 from app.json_utils import decode_json_object
 from app.queue import claim, complete, fail, heartbeat, reclaim_stale
-from app.tasks import resolve_task
+from app.tasks import PermanentTaskError, resolve_task
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +99,12 @@ class Worker:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            logger.exception("job %s failed", job_id)
+            permanent = isinstance(exc, PermanentTaskError)
+            logger.exception(
+                "job %s failed%s",
+                job_id,
+                " permanently" if permanent else "",
+            )
             async with self.pool.acquire() as conn:
                 await fail(
                     conn,
@@ -107,6 +112,7 @@ class Worker:
                     self.worker_id,
                     attempts=int(row["attempts"]),
                     error=f"{type(exc).__name__}: {exc}",
+                    permanent=permanent,
                 )
         finally:
             heartbeat_task.cancel()
@@ -169,8 +175,6 @@ async def _main() -> None:
     args = parser.parse_args()
 
     settings = WorkerSettings.from_env()
-    # Fail deployment startup before opening a DB pool or claiming work if the
-    # deterministic provider context envelope is internally inconsistent.
     app.rag.provider_context_limits()
     if args.concurrency is not None:
         settings.concurrency = args.concurrency
