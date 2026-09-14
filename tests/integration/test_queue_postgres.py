@@ -23,6 +23,11 @@ pytestmark = pytest.mark.skipif(
 async def database() -> None:
     assert TEST_DATABASE_URL is not None
     await migrate(TEST_DATABASE_URL)
+
+
+@pytest.fixture(autouse=True)
+async def clean_jobs() -> None:
+    assert TEST_DATABASE_URL is not None
     conn = await asyncpg.connect(TEST_DATABASE_URL)
     try:
         await conn.execute("TRUNCATE jobs RESTART IDENTITY CASCADE")
@@ -121,15 +126,19 @@ async def test_fail_retries_then_dead_letters_at_max_attempts() -> None:
     worker_id = uuid4()
     try:
         async with pool.acquire() as conn:
-            await enqueue(
+            enqueued = await enqueue(
                 conn,
                 task_name="integration-test",
                 payload={"value": 4},
                 idempotency_key="integration:fail",
                 max_attempts=2,
             )
+            assert enqueued is not None
+
             first = await claim(conn, worker_id)
             assert first is not None
+            assert first["id"] == enqueued["id"]
+            assert int(first["attempts"]) == 1
             first_status = await fail(
                 conn,
                 first["id"],
@@ -142,6 +151,8 @@ async def test_fail_retries_then_dead_letters_at_max_attempts() -> None:
             await conn.execute("UPDATE jobs SET run_at = NOW() WHERE id = $1", first["id"])
             second = await claim(conn, worker_id)
             assert second is not None
+            assert second["id"] == enqueued["id"]
+            assert int(second["attempts"]) == 2
             second_status = await fail(
                 conn,
                 second["id"],
