@@ -11,6 +11,7 @@ from fastapi import FastAPI, HTTPException, Request
 
 from app.auth import configured_bearer_tokens, tenant_from_request
 from app.db import create_pool
+from app.frontend import router as frontend_router
 from app.http_auth_config import validate_http_auth_config
 from app.http_limits import JuditWebhookBodyLimitMiddleware, judit_webhook_max_body_bytes
 from app.json_utils import decode_json_object
@@ -43,6 +44,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Rpy", lifespan=lifespan)
 app.add_middleware(JuditWebhookBodyLimitMiddleware)
 app.add_middleware(JuditWebhookSecretRedactionMiddleware)
+app.include_router(frontend_router)
 
 
 def _valid_webhook_token(token: str) -> bool:
