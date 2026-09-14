@@ -10,6 +10,7 @@ from anthropic import AsyncAnthropic
 
 from app.db import create_pool
 from app.embeddings import embed_query, ensure_step_embeddings
+from app.json_utils import decode_json_list, decode_json_object
 from app.retrieval import load_steps, rank_steps, vector_search
 from app.tasks import task
 from app.validation import ValidationResult, validar
@@ -114,10 +115,10 @@ async def _load_process(
         "code": process["code"],
         "court": process["court"],
         "class_name": process["class_name"],
-        "subjects": list(process["subjects"] or []),
-        "parties": list(process["parties"] or []),
+        "subjects": decode_json_list(process["subjects"], label="process subjects"),
+        "parties": decode_json_list(process["parties"], label="process parties"),
         "secrecy_level": int(process["secrecy_level"] or 0),
-        "header": dict(process["header"] or {}),
+        "header": decode_json_object(process["header"], label="process header"),
     }
 
 
