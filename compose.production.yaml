@@ -1,3 +1,5 @@
+x-rpy-image: &rpy-image ${RPY_IMAGE:?RPY_IMAGE immutable digest is required}
+
 x-api-env: &api-env
   DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
   JUDIT_WEBHOOK_TOKEN: ${JUDIT_WEBHOOK_TOKEN:?JUDIT_WEBHOOK_TOKEN is required}
@@ -41,7 +43,7 @@ services:
     restart: unless-stopped
 
   migrate:
-    build: .
+    image: *rpy-image
     command: ["python", "scripts/migrate.py"]
     environment:
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
@@ -53,7 +55,7 @@ services:
     restart: "no"
 
   api:
-    build: .
+    image: *rpy-image
     command: ["uvicorn", "app.api:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
     environment: *api-env
     ports:
@@ -77,7 +79,7 @@ services:
     restart: unless-stopped
 
   worker-1:
-    build: .
+    image: *rpy-image
     command: ["python", "-m", "app.worker"]
     environment: *worker-env
     depends_on:
@@ -89,7 +91,7 @@ services:
     restart: unless-stopped
 
   worker-2:
-    build: .
+    image: *rpy-image
     command: ["python", "-m", "app.worker"]
     environment: *worker-env
     depends_on:
@@ -101,7 +103,7 @@ services:
     restart: unless-stopped
 
   scheduler:
-    build: .
+    image: *rpy-image
     command: ["python", "-m", "app.scheduler"]
     environment: *scheduler-env
     depends_on:
