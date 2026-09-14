@@ -99,19 +99,7 @@ async def test_worker_wakes_without_waiting_for_long_poll_interval() -> None:
     )
     runner = asyncio.create_task(worker.run())
     try:
-        # Give the dedicated LISTEN connection time to subscribe before enqueue.
-        for _ in range(40):
-            if worker.wake_event.is_set():
-                worker.wake_event.clear()
-            await asyncio.sleep(0.025)
-            async with pool.acquire() as conn:
-                listeners = await conn.fetchval(
-                    "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND query = 'LISTEN rpy_jobs'"
-                )
-            if listeners:
-                break
-        else:
-            pytest.fail("worker LISTEN connection did not become ready")
+        await asyncio.wait_for(worker.listener_ready.wait(), timeout=2.0)
 
         async with pool.acquire() as conn:
             row = await enqueue(
