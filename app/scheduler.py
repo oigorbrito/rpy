@@ -52,6 +52,24 @@ async def expurgar(conn: asyncpg.Connection, *, retention_days: int) -> int:
     return int(deleted or 0)
 
 
+async def purge_terminal_jobs(conn: asyncpg.Connection, *, retention_days: int) -> int:
+    """Delete only completed/dead jobs after the operational retention window."""
+    _positive(retention_days, name="job_retention_days")
+    deleted = await conn.fetchval(
+        """
+        WITH deleted_jobs AS (
+            DELETE FROM jobs
+            WHERE status IN ('completed', 'dead')
+              AND updated_at < NOW() - make_interval(days => $1)
+            RETURNING id
+        )
+        SELECT count(*) FROM deleted_jobs
+        """,
+        retention_days,
+    )
+    return int(deleted or 0)
+
+
 async def acquire_singleton(conn: asyncpg.Connection) -> bool:
     return bool(await conn.fetchval("SELECT pg_try_advisory_lock(hashtext($1))", LOCK_NAME))
 
@@ -65,6 +83,9 @@ async def run_scheduler() -> None:
     if not database_url:
         raise RuntimeError("DATABASE_URL is required")
     retention_days = int(_positive(int(os.getenv("RETENTION_DAYS", "365")), name="RETENTION_DAYS"))
+    job_retention_days = int(
+        _positive(int(os.getenv("JOB_RETENTION_DAYS", "30")), name="JOB_RETENTION_DAYS")
+    )
     interval_seconds = float(
         _positive(
             float(
@@ -87,8 +108,17 @@ async def run_scheduler() -> None:
             try:
                 while True:
                     async with pool.acquire() as conn:
-                        deleted = await expurgar(conn, retention_days=retention_days)
-                    logger.info("expunge completed: %s process(es) deleted", deleted)
+                        deleted_processes = await expurgar(
+                            conn, retention_days=retention_days
+                        )
+                        deleted_jobs = await purge_terminal_jobs(
+                            conn, retention_days=job_retention_days
+                        )
+                    logger.info(
+                        "maintenance completed: %s process(es) expunged, %s terminal job(s) purged",
+                        deleted_processes,
+                        deleted_jobs,
+                    )
                     await asyncio.sleep(interval_seconds)
             finally:
                 with suppress(Exception):
