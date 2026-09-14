@@ -14,7 +14,14 @@ logger = logging.getLogger(__name__)
 LOCK_NAME = "rpy_scheduler"
 
 
+def _positive(value: int | float, *, name: str) -> int | float:
+    if value <= 0:
+        raise ValueError(f"{name} must be greater than zero")
+    return value
+
+
 async def expurgar(conn: asyncpg.Connection, *, retention_days: int) -> int:
+    _positive(retention_days, name="retention_days")
     deleted = await conn.fetchval(
         """
         WITH doomed AS (
@@ -57,9 +64,17 @@ async def run_scheduler() -> None:
     database_url = os.environ.get("DATABASE_URL")
     if not database_url:
         raise RuntimeError("DATABASE_URL is required")
-    retention_days = int(os.getenv("RETENTION_DAYS", "365"))
+    retention_days = int(_positive(int(os.getenv("RETENTION_DAYS", "365")), name="RETENTION_DAYS"))
     interval_seconds = float(
-        os.getenv("EXPUNGE_INTERVAL_SECONDS", str(timedelta(hours=24).total_seconds()))
+        _positive(
+            float(
+                os.getenv(
+                    "EXPUNGE_INTERVAL_SECONDS",
+                    str(timedelta(hours=24).total_seconds()),
+                )
+            ),
+            name="EXPUNGE_INTERVAL_SECONDS",
+        )
     )
 
     pool = await create_pool(database_url, min_size=1, max_size=2)
