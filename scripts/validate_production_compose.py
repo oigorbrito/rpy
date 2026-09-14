@@ -13,18 +13,62 @@ EXPECTED_SERVICES = {
     "worker-2",
     "scheduler",
 }
-REQUIRED_SECRET_ENV = {
+API_REQUIRED_ENV = {
     "DATABASE_URL",
-    "ANTHROPIC_API_KEY",
-    "OPENAI_API_KEY",
     "JUDIT_WEBHOOK_TOKEN",
+    "JUDIT_WEBHOOK_MAX_BODY_BYTES",
     "RPY_BEARER_TOKENS",
     "RPY_OPS_TOKEN",
 }
+WORKER_REQUIRED_ENV = {
+    "DATABASE_URL",
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "EMBEDDING_MODEL",
+    "ANTHROPIC_TIMEOUT_SECONDS",
+    "EMBEDDING_TIMEOUT_SECONDS",
+    "PROVIDER_MAX_ATTEMPTS",
+    "PROVIDER_RETRY_BACKOFF_SECONDS",
+    "WORKER_TASK_TIMEOUT_SECONDS",
+}
+SCHEDULER_REQUIRED_ENV = {
+    "DATABASE_URL",
+    "RETENTION_DAYS",
+    "JOB_RETENTION_DAYS",
+    "EXPUNGE_INTERVAL_SECONDS",
+}
+HTTP_SECRETS = {"JUDIT_WEBHOOK_TOKEN", "RPY_BEARER_TOKENS", "RPY_OPS_TOKEN"}
+PROVIDER_SECRETS = {"ANTHROPIC_API_KEY", "OPENAI_API_KEY"}
 
 
 def _fail(message: str) -> None:
     raise SystemExit(f"production compose contract failed: {message}")
+
+
+def _environment(services: dict[str, Any], service_name: str) -> dict[str, Any]:
+    environment = services[service_name].get("environment") or {}
+    if not isinstance(environment, dict):
+        _fail(f"{service_name} environment must be an object")
+    return environment
+
+
+def _require_env(
+    services: dict[str, Any], service_name: str, required: set[str]
+) -> dict[str, Any]:
+    environment = _environment(services, service_name)
+    missing = sorted(required - set(environment))
+    if missing:
+        _fail(f"{service_name} environment is missing required settings: {missing}")
+    return environment
+
+
+def _forbid_env(
+    services: dict[str, Any], service_name: str, forbidden: set[str]
+) -> None:
+    environment = _environment(services, service_name)
+    leaked = sorted(forbidden & set(environment))
+    if leaked:
+        _fail(f"{service_name} must not receive unrelated secrets: {leaked}")
 
 
 def validate(config: dict[str, Any]) -> None:
@@ -75,10 +119,20 @@ def validate(config: dict[str, Any]) -> None:
     if scheduler_networks != {"backend"}:
         _fail("scheduler must remain backend-only")
 
-    environment = services["api"].get("environment") or {}
-    missing = sorted(REQUIRED_SECRET_ENV - set(environment))
-    if missing:
-        _fail(f"api environment is missing required settings: {missing}")
+    _require_env(services, "api", API_REQUIRED_ENV)
+    for service_name in ("worker-1", "worker-2"):
+        _require_env(services, service_name, WORKER_REQUIRED_ENV)
+    _require_env(services, "scheduler", SCHEDULER_REQUIRED_ENV)
+
+    migrate_env = _environment(services, "migrate")
+    if set(migrate_env) != {"DATABASE_URL"}:
+        _fail("migrate must receive only DATABASE_URL")
+
+    _forbid_env(services, "api", PROVIDER_SECRETS)
+    for service_name in ("worker-1", "worker-2"):
+        _forbid_env(services, service_name, HTTP_SECRETS)
+    _forbid_env(services, "scheduler", HTTP_SECRETS | PROVIDER_SECRETS)
+    _forbid_env(services, "migrate", HTTP_SECRETS | PROVIDER_SECRETS)
 
 
 def main() -> None:
