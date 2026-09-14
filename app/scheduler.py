@@ -70,6 +70,27 @@ async def purge_terminal_jobs(conn: asyncpg.Connection, *, retention_days: int) 
     return int(deleted or 0)
 
 
+async def purge_judit_request_completions(
+    conn: asyncpg.Connection,
+    *,
+    retention_days: int,
+) -> int:
+    """Bound completion markers to the same operational window as terminal jobs."""
+    _positive(retention_days, name="job_retention_days")
+    deleted = await conn.fetchval(
+        """
+        WITH deleted_markers AS (
+            DELETE FROM judit_request_completions
+            WHERE completed_at < NOW() - make_interval(days => $1)
+            RETURNING request_id
+        )
+        SELECT count(*) FROM deleted_markers
+        """,
+        retention_days,
+    )
+    return int(deleted or 0)
+
+
 async def acquire_singleton(conn: asyncpg.Connection) -> bool:
     return bool(await conn.fetchval("SELECT pg_try_advisory_lock(hashtext($1))", LOCK_NAME))
 
@@ -114,10 +135,15 @@ async def run_scheduler() -> None:
                         deleted_jobs = await purge_terminal_jobs(
                             conn, retention_days=job_retention_days
                         )
+                        deleted_completion_markers = await purge_judit_request_completions(
+                            conn,
+                            retention_days=job_retention_days,
+                        )
                     logger.info(
-                        "maintenance completed: %s process(es) expunged, %s terminal job(s) purged",
+                        "maintenance completed: %s process(es) expunged, %s terminal job(s) purged, %s Judit completion marker(s) purged",
                         deleted_processes,
                         deleted_jobs,
+                        deleted_completion_markers,
                     )
                     await asyncio.sleep(interval_seconds)
             finally:
