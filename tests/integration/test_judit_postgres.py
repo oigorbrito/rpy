@@ -5,8 +5,8 @@ import os
 import asyncpg
 import pytest
 
+from app.migrations import migrate
 from app.processes import preferred_judit_version, stage_version
-from scripts.migrate import migrate
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(
