@@ -82,8 +82,10 @@ async def test_digit_only_process_read_uses_canonical_identity_and_audit() -> No
             )
             assert [row["process_code"] for row in audit_codes] == [canonical]
     finally:
+        # access_log is intentionally immutable and retains the tenant reference.
+        # Keep the randomized tenant row rather than weakening the audit invariant
+        # merely to clean up integration-test data.
         async with pool.acquire() as conn:
             await conn.execute("DELETE FROM tenant_processes WHERE tenant_id = $1", tenant_id)
             await conn.execute("DELETE FROM processes WHERE id = $1", process_id)
-            await conn.execute("DELETE FROM tenants WHERE id = $1", tenant_id)
         await pool.close()
