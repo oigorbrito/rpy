@@ -24,14 +24,21 @@ async def test_health_and_database_readiness_are_separate() -> None:
     app.state.pool = pool
     transport = httpx.ASGITransport(app=app)
 
-    try:
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-            health = await client.get("/health")
-            ready = await client.get("/ready")
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        health = await client.get("/health")
+        ready = await client.get("/ready")
 
         assert health.status_code == 200
         assert health.json() == {"ok": True}
         assert ready.status_code == 200
         assert ready.json() == {"ok": True}
-    finally:
+
         await pool.close()
+
+        health_without_db = await client.get("/health")
+        not_ready = await client.get("/ready")
+
+    assert health_without_db.status_code == 200
+    assert health_without_db.json() == {"ok": True}
+    assert not_ready.status_code == 503
+    assert not_ready.json()["detail"] == "database unavailable"
