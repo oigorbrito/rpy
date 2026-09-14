@@ -95,7 +95,10 @@ async def provision(database_url: str) -> None:
                 f"GRANT SELECT ON {', '.join(_quote_ident(t) for t in API_READ_TABLES)} TO {api}"
             )
             await conn.execute(f"GRANT INSERT, UPDATE ON processes, process_versions TO {api}")
-            await conn.execute(f"GRANT INSERT ON access_log, judit_deliveries, jobs TO {api}")
+            await conn.execute(
+                "GRANT INSERT ON tenant_processes, access_log, judit_deliveries, jobs TO "
+                f"{api}"
+            )
             await conn.execute(f"GRANT USAGE, SELECT ON SEQUENCE access_log_id_seq TO {api}")
 
             worker = _quote_ident("rpy_worker")

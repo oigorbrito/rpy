@@ -14,8 +14,13 @@ from app.db import create_pool
 from app.http_limits import JuditWebhookBodyLimitMiddleware, judit_webhook_max_body_bytes
 from app.json_utils import decode_json_object
 from app.judit import parse_event
-from app.observability import collect_operational_metrics, operational_thresholds
+from app.observability import (
+    collect_operational_metrics,
+    list_failed_summaries,
+    operational_thresholds,
+)
 from app.processes import get_authorized_process, log_access, stage_version
+from app.tenancy import configured_webhook_tenant, validate_carteira_seed
 from app.queue import enqueue
 from app.webhook_security import (
     JuditWebhookSecretRedactionMiddleware,
@@ -33,6 +38,8 @@ async def lifespan(app: FastAPI):
     judit_webhook_max_body_bytes()
     operational_thresholds()
     app.state.bearer_tokens = configured_bearer_tokens()
+    app.state.webhook_tenant_id = configured_webhook_tenant()
+    validate_carteira_seed()
     app.state.pool = await create_pool(database_url)
     try:
         yield
@@ -91,6 +98,17 @@ async def operational_metrics(request: Request) -> dict:
     pool: asyncpg.Pool = request.app.state.pool
     async with pool.acquire() as conn:
         return await collect_operational_metrics(conn)
+
+
+@app.get("/ops/failed-summaries")
+async def failed_summaries(request: Request) -> dict:
+    # Validation failures are the explicit exposure surface for generated summaries
+    # that never passed the gatekeeper; access-protected like the rest of /ops.
+    if not _valid_ops_request(request):
+        raise HTTPException(status_code=404, detail="not found")
+    pool: asyncpg.Pool = request.app.state.pool
+    async with pool.acquire() as conn:
+        return {"failed_summaries": await list_failed_summaries(conn)}
 
 
 @app.get("/processes/{code}")
@@ -183,6 +201,9 @@ async def judit_webhook(token: str, request: Request) -> dict[str, bool]:
                     judit_request_id=event.request_id,
                     judit_response_id=event.response_id,
                     judit_callback_id=event.callback_id,
+                    tenant_id=getattr(
+                        request.app.state, "webhook_tenant_id", None
+                    ),
                 )
 
             elif event.request_completed and event.request_id:
