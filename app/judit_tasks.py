@@ -4,6 +4,7 @@ import os
 from typing import Any
 
 from app.db import create_pool
+from app.json_utils import decode_json_object
 from app.judit import extract_promotable_fields, parse_event
 from app.processes import finalize_version, preferred_judit_version
 from app.queue import enqueue
@@ -24,7 +25,10 @@ async def finalize_judit_request_task(payload: dict[str, Any]) -> dict[str, Any]
             if staged is None:
                 return {"request_id": request_id, "status": "no_lawsuit_response"}
 
-            staged_event = parse_event(dict(staged["source_payload"] or {}))
+            source_payload = decode_json_object(
+                staged["source_payload"], label="staged Judit source payload"
+            )
+            staged_event = parse_event(source_payload)
             if not staged_event.response_data:
                 return {"request_id": request_id, "status": "missing_response_data"}
 
