@@ -8,8 +8,8 @@ from uuid import uuid4
 import asyncpg
 import pytest
 
+from app.migrations import migrate
 from app.scheduler import acquire_singleton, expurgar, release_singleton
-from scripts.migrate import migrate
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(
