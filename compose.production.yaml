@@ -1,0 +1,110 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-rpy}
+      POSTGRES_USER: ${POSTGRES_USER:-rpy}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rpy} -d ${POSTGRES_DB:-rpy}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    volumes:
+      - rpy_pgdata:/var/lib/postgresql/data
+    networks:
+      - backend
+    restart: unless-stopped
+
+  migrate:
+    build: .
+    command: ["python", "scripts/migrate.py"]
+    environment: &app-env
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?OPENAI_API_KEY is required}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      ANTHROPIC_TIMEOUT_SECONDS: ${ANTHROPIC_TIMEOUT_SECONDS:-15}
+      EMBEDDING_TIMEOUT_SECONDS: ${EMBEDDING_TIMEOUT_SECONDS:-15}
+      PROVIDER_MAX_ATTEMPTS: ${PROVIDER_MAX_ATTEMPTS:-2}
+      PROVIDER_RETRY_BACKOFF_SECONDS: ${PROVIDER_RETRY_BACKOFF_SECONDS:-0.25}
+      WORKER_TASK_TIMEOUT_SECONDS: ${WORKER_TASK_TIMEOUT_SECONDS:-120}
+      JUDIT_WEBHOOK_TOKEN: ${JUDIT_WEBHOOK_TOKEN:?JUDIT_WEBHOOK_TOKEN is required}
+      JUDIT_WEBHOOK_MAX_BODY_BYTES: ${JUDIT_WEBHOOK_MAX_BODY_BYTES:-5242880}
+      RPY_BEARER_TOKENS: ${RPY_BEARER_TOKENS:?RPY_BEARER_TOKENS is required}
+      RPY_OPS_TOKEN: ${RPY_OPS_TOKEN:?RPY_OPS_TOKEN is required}
+      RETENTION_DAYS: ${RETENTION_DAYS:-365}
+      JOB_RETENTION_DAYS: ${JOB_RETENTION_DAYS:-30}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - backend
+    restart: "no"
+
+  api:
+    build: .
+    command: ["uvicorn", "app.api:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+    environment: *app-env
+    ports:
+      - "${RPY_API_BIND_ADDRESS:-127.0.0.1}:${RPY_API_PORT:-8000}:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=2).read()"
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
+    networks:
+      - backend
+      - egress
+    restart: unless-stopped
+
+  worker-1:
+    build: .
+    command: ["python", "-m", "app.worker"]
+    environment: *app-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - backend
+      - egress
+    restart: unless-stopped
+
+  worker-2:
+    build: .
+    command: ["python", "-m", "app.worker"]
+    environment: *app-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - backend
+      - egress
+    restart: unless-stopped
+
+  scheduler:
+    build: .
+    command: ["python", "-m", "app.scheduler"]
+    environment: *app-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - backend
+    restart: unless-stopped
+
+networks:
+  backend:
+    internal: true
+  egress: {}
+
+volumes:
+  rpy_pgdata:
