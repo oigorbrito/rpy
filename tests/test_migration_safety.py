@@ -56,3 +56,11 @@ def test_stale_waiver_marker_is_rejected(tmp_path: Path, monkeypatch) -> None:
     path.write_text(f"{guard.WAIVER_MARKER}\nCREATE TABLE safe(id integer);", encoding="utf-8")
     monkeypatch.setattr(guard, "DOCS_DIR", docs_dir)
     assert guard.migration_violations(path) == ["stale destructive-migration waiver marker"]
+
+
+def test_repository_migrations_are_safe() -> None:
+    violations: list[tuple[str, str]] = []
+    for path in sorted(guard.SQL_DIR.glob("*.sql")):
+        for message in guard.migration_violations(path):
+            violations.append((path.name, message))
+    assert violations == []
