@@ -2,23 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import os
-from dataclasses import dataclass
 from urllib.parse import unquote, urlparse
 
 import asyncpg
 
-
-@dataclass(frozen=True)
-class RuntimeRole:
-    name: str
-    env_name: str
-
-
 RUNTIME_ROLES = (
-    RuntimeRole("rpy_api", "API_DATABASE_URL"),
-    RuntimeRole("rpy_worker", "WORKER_DATABASE_URL"),
-    RuntimeRole("rpy_scheduler", "SCHEDULER_DATABASE_URL"),
-    RuntimeRole("rpy_backup", "BACKUP_DATABASE_URL"),
+    ("rpy_api", "API_DATABASE_URL"),
+    ("rpy_worker", "WORKER_DATABASE_URL"),
+    ("rpy_scheduler", "SCHEDULER_DATABASE_URL"),
+    ("rpy_backup", "BACKUP_DATABASE_URL"),
 )
 
 API_READ_TABLES = (
@@ -29,13 +21,6 @@ API_READ_TABLES = (
     "jobs",
     "judit_deliveries",
     "backup_runs",
-)
-WORKER_TABLES = (
-    "jobs",
-    "processes",
-    "process_versions",
-    "process_steps",
-    "process_summaries",
 )
 
 
@@ -67,21 +52,17 @@ async def _ensure_login_role(conn: asyncpg.Connection, *, name: str, password: s
     exists = await conn.fetchval("SELECT 1 FROM pg_roles WHERE rolname = $1", name)
     ident = _quote_ident(name)
     password_sql = _quote_literal(password)
-    if not exists:
-        await conn.execute(
-            f"CREATE ROLE {ident} LOGIN PASSWORD {password_sql} "
-            "NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS"
-        )
-    else:
-        await conn.execute(
-            f"ALTER ROLE {ident} WITH LOGIN PASSWORD {password_sql} "
-            "NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS"
-        )
+    statement = "ALTER ROLE" if exists else "CREATE ROLE"
+    await conn.execute(
+        f"{statement} {ident} WITH LOGIN PASSWORD {password_sql} "
+        "NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS"
+    )
 
 
 async def provision(database_url: str) -> None:
     credentials = {
-        role.name: _credentials(role.env_name, role.name) for role in RUNTIME_ROLES
+        role_name: _credentials(env_name, role_name)
+        for role_name, env_name in RUNTIME_ROLES
     }
     conn = await asyncpg.connect(database_url)
     try:
@@ -91,19 +72,23 @@ async def provision(database_url: str) -> None:
         database_ident = _quote_ident(database_name)
 
         async with conn.transaction():
-            for role in RUNTIME_ROLES:
-                _, password = credentials[role.name]
-                await _ensure_login_role(conn, name=role.name, password=password)
+            for role_name, _ in RUNTIME_ROLES:
+                _, password = credentials[role_name]
+                await _ensure_login_role(conn, name=role_name, password=password)
 
-            role_list = ", ".join(_quote_ident(role.name) for role in RUNTIME_ROLES)
-            await conn.execute(f"REVOKE ALL ON SCHEMA public FROM PUBLIC")
+            role_list = ", ".join(_quote_ident(role_name) for role_name, _ in RUNTIME_ROLES)
+            await conn.execute("REVOKE ALL ON SCHEMA public FROM PUBLIC")
             await conn.execute(f"GRANT USAGE ON SCHEMA public TO {role_list}")
             await conn.execute(f"GRANT CONNECT ON DATABASE {database_ident} TO {role_list}")
 
-            for role in RUNTIME_ROLES:
-                ident = _quote_ident(role.name)
-                await conn.execute(f"REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM {ident}")
-                await conn.execute(f"REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM {ident}")
+            for role_name, _ in RUNTIME_ROLES:
+                ident = _quote_ident(role_name)
+                await conn.execute(
+                    f"REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM {ident}"
+                )
+                await conn.execute(
+                    f"REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM {ident}"
+                )
 
             api = _quote_ident("rpy_api")
             await conn.execute(
