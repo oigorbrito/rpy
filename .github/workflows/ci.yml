@@ -69,7 +69,7 @@ jobs:
       - name: Container image smoke
         run: |
           docker build -t "rpy-ci:${GITHUB_SHA}" .
-          docker run --rm "rpy-ci:${GITHUB_SHA}" python -c "import app.api, app.worker, app.scheduler"
+          sh scripts/verify_image_runtime.sh "rpy-ci:${GITHUB_SHA}"
 
       - name: PostgreSQL backup restore drill
         run: sh scripts/verify_backup_restore.sh
