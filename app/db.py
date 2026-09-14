@@ -1,10 +1,26 @@
 from __future__ import annotations
 
+import json
+
 import asyncpg
 from pgvector.asyncpg import register_vector
 
 
 async def _init_connection(conn: asyncpg.Connection) -> None:
+    await conn.set_type_codec(
+        "json",
+        schema="pg_catalog",
+        encoder=json.dumps,
+        decoder=json.loads,
+        format="text",
+    )
+    await conn.set_type_codec(
+        "jsonb",
+        schema="pg_catalog",
+        encoder=json.dumps,
+        decoder=json.loads,
+        format="text",
+    )
     await register_vector(conn)
 
 
