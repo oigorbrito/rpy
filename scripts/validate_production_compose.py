@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,8 @@ EXPECTED_SERVICES = {
     "worker-2",
     "scheduler",
 }
+APPLICATION_SERVICES = ("migrate", "api", "worker-1", "worker-2", "scheduler")
+IMMUTABLE_IMAGE_RE = re.compile(r"^.+@sha256:[0-9a-fA-F]{64}$")
 API_REQUIRED_ENV = {
     "DATABASE_URL",
     "JUDIT_WEBHOOK_TOKEN",
@@ -71,6 +74,25 @@ def _forbid_env(
         _fail(f"{service_name} must not receive unrelated secrets: {leaked}")
 
 
+def _validate_application_image(services: dict[str, Any]) -> None:
+    images: dict[str, str] = {}
+    for service_name in APPLICATION_SERVICES:
+        service = services[service_name]
+        if "build" in service:
+            _fail(f"{service_name} must not build source on the production host")
+        image = str(service.get("image") or "")
+        if not IMMUTABLE_IMAGE_RE.fullmatch(image):
+            _fail(
+                f"{service_name} image must be pinned by sha256 digest, got {image!r}"
+            )
+        images[service_name] = image
+
+    unique_images = set(images.values())
+    if len(unique_images) != 1:
+        rendered = ", ".join(f"{name}={image}" for name, image in images.items())
+        _fail(f"all application services must use the same image digest: {rendered}")
+
+
 def validate(config: dict[str, Any]) -> None:
     services = config.get("services")
     if not isinstance(services, dict):
@@ -78,6 +100,8 @@ def validate(config: dict[str, Any]) -> None:
 
     if set(services) != EXPECTED_SERVICES:
         _fail(f"unexpected services: {sorted(services)}")
+
+    _validate_application_image(services)
 
     if "ports" in services["postgres"]:
         _fail("postgres must not publish host ports")
