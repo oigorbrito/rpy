@@ -74,7 +74,7 @@ async def test_operational_metrics_are_aggregate_and_protected(monkeypatch: pyte
                 """,
                 process_id,
                 version_id,
-                '{"passed": false, "errors": ["x"]}',
+                {"passed": False, "errors": ["x"]},
             )
 
         transport = httpx.ASGITransport(app=app)
