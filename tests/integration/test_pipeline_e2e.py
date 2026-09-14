@@ -44,11 +44,17 @@ async def test_judit_to_summary_end_to_end(monkeypatch: pytest.MonkeyPatch) -> N
     callback_response = f"cb-e2e-response-{uuid4()}"
     callback_completed = f"cb-e2e-completed-{uuid4()}"
     code = "0000000-00.0000.0.00.0201"
+    generation_attempts: list[list[str] | None] = []
 
     async def fake_generate(client, context, validation_errors=None):
         assert context["code"] == code
         assert len(context["steps"]) == 3
-        assert validation_errors is None
+        generation_attempts.append(validation_errors)
+
+        if validation_errors is None:
+            return f"Processo {code}. Provavelmente será condenado."
+
+        assert any("prognostic" in error for error in validation_errors)
         return f"""# Resumo do processo
 
 <ProcessHeader className=\"process-header\">
@@ -145,6 +151,9 @@ O último movimento fornecido é uma sentença.
         assert await worker.process_one() is True  # finalize_judit_request
         assert await worker.process_one() is True  # generate_process_summary
         assert await worker.process_one() is False
+        assert len(generation_attempts) == 2
+        assert generation_attempts[0] is None
+        assert generation_attempts[1]
 
         async with pool.acquire() as conn:
             process = await conn.fetchrow(
