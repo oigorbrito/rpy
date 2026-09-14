@@ -33,7 +33,7 @@ async def finalize_judit_request_task(payload: dict[str, Any]) -> dict[str, Any]
                 return {"request_id": request_id, "status": "missing_response_data"}
 
             fields = extract_promotable_fields(staged_event.response_data)
-            await finalize_version(
+            promoted = await finalize_version(
                 conn,
                 process_id=staged["process_id"],
                 version_id=staged["version_id"],
@@ -41,7 +41,7 @@ async def finalize_judit_request_task(payload: dict[str, Any]) -> dict[str, Any]
             )
 
             summary_enqueued = False
-            if not bool(staged["source_cached_response"]):
+            if promoted and not bool(staged["source_cached_response"]):
                 job = await enqueue(
                     conn,
                     task_name="generate_process_summary",
@@ -56,7 +56,8 @@ async def finalize_judit_request_task(payload: dict[str, Any]) -> dict[str, Any]
 
         return {
             "request_id": request_id,
-            "status": "finalized",
+            "status": "finalized" if promoted else "finalized_stale",
+            "promoted": promoted,
             "cached_response": bool(staged["source_cached_response"]),
             "summary_enqueued": summary_enqueued,
         }
