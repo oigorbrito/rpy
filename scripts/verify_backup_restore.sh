@@ -14,7 +14,8 @@ rm -rf "$workdir"
 mkdir -p "$workdir"
 
 run_client() {
-  docker run --rm --network host "$PG_CLIENT_IMAGE" "$@"
+  # Keep stdin attached so here-doc SQL is actually delivered to psql.
+  docker run --rm --interactive --network host "$PG_CLIENT_IMAGE" "$@"
 }
 
 cleanup() {
