@@ -15,8 +15,13 @@ from app.providers import (
 )
 
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+# Schema contract: sql/002_process_data.sql defines process_steps.embedding as
+# vector(1536). Changing this value requires a database migration and index rebuild;
+# it is intentionally not configurable through the environment.
 VECTOR_DIMENSIONS = 1536
 EMBEDDING_BATCH_SIZE = 64
+_DIMENSION_CONFIGURABLE_MODELS = {"text-embedding-3-small", "text-embedding-3-large"}
+_FIXED_1536_MODELS = {"text-embedding-ada-002"}
 
 
 def _client():
@@ -26,15 +31,27 @@ def _client():
     return openai_client(api_key)
 
 
+def validate_embedding_model(model: str | None = None) -> str:
+    configured = str(model or EMBEDDING_MODEL).strip()
+    if not configured:
+        raise RuntimeError("EMBEDDING_MODEL must not be empty")
+    if configured in _DIMENSION_CONFIGURABLE_MODELS or configured in _FIXED_1536_MODELS:
+        return configured
+    raise RuntimeError(
+        "unsupported EMBEDDING_MODEL for vector(1536) schema: "
+        f"{configured}; update the embedding/schema contract deliberately before using it"
+    )
+
+
 def _request_kwargs(texts: Sequence[str]) -> dict[str, Any]:
+    model = validate_embedding_model()
     request: dict[str, Any] = {
-        "model": EMBEDDING_MODEL,
+        "model": model,
         "input": list(texts),
     }
-    # OpenAI text-embedding-3 models allow dimensionality reduction. Keep this
-    # aligned with the PostgreSQL vector(1536) schema even if the configured
-    # text-embedding-3 model changes.
-    if EMBEDDING_MODEL.startswith("text-embedding-3"):
+    # OpenAI text-embedding-3 models support explicit dimensionality. Pin them to
+    # PostgreSQL vector(1536) even when the larger model is selected.
+    if model in _DIMENSION_CONFIGURABLE_MODELS:
         request["dimensions"] = VECTOR_DIMENSIONS
     return request
 
@@ -64,6 +81,9 @@ async def embed_texts(texts: Sequence[str]) -> list[list[float]]:
     if any(not str(text).strip() for text in texts):
         raise ValueError("embedding inputs must be non-empty text")
 
+    # Validate before API-key lookup and before any provider/network work so bad
+    # deployment configuration fails deterministically and cheaply.
+    validate_embedding_model()
     client = _client()
     settings = embedding_settings()
 
