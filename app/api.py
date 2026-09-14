@@ -17,6 +17,10 @@ from app.judit import parse_event
 from app.observability import collect_operational_metrics
 from app.processes import get_authorized_process, log_access, stage_version
 from app.queue import enqueue
+from app.webhook_security import (
+    JuditWebhookSecretRedactionMiddleware,
+    webhook_token_from_scope,
+)
 
 
 @asynccontextmanager
@@ -37,6 +41,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Rpy", lifespan=lifespan)
 app.add_middleware(JuditWebhookBodyLimitMiddleware)
+# Added after the body-limit middleware so it is the outermost application
+# middleware and the secret is removed from the shared ASGI scope immediately.
+app.add_middleware(JuditWebhookSecretRedactionMiddleware)
 
 
 def _valid_webhook_token(token: str) -> bool:
@@ -145,7 +152,8 @@ async def _record_delivery(conn: asyncpg.Connection, event) -> bool:
 
 @app.post("/webhooks/judit/{token}")
 async def judit_webhook(token: str, request: Request) -> dict[str, bool]:
-    if not _valid_webhook_token(token):
+    supplied_token = webhook_token_from_scope(request.scope, token)
+    if not _valid_webhook_token(supplied_token):
         raise HTTPException(status_code=404, detail="not found")
 
     try:
