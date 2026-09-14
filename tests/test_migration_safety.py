@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 
-import scripts.check_migration_safety as guard
+MODULE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "check_migration_safety.py"
+spec = importlib.util.spec_from_file_location("check_migration_safety", MODULE_PATH)
+assert spec is not None and spec.loader is not None
+guard = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(guard)
 
 
 def test_additive_sql_is_allowed(tmp_path: Path, monkeypatch) -> None:
