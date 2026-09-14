@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 import signal
@@ -47,6 +48,22 @@ class WorkerSettings:
         )
 
 
+def _decode_payload(value: Any) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str):
+        decoded = json.loads(value)
+        if not isinstance(decoded, dict):
+            raise ValueError("job payload must decode to an object")
+        return decoded
+    try:
+        return dict(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("job payload must be a JSON object") from exc
+
+
 class Worker:
     def __init__(self, pool: asyncpg.Pool, settings: WorkerSettings, worker_id: UUID | None = None):
         self.pool = pool
@@ -65,7 +82,7 @@ class Worker:
     async def _run_job(self, row: asyncpg.Record) -> None:
         job_id = row["id"]
         handler = resolve_task(str(row["task_name"]))
-        payload: dict[str, Any] = dict(row["payload"] or {})
+        payload = _decode_payload(row["payload"])
         heartbeat_task = asyncio.create_task(self._heartbeat_loop(job_id))
         try:
             result = await asyncio.wait_for(
@@ -132,29 +149,29 @@ class Worker:
         try:
             await self.stop_event.wait()
         finally:
-            self.stop_event.set()
-            for task in tasks:
-                task.cancel()
+            for item in tasks:
+                item.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
 
-
-def _install_signal_handlers(worker: Worker) -> None:
-    loop = asyncio.get_running_loop()
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        with suppress(NotImplementedError):
-            loop.add_signal_handler(sig, worker.stop_event.set)
+    def stop(self) -> None:
+        self.stop_event.set()
 
 
 async def _main() -> None:
     parser = argparse.ArgumentParser(description="Rpy PostgreSQL worker")
-    parser.add_argument("--log-level", default=os.getenv("LOG_LEVEL", "INFO"))
+    parser.add_argument("--concurrency", type=int)
     args = parser.parse_args()
-    logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO))
 
     settings = WorkerSettings.from_env()
-    pool = await create_pool(settings.database_url, max_size=max(4, settings.concurrency + 2))
+    if args.concurrency is not None:
+        settings.concurrency = args.concurrency
+
+    pool = await create_pool(settings.database_url, min_size=1, max_size=max(4, settings.concurrency + 2))
     worker = Worker(pool, settings)
-    _install_signal_handlers(worker)
+    loop = asyncio.get_running_loop()
+    for signal_name in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(signal_name, worker.stop)
+
     try:
         await worker.run()
     finally:
