@@ -17,6 +17,7 @@ EXPECTED_SERVICES = {
 }
 APPLICATION_SERVICES = ("migrate", "api", "worker-1", "worker-2", "scheduler")
 IMMUTABLE_IMAGE_RE = re.compile(r"^.+@sha256:[0-9a-fA-F]{64}$")
+DURATION_RE = re.compile(r"^(?P<value>[0-9]+(?:\.[0-9]+)?)(?P<unit>ms|s|m|h)$")
 API_REQUIRED_ENV = {
     "DATABASE_URL",
     "JUDIT_WEBHOOK_TOKEN",
@@ -45,6 +46,7 @@ WORKER_REQUIRED_ENV = {
     "PROVIDER_STEP_TEXT_MAX_CHARS",
     "PROVIDER_STEPS_TEXT_MAX_CHARS",
     "WORKER_TASK_TIMEOUT_SECONDS",
+    "WORKER_SHUTDOWN_GRACE_SECONDS",
 }
 SCHEDULER_REQUIRED_ENV = {
     "DATABASE_URL",
@@ -163,6 +165,50 @@ def _validate_database_isolation(services: dict[str, Any]) -> None:
             _fail(f"migrate {env_name} must use role {expected_user!r}")
 
 
+def _duration_seconds(value: Any) -> float:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        seconds = float(value)
+        if seconds <= 0:
+            _fail("duration must be greater than zero")
+        return seconds
+
+    rendered = str(value or "").strip()
+    match = DURATION_RE.fullmatch(rendered)
+    if match is None:
+        _fail(f"unsupported duration value: {rendered!r}")
+    amount = float(match.group("value"))
+    unit = match.group("unit")
+    multiplier = {"ms": 0.001, "s": 1.0, "m": 60.0, "h": 3600.0}[unit]
+    seconds = amount * multiplier
+    if seconds <= 0:
+        _fail("duration must be greater than zero")
+    return seconds
+
+
+def _validate_worker_shutdown(services: dict[str, Any]) -> None:
+    rendered_pairs: list[tuple[float, float]] = []
+    for service_name in ("worker-1", "worker-2"):
+        environment = _environment(services, service_name)
+        try:
+            app_grace = float(environment["WORKER_SHUTDOWN_GRACE_SECONDS"])
+        except (KeyError, TypeError, ValueError):
+            _fail(f"{service_name} WORKER_SHUTDOWN_GRACE_SECONDS must be numeric")
+        if app_grace <= 0:
+            _fail(f"{service_name} WORKER_SHUTDOWN_GRACE_SECONDS must be positive")
+        container_grace = _duration_seconds(
+            services[service_name].get("stop_grace_period")
+        )
+        if container_grace <= app_grace:
+            _fail(
+                f"{service_name} stop_grace_period must exceed "
+                "WORKER_SHUTDOWN_GRACE_SECONDS"
+            )
+        rendered_pairs.append((app_grace, container_grace))
+
+    if len(set(rendered_pairs)) != 1:
+        _fail("both workers must use the same shutdown grace contract")
+
+
 def validate(config: dict[str, Any]) -> None:
     services = config.get("services")
     if not isinstance(services, dict):
@@ -222,6 +268,7 @@ def validate(config: dict[str, Any]) -> None:
     for service_name in ("worker-1", "worker-2"):
         _require_env(services, service_name, WORKER_REQUIRED_ENV)
     _require_env(services, "scheduler", SCHEDULER_REQUIRED_ENV)
+    _validate_worker_shutdown(services)
 
     _forbid_env(services, "api", PROVIDER_SECRETS | MIGRATE_REQUIRED_ENV)
     for service_name in ("worker-1", "worker-2"):
