@@ -99,7 +99,7 @@ jobs:
         run: |
           IMAGE_REF="ghcr.io/${GITHUB_REPOSITORY}@${IMAGE_DIGEST}"
           docker pull "$IMAGE_REF"
-          docker run --rm "$IMAGE_REF" python -c "import app.api, app.worker, app.scheduler"
+          sh scripts/verify_image_runtime.sh "$IMAGE_REF"
 
       - name: Record immutable deployment reference
         env:
