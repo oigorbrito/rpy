@@ -1,0 +1,79 @@
+#!/bin/sh
+set -eu
+
+: "${TEST_DATABASE_URL:?TEST_DATABASE_URL is required}"
+: "${TEST_ADMIN_DATABASE_URL:?TEST_ADMIN_DATABASE_URL is required}"
+: "${TEST_RESTORE_DATABASE_URL:?TEST_RESTORE_DATABASE_URL is required}"
+
+PG_CLIENT_IMAGE=${PG_CLIENT_IMAGE:-pgvector/pgvector:pg16}
+workdir=.tmp/backup-restore
+backup="$workdir/rpy.dump"
+restore_db=rpy_restore_test
+
+rm -rf "$workdir"
+mkdir -p "$workdir"
+
+run_client() {
+  docker run --rm --network host "$PG_CLIENT_IMAGE" "$@"
+}
+
+cleanup() {
+  run_client psql "$TEST_ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 \
+    -c "DROP DATABASE IF EXISTS $restore_db WITH (FORCE);" >/dev/null 2>&1 || true
+  rm -rf "$workdir"
+}
+trap cleanup EXIT INT TERM
+
+python scripts/migrate.py --database-url "$TEST_DATABASE_URL"
+
+run_client psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+DROP TABLE IF EXISTS backup_restore_probe;
+CREATE TABLE backup_restore_probe (
+  id integer PRIMARY KEY,
+  value text NOT NULL
+);
+INSERT INTO backup_restore_probe (id, value) VALUES (1, 'rpy-backup-restore-ok');
+SQL
+
+source_migrations=$(run_client psql "$TEST_DATABASE_URL" -Atc "SELECT count(*) FROM schema_migrations;")
+
+# Run the same operational scripts using PostgreSQL 16 client binaries from the
+# pgvector image, avoiding assumptions about pg_dump availability on the runner.
+docker run --rm --network host \
+  -e DATABASE_URL="$TEST_DATABASE_URL" \
+  -v "$PWD:/work" -w /work \
+  "$PG_CLIENT_IMAGE" \
+  sh scripts/backup_database.sh "$backup"
+
+run_client psql "$TEST_ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 \
+  -c "DROP DATABASE IF EXISTS $restore_db WITH (FORCE);" \
+  -c "CREATE DATABASE $restore_db;"
+
+docker run --rm --network host \
+  -e DATABASE_URL="$TEST_RESTORE_DATABASE_URL" \
+  -e ALLOW_DESTRUCTIVE_RESTORE=YES \
+  -v "$PWD:/work" -w /work \
+  "$PG_CLIENT_IMAGE" \
+  sh scripts/restore_database.sh "$backup"
+
+restored_probe=$(run_client psql "$TEST_RESTORE_DATABASE_URL" -Atc \
+  "SELECT value FROM backup_restore_probe WHERE id = 1;")
+restored_migrations=$(run_client psql "$TEST_RESTORE_DATABASE_URL" -Atc \
+  "SELECT count(*) FROM schema_migrations;")
+restored_vector=$(run_client psql "$TEST_RESTORE_DATABASE_URL" -Atc \
+  "SELECT count(*) FROM pg_extension WHERE extname = 'vector';")
+
+[ "$restored_probe" = "rpy-backup-restore-ok" ] || {
+  echo "restore drill failed: sentinel row mismatch" >&2
+  exit 1
+}
+[ "$restored_migrations" = "$source_migrations" ] || {
+  echo "restore drill failed: schema_migrations count mismatch" >&2
+  exit 1
+}
+[ "$restored_vector" = "1" ] || {
+  echo "restore drill failed: pgvector extension missing" >&2
+  exit 1
+}
+
+echo "backup/restore drill: ok"
