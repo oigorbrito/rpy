@@ -53,10 +53,13 @@ RETURNING id;
 FAIL_SQL = """
 UPDATE jobs
 SET status = CASE
-        WHEN attempts >= max_attempts THEN 'dead'::job_status
+        WHEN $5::boolean OR attempts >= max_attempts THEN 'dead'::job_status
         ELSE 'pending'::job_status
     END,
-    run_at = CASE WHEN attempts >= max_attempts THEN run_at ELSE $3 END,
+    run_at = CASE
+        WHEN $5::boolean OR attempts >= max_attempts THEN run_at
+        ELSE $3
+    END,
     worker_id = NULL,
     last_heartbeat = NULL,
     error_log = COALESCE(error_log, '') || $4,
@@ -138,6 +141,7 @@ async def fail(
     *,
     attempts: int,
     error: str,
+    permanent: bool = False,
 ) -> str | None:
     backoff_seconds = min(300, 2 ** max(1, attempts))
     retry_at = datetime.now(UTC) + timedelta(seconds=backoff_seconds)
@@ -147,6 +151,7 @@ async def fail(
         worker_id,
         retry_at,
         f"\n[{datetime.now(UTC).isoformat()}] {error}",
+        permanent,
     )
     return str(row["status"]) if row else None
 
