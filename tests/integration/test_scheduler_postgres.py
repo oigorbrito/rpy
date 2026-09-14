@@ -50,6 +50,7 @@ async def test_expunge_removes_process_vectors_and_judit_raw_but_preserves_audit
         code = "0000000-00.0000.0.00.0099"
         request_id = "request-expunge"
         old_time = datetime.now(UTC) - timedelta(days=500)
+        zero_vector = "[" + ",".join("0" for _ in range(1536)) + "]"
 
         await conn.execute(
             "INSERT INTO tenants (id, name) VALUES ($1, $2) ON CONFLICT DO NOTHING",
@@ -93,7 +94,7 @@ async def test_expunge_removes_process_vectors_and_judit_raw_but_preserves_audit
             """,
             version_id,
             process_id,
-            [0.0] * 1536,
+            zero_vector,
         )
         await conn.execute(
             """
