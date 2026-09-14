@@ -139,6 +139,26 @@ def rag_invariant_violations() -> list[str]:
     return errors
 
 
+def embedding_invariant_violations() -> list[str]:
+    embeddings = ROOT / "app" / "embeddings.py"
+    schema = ROOT / "sql" / "002_process_data.sql"
+    errors: list[str] = []
+    if not embeddings.exists():
+        return ["missing app/embeddings.py"]
+    if not schema.exists():
+        return ["missing sql/002_process_data.sql"]
+
+    embedding_text = embeddings.read_text(encoding="utf-8", errors="ignore")
+    schema_text = schema.read_text(encoding="utf-8", errors="ignore").lower()
+    if "VECTOR_DIMENSIONS = 1536" not in embedding_text:
+        errors.append("embedding provider must stay aligned to vector(1536)")
+    if "embedding vector(1536)" not in schema_text:
+        errors.append("process_steps embedding column must remain vector(1536)")
+    if 'request["dimensions"] = VECTOR_DIMENSIONS' not in embedding_text:
+        errors.append("text-embedding-3 requests must pin output dimensions")
+    return errors
+
+
 def webhook_invariant_violations() -> list[str]:
     api = ROOT / "app" / "api.py"
     judit = ROOT / "app" / "judit.py"
@@ -203,6 +223,8 @@ def main() -> int:
         violations.append(("app/queue.py", msg))
     for msg in rag_invariant_violations():
         violations.append(("app/rag.py", msg))
+    for msg in embedding_invariant_violations():
+        violations.append(("app/embeddings.py", msg))
     for msg in webhook_invariant_violations():
         violations.append(("app/api.py", msg))
 
