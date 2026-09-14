@@ -4,6 +4,7 @@ from uuid import uuid4
 import pytest
 
 import app.worker as worker_module
+from app.tasks import PermanentTaskError
 from app.worker import Worker, WorkerSettings, _decode_payload
 
 
@@ -40,14 +41,14 @@ class _Pool:
 
 
 @pytest.mark.asyncio
-async def test_worker_task_timeout_fails_hung_job(monkeypatch) -> None:
-    failed: list[str] = []
+async def test_worker_task_timeout_remains_retryable(monkeypatch) -> None:
+    failed: list[tuple[str, bool]] = []
 
     async def hung_handler(payload):
         await asyncio.sleep(60)
 
-    async def fake_fail(conn, job_id, worker_id, *, attempts, error):
-        failed.append(error)
+    async def fake_fail(conn, job_id, worker_id, *, attempts, error, permanent=False):
+        failed.append((error, permanent))
         return True
 
     monkeypatch.setattr(worker_module, "resolve_task", lambda name: hung_handler)
@@ -72,4 +73,40 @@ async def test_worker_task_timeout_fails_hung_job(monkeypatch) -> None:
     await worker._run_job(row)
 
     assert len(failed) == 1
-    assert failed[0].startswith("TimeoutError:")
+    assert failed[0][0].startswith("TimeoutError:")
+    assert failed[0][1] is False
+
+
+@pytest.mark.asyncio
+async def test_worker_marks_explicit_permanent_task_error(monkeypatch) -> None:
+    failed: list[tuple[str, bool]] = []
+
+    async def permanent_handler(payload):
+        raise PermanentTaskError("deterministic contract failure")
+
+    async def fake_fail(conn, job_id, worker_id, *, attempts, error, permanent=False):
+        failed.append((error, permanent))
+        return True
+
+    monkeypatch.setattr(worker_module, "resolve_task", lambda name: permanent_handler)
+    monkeypatch.setattr(worker_module, "fail", fake_fail)
+
+    settings = WorkerSettings(
+        database_url="postgresql://unused/rpy",
+        concurrency=1,
+        heartbeat_interval_seconds=1,
+        stale_after_seconds=2,
+        task_timeout_seconds=1,
+        reclaim_interval_seconds=1,
+    )
+    worker = Worker(_Pool(), settings, worker_id=uuid4())
+    row = {
+        "id": uuid4(),
+        "task_name": "permanent",
+        "payload": {},
+        "attempts": 1,
+    }
+
+    await worker._run_job(row)
+
+    assert failed == [("PermanentTaskError: deterministic contract failure", True)]
