@@ -16,7 +16,9 @@ from app.http_auth_config import validate_http_auth_config
 from app.http_limits import JuditWebhookBodyLimitMiddleware, judit_webhook_max_body_bytes
 from app.json_utils import decode_json_object
 from app.judit import normalize_cnj, parse_event
+from app.judit_client import JuditRequestError
 from app.observability import collect_operational_metrics, operational_thresholds
+from app.process_requests import grant_request_tenants, request_process
 from app.processes import get_authorized_process, log_access, stage_version
 from app.queue import enqueue
 from app.webhook_security import JuditWebhookSecretRedactionMiddleware, webhook_token_from_scope
@@ -64,6 +66,17 @@ async def ready(request:Request)->dict[str,bool]:
 async def operational_metrics(request:Request)->dict:
     if not _valid_ops_request(request):raise HTTPException(status_code=404,detail="not found")
     async with request.app.state.pool.acquire() as conn:return await collect_operational_metrics(conn)
+@app.post("/processes/{code}/request",status_code=202)
+async def create_process_request(code:str,request:Request)->dict:
+    tenant_id=tenant_from_request(request)
+    try:canonical_code=normalize_cnj(code)
+    except ValueError:raise HTTPException(status_code=400,detail="invalid process code") from None
+    try:result=await request_process(request.app.state.pool,tenant_id=tenant_id,code=canonical_code)
+    except JuditRequestError:raise HTTPException(status_code=503,detail="process provider unavailable") from None
+    async with request.app.state.pool.acquire() as conn:
+        process=await get_authorized_process(conn,tenant_id=tenant_id,code=canonical_code)
+        await log_access(conn,tenant_id=tenant_id,process_id=process["id"] if process else None,process_code=canonical_code,action="request_process",metadata={"created":result.created})
+    return {"code":canonical_code,"status":"available" if process else "processing","created":result.created}
 @app.get("/processes/{code}")
 async def get_process_summary(code:str,request:Request)->dict:
     tenant_id=tenant_from_request(request)
@@ -88,7 +101,9 @@ async def get_process_summary(code:str,request:Request)->dict:
 async def _record_delivery(conn,event)->bool:
     if not event.callback_id:return True
     inserted=await conn.fetchval("INSERT INTO judit_deliveries (callback_id, request_id, event_type, raw_payload) VALUES ($1,$2,$3,$4::jsonb) ON CONFLICT (callback_id) DO NOTHING RETURNING callback_id",event.callback_id,event.request_id,event.event_type,json.dumps(event.raw)); return inserted is not None
-async def _record_request_completion(conn,request_id:str)->None:await conn.execute("INSERT INTO judit_request_completions (request_id) VALUES ($1) ON CONFLICT (request_id) DO NOTHING",request_id)
+async def _record_request_completion(conn,request_id:str)->None:
+    await conn.execute("INSERT INTO judit_request_completions (request_id) VALUES ($1) ON CONFLICT (request_id) DO NOTHING",request_id)
+    await conn.execute("UPDATE tenant_judit_requests SET completed_at=COALESCE(completed_at,NOW()) WHERE judit_request_id=$1",request_id)
 async def _request_was_completed(conn,request_id:str)->bool:return bool(await conn.fetchval("SELECT EXISTS(SELECT 1 FROM judit_request_completions WHERE request_id=$1)",request_id))
 async def _enqueue_finalize(conn,*,request_id:str,idempotency_key:str)->None:await enqueue(conn,task_name="finalize_judit_request",payload={"request_id":request_id},idempotency_key=idempotency_key)
 @app.post("/webhooks/judit/{token}")
@@ -103,7 +118,8 @@ async def judit_webhook(token:str,request:Request)->dict[str,bool]:
             if not await _record_delivery(conn,event):return {"ok":True}
             if event.is_lawsuit_response:
                 source_id=event.response_id or event.callback_id
-                await stage_version(conn,code=str(event.code),source_request_id=source_id,cached_response=event.cached_response,payload=event.raw,judit_request_id=event.request_id,judit_response_id=event.response_id,judit_callback_id=event.callback_id)
+                process_id,_=await stage_version(conn,code=str(event.code),source_request_id=source_id,cached_response=event.cached_response,payload=event.raw,judit_request_id=event.request_id,judit_response_id=event.response_id,judit_callback_id=event.callback_id)
+                if event.request_id:await grant_request_tenants(conn,request_id=str(event.request_id),process_id=process_id)
                 if await _request_was_completed(conn,str(event.request_id)):await _enqueue_finalize(conn,request_id=str(event.request_id),idempotency_key=f"judit-finalize-repair:{event.request_id}:{source_id}")
             elif event.request_completed and event.request_id:
                 await _record_request_completion(conn,event.request_id); await _enqueue_finalize(conn,request_id=event.request_id,idempotency_key=f"judit-finalize:{event.request_id}")
