@@ -42,7 +42,11 @@ jobs:
         env:
           RPY_IMAGE: ghcr.io/oigorbrito/rpy@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
           POSTGRES_PASSWORD: ci-production-password
-          DATABASE_URL: postgresql://rpy:ci-production-password@postgres:5432/rpy
+          MIGRATION_DATABASE_URL: postgresql://rpy:ci-production-password@postgres:5432/rpy
+          API_DATABASE_URL: postgresql://rpy_api:ci-api-password@postgres:5432/rpy
+          WORKER_DATABASE_URL: postgresql://rpy_worker:ci-worker-password@postgres:5432/rpy
+          SCHEDULER_DATABASE_URL: postgresql://rpy_scheduler:ci-scheduler-password@postgres:5432/rpy
+          BACKUP_DATABASE_URL: postgresql://rpy_backup:ci-backup-password@postgres:5432/rpy
           ANTHROPIC_API_KEY: ci-anthropic-key
           OPENAI_API_KEY: ci-openai-key
           JUDIT_WEBHOOK_TOKEN: ci-judit-token
