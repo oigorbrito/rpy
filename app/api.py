@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException, Request
 
 from app.auth import tenant_from_request
 from app.db import create_pool
+from app.json_utils import decode_json_object
 from app.judit import parse_event
 from app.processes import get_authorized_process, log_access, stage_version
 from app.queue import enqueue
@@ -64,11 +65,18 @@ async def get_process_summary(code: str, request: Request) -> dict:
             process["id"],
             process["current_version_id"],
         )
+
+    summary_data = dict(summary) if summary else None
+    if summary_data is not None:
+        summary_data["validation"] = decode_json_object(
+            summary_data.get("validation"), label="summary validation"
+        )
+
     return {
         "code": process["code"],
         "class_name": process["class_name"],
         "court": process["court"],
-        "summary": dict(summary) if summary else None,
+        "summary": summary_data,
     }
 
 
