@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import logging
 import os
 import signal
@@ -16,6 +15,7 @@ import asyncpg
 import app.judit_tasks  # noqa: F401 - imports task registrations
 import app.rag  # noqa: F401 - imports task registrations
 from app.db import create_pool
+from app.json_utils import decode_json_object
 from app.queue import claim, complete, fail, heartbeat, reclaim_stale
 from app.tasks import resolve_task
 
@@ -49,19 +49,7 @@ class WorkerSettings:
 
 
 def _decode_payload(value: Any) -> dict[str, Any]:
-    if value is None:
-        return {}
-    if isinstance(value, dict):
-        return dict(value)
-    if isinstance(value, str):
-        decoded = json.loads(value)
-        if not isinstance(decoded, dict):
-            raise ValueError("job payload must decode to an object")
-        return decoded
-    try:
-        return dict(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("job payload must be a JSON object") from exc
+    return decode_json_object(value, label="job payload")
 
 
 class Worker:
@@ -166,7 +154,11 @@ async def _main() -> None:
     if args.concurrency is not None:
         settings.concurrency = args.concurrency
 
-    pool = await create_pool(settings.database_url, min_size=1, max_size=max(4, settings.concurrency + 2))
+    pool = await create_pool(
+        settings.database_url,
+        min_size=1,
+        max_size=max(4, settings.concurrency + 2),
+    )
     worker = Worker(pool, settings)
     loop = asyncio.get_running_loop()
     for signal_name in (signal.SIGINT, signal.SIGTERM):
