@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 
@@ -32,7 +33,6 @@ def parse_event(body: dict[str, Any]) -> JuditEvent:
     event_type = str(body.get("event_type") or "").strip().lower()
     payload = body.get("payload") if isinstance(body.get("payload"), dict) else {}
 
-    # Current Judit envelope. Keep a small legacy fallback for previously captured payloads.
     request_id = (
         body.get("reference_id")
         or payload.get("request_id")
@@ -48,7 +48,11 @@ def parse_event(body: dict[str, Any]) -> JuditEvent:
 
     if not event_type:
         status = str(body.get("status") or "").lower()
-        event_type = "request_completed" if status in {"completed", "request_completed"} else "response_created"
+        event_type = (
+            "request_completed"
+            if status in {"completed", "request_completed"}
+            else "response_created"
+        )
         if response_data is None:
             response_data = body
         response_type = response_type or "lawsuit"
@@ -110,27 +114,43 @@ def _safe_subjects(process: dict[str, Any]) -> list[dict[str, Any]]:
     return safe
 
 
+def _parse_datetime(value: Any) -> datetime | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().replace("Z", "+00:00")
+        try:
+            return datetime.fromisoformat(normalized)
+        except ValueError:
+            return None
+    return None
+
+
 def extract_promotable_fields(process: dict[str, Any]) -> dict[str, Any]:
     steps = process.get("steps") or process.get("movements") or process.get("events") or []
     normalized_steps: list[dict[str, Any]] = []
     for index, step in enumerate(steps, start=1):
         if not isinstance(step, dict):
             continue
+        step_date = (
+            step.get("step_date")
+            or step.get("occurred_at")
+            or step.get("date")
+            or step.get("datetime")
+        )
         normalized_steps.append(
             {
                 "step_number": index,
-                "occurred_at": (
-                    step.get("step_date")
-                    or step.get("occurred_at")
-                    or step.get("date")
-                    or step.get("datetime")
-                ),
+                "occurred_at": _parse_datetime(step_date),
                 "title": step.get("step_type") or step.get("title") or step.get("type"),
                 "text": step.get("content") or step.get("text") or step.get("description") or "",
                 "metadata": {
                     "step_id": step.get("step_id"),
                     "private": step.get("private"),
                     "tags": step.get("tags") or {},
+                    "source_step_date": step_date,
                 },
             }
         )
