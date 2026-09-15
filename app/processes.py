@@ -162,7 +162,8 @@ async def finalize_version(
 
     The process row is locked so concurrent Judit requests for the same CNJ cannot
     let an older response overwrite a newer current version. Historical versions
-    are still finalized and retain their own steps for auditability.
+    are still finalized and retain their own steps for auditability. Reprocessing
+    an already-finalized version is a no-op and reports whether it is still current.
     """
     async with conn.transaction():
         process = await conn.fetchrow(
@@ -179,7 +180,7 @@ async def finalize_version(
 
         candidate = await conn.fetchrow(
             """
-            SELECT created_at
+            SELECT created_at, finalized
             FROM process_versions
             WHERE id = $1 AND process_id = $2
             FOR UPDATE
@@ -190,8 +191,11 @@ async def finalize_version(
         if candidate is None:
             raise LookupError("process version does not exist")
 
-        current_created_at = None
         current_version_id = process["current_version_id"]
+        if bool(candidate["finalized"]):
+            return current_version_id == version_id
+
+        current_created_at = None
         if current_version_id is not None:
             current_created_at = await conn.fetchval(
                 "SELECT created_at FROM process_versions WHERE id = $1",
