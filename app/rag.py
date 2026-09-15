@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from time import perf_counter
 from typing import Any
 from uuid import UUID
 
@@ -171,6 +172,7 @@ async def generate_summary(
     process_id: UUID,
     version_id: UUID,
 ) -> dict[str, Any]:
+    started = perf_counter()
     context = await _load_context(pool, process_id, version_id)
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")
@@ -192,28 +194,31 @@ async def generate_summary(
             parties=context.get("parties", []),
         )
 
+    generation_ms = max(0, round((perf_counter() - started) * 1000))
     validation = {"passed": result.passed, "errors": result.errors}
     async with pool.acquire() as conn:
         await conn.execute(
             """
             INSERT INTO process_summaries (
-                process_id, version_id, markdown, validation, model, prompt_version
-            ) VALUES ($1, $2, $3, $4::jsonb, $5, $6)
+                process_id, version_id, markdown, validation, model, prompt_version, generation_ms
+            ) VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)
             ON CONFLICT (process_id, version_id)
             DO UPDATE SET markdown = EXCLUDED.markdown,
                           validation = EXCLUDED.validation,
                           model = EXCLUDED.model,
                           prompt_version = EXCLUDED.prompt_version,
+                          generation_ms = EXCLUDED.generation_ms,
                           created_at = NOW()
             """,
             process_id,
             version_id,
             text,
-            json.dumps(validation),
+            validation,
             MODEL,
             PROMPT_VERSION,
+            generation_ms,
         )
-    return {"validation": validation, "model": MODEL}
+    return {"validation": validation, "model": MODEL, "generation_ms": generation_ms}
 
 
 @task("generate_process_summary")

@@ -13,6 +13,7 @@ from app.auth import tenant_from_request
 from app.db import create_pool
 from app.json_utils import decode_json_object
 from app.judit import parse_event
+from app.observability import collect_operational_metrics
 from app.processes import get_authorized_process, log_access, stage_version
 from app.queue import enqueue
 
@@ -37,6 +38,15 @@ def _valid_webhook_token(token: str) -> bool:
     return bool(expected) and hmac.compare_digest(token, expected)
 
 
+def _valid_ops_request(request: Request) -> bool:
+    expected = os.environ.get("RPY_OPS_TOKEN", "")
+    authorization = request.headers.get("authorization", "")
+    if not expected or not authorization.startswith("Bearer "):
+        return False
+    supplied = authorization.removeprefix("Bearer ").strip()
+    return bool(supplied) and hmac.compare_digest(supplied, expected)
+
+
 @app.get("/health")
 async def health() -> dict[str, bool]:
     """Process liveness probe; deliberately does not depend on PostgreSQL."""
@@ -59,6 +69,16 @@ async def ready(request: Request) -> dict[str, bool]:
     return {"ok": True}
 
 
+@app.get("/ops/metrics")
+async def operational_metrics(request: Request) -> dict:
+    # Hide the existence of the operational surface when the token is absent/invalid.
+    if not _valid_ops_request(request):
+        raise HTTPException(status_code=404, detail="not found")
+    pool: asyncpg.Pool = request.app.state.pool
+    async with pool.acquire() as conn:
+        return await collect_operational_metrics(conn)
+
+
 @app.get("/processes/{code}")
 async def get_process_summary(code: str, request: Request) -> dict:
     tenant_id = tenant_from_request(request)
@@ -76,7 +96,7 @@ async def get_process_summary(code: str, request: Request) -> dict:
         )
         summary = await conn.fetchrow(
             """
-            SELECT markdown, validation, model, prompt_version, created_at
+            SELECT markdown, validation, model, prompt_version, generation_ms, created_at
             FROM process_summaries
             WHERE process_id = $1 AND version_id = $2
             """,
