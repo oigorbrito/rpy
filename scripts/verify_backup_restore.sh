@@ -5,7 +5,7 @@ set -eu
 : "${TEST_ADMIN_DATABASE_URL:?TEST_ADMIN_DATABASE_URL is required}"
 : "${TEST_RESTORE_DATABASE_URL:?TEST_RESTORE_DATABASE_URL is required}"
 
-PG_CLIENT_IMAGE=${PG_CLIENT_IMAGE:-pgvector/pgvector:pg16}
+PG_CLIENT_IMAGE=${PG_CLIENT_IMAGE:-pgvector/pgvector:pg16@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b}
 workdir=.tmp/backup-restore
 backup="$workdir/rpy.dump"
 restore_db=rpy_restore_test
@@ -45,16 +45,12 @@ source_probe=$(run_client psql "$TEST_DATABASE_URL" -Atc \
 source_migrations=$(run_client psql "$TEST_DATABASE_URL" -Atc \
   "SELECT count(*) FROM schema_migrations;")
 
-# Run the same operational scripts using PostgreSQL 16 client binaries from the
-# pgvector image, avoiding assumptions about pg_dump availability on the runner.
 docker run --rm --network host \
   -e DATABASE_URL="$TEST_DATABASE_URL" \
   -v "$PWD:/work" -w /work \
   "$PG_CLIENT_IMAGE" \
   sh scripts/backup_database.sh "$backup"
 
-# The archive must contain both the sentinel table definition and its data before
-# any restore is attempted. This localizes failures to dump vs. restore behavior.
 docker run --rm \
   -v "$PWD:/work" -w /work \
   "$PG_CLIENT_IMAGE" \

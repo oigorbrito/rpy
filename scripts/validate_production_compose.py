@@ -103,6 +103,10 @@ def validate(config: dict[str, Any]) -> None:
 
     _validate_application_image(services)
 
+    postgres_image = str(services["postgres"].get("image") or "")
+    if not IMMUTABLE_IMAGE_RE.fullmatch(postgres_image):
+        _fail("postgres image must be pinned by sha256 digest")
+
     if "ports" in services["postgres"]:
         _fail("postgres must not publish host ports")
 
