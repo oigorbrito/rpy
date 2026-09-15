@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
+
+_CNJ_CANONICAL_RE = re.compile(r"^\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}$")
+_CNJ_DIGITS_RE = re.compile(r"^\d{20}$")
 
 
 @dataclass(slots=True)
@@ -36,6 +40,20 @@ class JuditEvent:
         return self.event_type == "response_created" and self.response_type == "lawsuit"
 
 
+def normalize_cnj(value: str) -> str:
+    candidate = value.strip()
+    if not (
+        _CNJ_CANONICAL_RE.fullmatch(candidate)
+        or _CNJ_DIGITS_RE.fullmatch(candidate)
+    ):
+        raise ValueError("invalid CNJ process code")
+    digits = "".join(character for character in candidate if character.isdigit())
+    return (
+        f"{digits[:7]}-{digits[7:9]}."
+        f"{digits[9:13]}.{digits[13]}.{digits[14:16]}.{digits[16:20]}"
+    )
+
+
 def parse_event(body: dict[str, Any]) -> JuditEvent:
     if not isinstance(body, dict):
         raise ValueError("invalid webhook envelope")
@@ -44,9 +62,6 @@ def parse_event(body: dict[str, Any]) -> JuditEvent:
     reference_type = str(body.get("reference_type") or "").strip().lower()
     payload = body.get("payload") if isinstance(body.get("payload"), dict) else {}
 
-    # A tracking reference identifies the tracking subscription, not the concrete
-    # request execution. Never reuse tracking reference_id as request_id because
-    # that can correlate unrelated callbacks under the wrong durable request key.
     explicit_request_id = (
         payload.get("request_id")
         or body.get("request_id")
@@ -103,6 +118,7 @@ def parse_event(body: dict[str, Any]) -> JuditEvent:
     if event.is_lawsuit_response:
         if not event.code:
             raise ValueError("lawsuit response missing process code")
+        event.code = normalize_cnj(event.code)
         if not event.request_id:
             raise ValueError("lawsuit response missing request id")
         if not (event.response_id or event.callback_id):
