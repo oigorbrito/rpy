@@ -32,6 +32,24 @@ class WorkerSettings:
     task_timeout_seconds: float = 120.0
     reclaim_interval_seconds: float = 15.0
 
+    def validate(self) -> "WorkerSettings":
+        positive = {
+            "concurrency": self.concurrency,
+            "poll_interval_seconds": self.poll_interval_seconds,
+            "heartbeat_interval_seconds": self.heartbeat_interval_seconds,
+            "stale_after_seconds": self.stale_after_seconds,
+            "task_timeout_seconds": self.task_timeout_seconds,
+            "reclaim_interval_seconds": self.reclaim_interval_seconds,
+        }
+        for name, value in positive.items():
+            if value <= 0:
+                raise ValueError(f"{name} must be greater than zero")
+        if self.stale_after_seconds <= self.heartbeat_interval_seconds:
+            raise ValueError(
+                "stale_after_seconds must be greater than heartbeat_interval_seconds"
+            )
+        return self
+
     @classmethod
     def from_env(cls) -> "WorkerSettings":
         database_url = os.environ.get("DATABASE_URL")
@@ -45,7 +63,7 @@ class WorkerSettings:
             stale_after_seconds=int(os.getenv("WORKER_STALE_AFTER_SECONDS", "45")),
             task_timeout_seconds=float(os.getenv("WORKER_TASK_TIMEOUT_SECONDS", "120")),
             reclaim_interval_seconds=float(os.getenv("WORKER_RECLAIM_INTERVAL_SECONDS", "15")),
-        )
+        ).validate()
 
 
 def _decode_payload(value: Any) -> dict[str, Any]:
@@ -55,7 +73,7 @@ def _decode_payload(value: Any) -> dict[str, Any]:
 class Worker:
     def __init__(self, pool: asyncpg.Pool, settings: WorkerSettings, worker_id: UUID | None = None):
         self.pool = pool
-        self.settings = settings
+        self.settings = settings.validate()
         self.worker_id = worker_id or uuid4()
         self.stop_event = asyncio.Event()
 
@@ -153,6 +171,7 @@ async def _main() -> None:
     settings = WorkerSettings.from_env()
     if args.concurrency is not None:
         settings.concurrency = args.concurrency
+        settings.validate()
 
     pool = await create_pool(
         settings.database_url,
