@@ -29,8 +29,6 @@ async def lifespan(app: FastAPI):
     database_url = os.environ.get("DATABASE_URL")
     if not database_url:
         raise RuntimeError("DATABASE_URL is required")
-    # Fail deployment startup on invalid security/runtime configuration instead of
-    # discovering it only after the first production request arrives.
     judit_webhook_max_body_bytes()
     operational_thresholds()
     validate_http_auth_config()
@@ -44,8 +42,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Rpy", lifespan=lifespan)
 app.add_middleware(JuditWebhookBodyLimitMiddleware)
-# Added after the body-limit middleware so it is the outermost application
-# middleware and the secret is removed from the shared ASGI scope immediately.
 app.add_middleware(JuditWebhookSecretRedactionMiddleware)
 
 
@@ -65,13 +61,11 @@ def _valid_ops_request(request: Request) -> bool:
 
 @app.get("/health")
 async def health() -> dict[str, bool]:
-    """Process liveness probe; deliberately does not depend on PostgreSQL."""
     return {"ok": True}
 
 
 @app.get("/ready")
 async def ready(request: Request) -> dict[str, bool]:
-    """Readiness probe: traffic is accepted only while PostgreSQL is reachable."""
     pool: asyncpg.Pool = request.app.state.pool
 
     async def _probe() -> None:
@@ -87,7 +81,6 @@ async def ready(request: Request) -> dict[str, bool]:
 
 @app.get("/ops/metrics")
 async def operational_metrics(request: Request) -> dict:
-    # Hide the existence of the operational surface when the token is absent/invalid.
     if not _valid_ops_request(request):
         raise HTTPException(status_code=404, detail="not found")
     pool: asyncpg.Pool = request.app.state.pool
@@ -135,7 +128,6 @@ async def get_process_summary(code: str, request: Request) -> dict:
 
 
 async def _record_delivery(conn: asyncpg.Connection, event) -> bool:
-    """Return False when this callback_id has already been persisted."""
     if not event.callback_id:
         return True
     inserted = await conn.fetchval(
@@ -153,6 +145,40 @@ async def _record_delivery(conn: asyncpg.Connection, event) -> bool:
     return inserted is not None
 
 
+async def _record_request_completion(conn: asyncpg.Connection, request_id: str) -> None:
+    await conn.execute(
+        """
+        INSERT INTO judit_request_completions (request_id)
+        VALUES ($1)
+        ON CONFLICT (request_id) DO NOTHING
+        """,
+        request_id,
+    )
+
+
+async def _request_was_completed(conn: asyncpg.Connection, request_id: str) -> bool:
+    return bool(
+        await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM judit_request_completions WHERE request_id = $1)",
+            request_id,
+        )
+    )
+
+
+async def _enqueue_finalize(
+    conn: asyncpg.Connection,
+    *,
+    request_id: str,
+    idempotency_key: str,
+) -> None:
+    await enqueue(
+        conn,
+        task_name="finalize_judit_request",
+        payload={"request_id": request_id},
+        idempotency_key=idempotency_key,
+    )
+
+
 @app.post("/webhooks/judit/{token}")
 async def judit_webhook(token: str, request: Request) -> dict[str, bool]:
     supplied_token = webhook_token_from_scope(request.scope, token)
@@ -167,9 +193,6 @@ async def judit_webhook(token: str, request: Request) -> dict[str, bool]:
 
     pool: asyncpg.Pool = request.app.state.pool
     async with pool.acquire() as conn:
-        # Delivery dedupe and its corresponding durable side effect are one unit.
-        # If staging/enqueue fails, the delivery row rolls back so Judit can retry
-        # the same callback_id without the event being discarded as a duplicate.
         async with conn.transaction():
             if not await _record_delivery(conn, event):
                 return {"ok": True}
@@ -186,12 +209,18 @@ async def judit_webhook(token: str, request: Request) -> dict[str, bool]:
                     judit_response_id=event.response_id,
                     judit_callback_id=event.callback_id,
                 )
+                if await _request_was_completed(conn, str(event.request_id)):
+                    await _enqueue_finalize(
+                        conn,
+                        request_id=str(event.request_id),
+                        idempotency_key=f"judit-finalize-repair:{event.request_id}:{source_id}",
+                    )
 
             elif event.request_completed and event.request_id:
-                await enqueue(
+                await _record_request_completion(conn, event.request_id)
+                await _enqueue_finalize(
                     conn,
-                    task_name="finalize_judit_request",
-                    payload={"request_id": event.request_id},
+                    request_id=event.request_id,
                     idempotency_key=f"judit-finalize:{event.request_id}",
                 )
 

@@ -20,6 +20,7 @@ API_READ_TABLES = (
     "tenant_processes",
     "jobs",
     "judit_deliveries",
+    "judit_request_completions",
     "backup_runs",
 )
 
@@ -95,7 +96,9 @@ async def provision(database_url: str) -> None:
                 f"GRANT SELECT ON {', '.join(_quote_ident(t) for t in API_READ_TABLES)} TO {api}"
             )
             await conn.execute(f"GRANT INSERT, UPDATE ON processes, process_versions TO {api}")
-            await conn.execute(f"GRANT INSERT ON access_log, judit_deliveries, jobs TO {api}")
+            await conn.execute(
+                f"GRANT INSERT ON access_log, judit_deliveries, judit_request_completions, jobs TO {api}"
+            )
             await conn.execute(f"GRANT USAGE, SELECT ON SEQUENCE access_log_id_seq TO {api}")
 
             worker = _quote_ident("rpy_worker")
@@ -112,15 +115,15 @@ async def provision(database_url: str) -> None:
             await conn.execute(f"GRANT SELECT, DELETE ON processes TO {scheduler}")
             await conn.execute(f"GRANT SELECT ON process_versions TO {scheduler}")
             await conn.execute(f"GRANT DELETE ON judit_deliveries, jobs TO {scheduler}")
+            await conn.execute(
+                f"GRANT SELECT, DELETE ON judit_request_completions TO {scheduler}"
+            )
 
             backup = _quote_ident("rpy_backup")
             await conn.execute(f"GRANT SELECT ON ALL TABLES IN SCHEMA public TO {backup}")
             await conn.execute(f"GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO {backup}")
             await conn.execute(f"GRANT INSERT ON backup_runs TO {backup}")
 
-            # Future objects created by the migration role remain private by default.
-            # Only the backup role receives read access automatically; runtime DML
-            # for new tables must be granted explicitly alongside the migration.
             await conn.execute(
                 f"ALTER DEFAULT PRIVILEGES FOR ROLE {migrator_ident} IN SCHEMA public "
                 f"GRANT SELECT ON TABLES TO {backup}"
