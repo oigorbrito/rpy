@@ -8,6 +8,8 @@ from uuid import UUID
 import asyncpg
 
 MAX_JOB_ERROR_LOG_CHARS = 16_000
+MIN_JOB_ATTEMPTS = 1
+MAX_JOB_ATTEMPTS = 100
 
 CLAIM_JOB_SQL = """
 UPDATE jobs
@@ -96,6 +98,16 @@ RETURNING j.id, j.status;
 """
 
 
+def _validate_max_attempts(max_attempts: int) -> int:
+    if isinstance(max_attempts, bool) or not isinstance(max_attempts, int):
+        raise ValueError("max_attempts must be an integer")
+    if not MIN_JOB_ATTEMPTS <= max_attempts <= MAX_JOB_ATTEMPTS:
+        raise ValueError(
+            f"max_attempts must be between {MIN_JOB_ATTEMPTS} and {MAX_JOB_ATTEMPTS}"
+        )
+    return max_attempts
+
+
 async def enqueue(
     conn: asyncpg.Connection,
     *,
@@ -106,13 +118,14 @@ async def enqueue(
     max_attempts: int = 3,
     idempotency_key: str | None = None,
 ) -> asyncpg.Record | None:
+    bounded_attempts = _validate_max_attempts(max_attempts)
     return await conn.fetchrow(
         ENQUEUE_SQL,
         task_name,
         json.dumps(payload),
         priority,
         run_at,
-        max_attempts,
+        bounded_attempts,
         idempotency_key,
     )
 
