@@ -91,6 +91,27 @@ async def purge_judit_request_completions(
     return int(deleted or 0)
 
 
+async def purge_judit_deliveries(
+    conn: asyncpg.Connection,
+    *,
+    retention_days: int,
+) -> int:
+    """Bound raw Judit webhook payload retention to the operational dedupe window."""
+    _positive(retention_days, name="job_retention_days")
+    deleted = await conn.fetchval(
+        """
+        WITH deleted_deliveries AS (
+            DELETE FROM judit_deliveries
+            WHERE received_at < NOW() - make_interval(days => $1)
+            RETURNING callback_id
+        )
+        SELECT count(*) FROM deleted_deliveries
+        """,
+        retention_days,
+    )
+    return int(deleted or 0)
+
+
 async def acquire_singleton(conn: asyncpg.Connection) -> bool:
     return bool(await conn.fetchval("SELECT pg_try_advisory_lock(hashtext($1))", LOCK_NAME))
 
@@ -139,11 +160,16 @@ async def run_scheduler() -> None:
                             conn,
                             retention_days=job_retention_days,
                         )
+                        deleted_deliveries = await purge_judit_deliveries(
+                            conn,
+                            retention_days=job_retention_days,
+                        )
                     logger.info(
-                        "maintenance completed: %s process(es) expunged, %s terminal job(s) purged, %s Judit completion marker(s) purged",
+                        "maintenance completed: %s process(es) expunged, %s terminal job(s) purged, %s Judit completion marker(s) purged, %s Judit delivery payload(s) purged",
                         deleted_processes,
                         deleted_jobs,
                         deleted_completion_markers,
+                        deleted_deliveries,
                     )
                     await asyncio.sleep(interval_seconds)
             finally:
