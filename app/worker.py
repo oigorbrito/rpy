@@ -32,6 +32,7 @@ class WorkerSettings:
     stale_after_seconds: int = 45
     task_timeout_seconds: float = 120.0
     reclaim_interval_seconds: float = 15.0
+    shutdown_grace_seconds: float = 30.0
 
     def validate(self) -> "WorkerSettings":
         positive = {
@@ -41,6 +42,7 @@ class WorkerSettings:
             "stale_after_seconds": self.stale_after_seconds,
             "task_timeout_seconds": self.task_timeout_seconds,
             "reclaim_interval_seconds": self.reclaim_interval_seconds,
+            "shutdown_grace_seconds": self.shutdown_grace_seconds,
         }
         for name, value in positive.items():
             if value <= 0:
@@ -64,6 +66,7 @@ class WorkerSettings:
             stale_after_seconds=int(os.getenv("WORKER_STALE_AFTER_SECONDS", "45")),
             task_timeout_seconds=float(os.getenv("WORKER_TASK_TIMEOUT_SECONDS", "120")),
             reclaim_interval_seconds=float(os.getenv("WORKER_RECLAIM_INTERVAL_SECONDS", "15")),
+            shutdown_grace_seconds=float(os.getenv("WORKER_SHUTDOWN_GRACE_SECONDS", "30")),
         ).validate()
 
 
@@ -79,7 +82,9 @@ class Worker:
         self.stop_event = asyncio.Event()
 
     async def _heartbeat_loop(self, job_id: UUID) -> None:
-        while not self.stop_event.is_set():
+        # A process shutdown must not stop heartbeating work that is intentionally
+        # draining. This loop is cancelled by _run_job when that specific job exits.
+        while True:
             await asyncio.sleep(self.settings.heartbeat_interval_seconds)
             async with self.pool.acquire() as conn:
                 alive = await heartbeat(conn, job_id, self.worker_id)
@@ -102,10 +107,6 @@ class Worker:
         except Exception as exc:
             permanent = isinstance(exc, PermanentTaskError)
             safe_detail = sanitize_error_message(exc)
-            # Job failures are expected operational events. Do not emit the raw
-            # traceback because its exception tail can include provider request
-            # fragments, database URLs or credentials. Durable diagnostics retain
-            # the exception class and a bounded, redacted message instead.
             logger.error(
                 "job %s failed%s (%s): %s",
                 job_id,
@@ -128,6 +129,8 @@ class Worker:
                 await heartbeat_task
 
     async def process_one(self) -> bool:
+        if self.stop_event.is_set():
+            return False
         async with self.pool.acquire() as conn:
             row = await claim(conn, self.worker_id)
         if row is None:
@@ -161,17 +164,44 @@ class Worker:
                 pass
 
     async def run(self) -> None:
-        tasks = [
+        slot_tasks = [
             asyncio.create_task(self._slot_loop(slot))
             for slot in range(self.settings.concurrency)
         ]
-        tasks.append(asyncio.create_task(self._reclaimer_loop()))
-        try:
-            await self.stop_event.wait()
-        finally:
-            for item in tasks:
+        reclaimer_task = asyncio.create_task(self._reclaimer_loop())
+
+        await self.stop_event.wait()
+        logger.info(
+            "worker %s draining active jobs for up to %.1fs",
+            self.worker_id,
+            self.settings.shutdown_grace_seconds,
+        )
+
+        # Reclaiming belongs to an active worker. Once shutdown begins, stop that
+        # background responsibility immediately and only drain already-claimed jobs.
+        reclaimer_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await reclaimer_task
+
+        done, pending = await asyncio.wait(
+            slot_tasks,
+            timeout=self.settings.shutdown_grace_seconds,
+        )
+        if pending:
+            logger.warning(
+                "worker %s shutdown grace expired; cancelling %s active slot(s)",
+                self.worker_id,
+                len(pending),
+            )
+            for item in pending:
                 item.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
+
+        await asyncio.gather(*slot_tasks, return_exceptions=True)
+        logger.info(
+            "worker %s shutdown complete (%s slot(s) drained)",
+            self.worker_id,
+            len(done),
+        )
 
     def stop(self) -> None:
         self.stop_event.set()

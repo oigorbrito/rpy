@@ -4,6 +4,8 @@ x-api-env: &api-env
   DATABASE_URL: ${API_DATABASE_URL:?API_DATABASE_URL is required}
   JUDIT_WEBHOOK_TOKEN: ${JUDIT_WEBHOOK_TOKEN:?JUDIT_WEBHOOK_TOKEN is required}
   JUDIT_WEBHOOK_MAX_BODY_BYTES: ${JUDIT_WEBHOOK_MAX_BODY_BYTES:-5242880}
+  JUDIT_WEBHOOK_TENANT_ID: ${JUDIT_WEBHOOK_TENANT_ID:-}
+  RPY_TENANT_PROCESSES: ${RPY_TENANT_PROCESSES:-{}}
   RPY_BEARER_TOKENS: ${RPY_BEARER_TOKENS:?RPY_BEARER_TOKENS is required}
   RPY_OPS_TOKEN: ${RPY_OPS_TOKEN:?RPY_OPS_TOKEN is required}
   OPS_BACKUP_MAX_AGE_SECONDS: ${OPS_BACKUP_MAX_AGE_SECONDS:-93600}
@@ -28,6 +30,7 @@ x-worker-env: &worker-env
   PROVIDER_STEP_TEXT_MAX_CHARS: ${PROVIDER_STEP_TEXT_MAX_CHARS:-12000}
   PROVIDER_STEPS_TEXT_MAX_CHARS: ${PROVIDER_STEPS_TEXT_MAX_CHARS:-80000}
   WORKER_TASK_TIMEOUT_SECONDS: ${WORKER_TASK_TIMEOUT_SECONDS:-120}
+  WORKER_SHUTDOWN_GRACE_SECONDS: ${WORKER_SHUTDOWN_GRACE_SECONDS:-30}
 
 x-scheduler-env: &scheduler-env
   DATABASE_URL: ${SCHEDULER_DATABASE_URL:?SCHEDULER_DATABASE_URL is required}
@@ -102,6 +105,7 @@ services:
     image: *rpy-image
     command: ["python", "-m", "app.worker"]
     environment: *worker-env
+    stop_grace_period: ${WORKER_STOP_GRACE_PERIOD:-40s}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -114,6 +118,7 @@ services:
     image: *rpy-image
     command: ["python", "-m", "app.worker"]
     environment: *worker-env
+    stop_grace_period: ${WORKER_STOP_GRACE_PERIOD:-40s}
     depends_on:
       migrate:
         condition: service_completed_successfully

@@ -19,6 +19,50 @@ def test_rejects_wrong_cnj() -> None:
     assert any("CNJ mismatch" in error for error in result.errors)
 
 
+def test_rejects_partial_cnj_with_wrong_first_group() -> None:
+    result = validar(
+        text="Processo 1111111-89.2024.8.26.0100",
+        code=CODE,
+        parties=PARTIES,
+    )
+    assert result.passed is False
+    assert any("CNJ mismatch" in error for error in result.errors)
+
+
+def test_rejects_foreign_numeric_reference_not_looking_like_cnj() -> None:
+    result = validar(
+        text="Autos nº 98765432109876 distribuídos em 2024.",
+        code=CODE,
+        parties=PARTIES,
+    )
+    assert result.passed is False
+    assert any("CNJ mismatch" in error for error in result.errors)
+
+
+def test_rejects_wrong_cnj_embedded_without_separators_same_length() -> None:
+    result = validar(
+        text="Numeração 11111111111111111111 (vinte dígitos trocados).",
+        code=CODE,
+        parties=PARTIES,
+    )
+    assert result.passed is False
+    assert any("CNJ mismatch" in error for error in result.errors)
+
+
+def test_accepts_correct_cnj_in_summary_dots_dashes_forms() -> None:
+    for rendered in (
+        "0000000-00.0000.0.00.0000",
+        "0000000.00.0000.0.00.0000",
+        "0000000-00 0000 0 00 0000",
+    ):
+        result = validar(
+            text=f"Processo {rendered}",
+            code=CODE,
+            parties=PARTIES,
+        )
+        assert result.passed is True, rendered
+
+
 def test_rejects_unknown_party() -> None:
     result = validar(
         text='<Party name="Pessoa Inventada" />',

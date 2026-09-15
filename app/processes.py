@@ -47,6 +47,33 @@ async def log_access(
     )
 
 
+async def grant_process_access(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    process_id: UUID,
+) -> bool:
+    """Bind a process to the tenant's authorized portfolio.
+
+    Idempotent: returns True when a row was created, False when the binding
+    already existed. Used at seed/startup time and on lawful webhook ingestion
+    so a tenant that legitimately receives Judit callbacks for a CNJ can read
+    the resulting process. Refusing to bind at ingestion would make every
+    webhook-created process permanently invisible to its own tenant.
+    """
+    inserted = await conn.fetchrow(
+        """
+        INSERT INTO tenant_processes (tenant_id, process_id)
+        VALUES ($1, $2)
+        ON CONFLICT DO NOTHING
+        RETURNING process_id
+        """,
+        tenant_id,
+        process_id,
+    )
+    return inserted is not None
+
+
 async def stage_version(
     conn: asyncpg.Connection,
     *,
@@ -57,6 +84,7 @@ async def stage_version(
     judit_request_id: str | None = None,
     judit_response_id: str | None = None,
     judit_callback_id: str | None = None,
+    tenant_id: UUID | None = None,
 ) -> tuple[UUID, UUID]:
     async with conn.transaction():
         process_id = await conn.fetchval(
@@ -68,6 +96,12 @@ async def stage_version(
             """,
             code,
         )
+        if tenant_id is not None:
+            # The tenant that lawfully sent/Judit proxied this response owns
+            # read access to the ingested process (see grant_process_access).
+            await grant_process_access(
+                conn, tenant_id=tenant_id, process_id=process_id
+            )
         version_id = await conn.fetchval(
             """
             INSERT INTO process_versions (

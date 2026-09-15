@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
 from typing import Any
@@ -238,3 +239,53 @@ async def collect_operational_metrics(conn: asyncpg.Connection) -> dict[str, Any
     }
     metrics["operational_health"] = assess_operational_health(metrics, thresholds)
     return metrics
+
+
+async def list_failed_summaries(conn: asyncpg.Connection, *, limit: int = 50) -> list[dict[str, Any]]:
+    """Return the most recent process summaries that failed post-generation validation.
+
+    This is the explicit exposure surface for ``validation.passed: false`` required
+    by the product contract; operators can act on these rows instead of parsing raw
+    metrics counters.
+    """
+    rows = await conn.fetch(
+        """
+        SELECT p.code,
+               p.court,
+               p.class_name,
+               ps.model,
+               ps.prompt_version,
+               ps.validation,
+               ps.generation_ms,
+               ps.created_at
+        FROM process_summaries ps
+        JOIN processes p ON p.id = ps.process_id
+        WHERE ps.validation->>'passed' = 'false'
+        ORDER BY ps.created_at DESC
+        LIMIT $1
+        """,
+        limit,
+    )
+    failed: list[dict[str, Any]] = []
+    for row in rows:
+        validation = row["validation"]
+        if isinstance(validation, str):
+            try:
+                validation = json.loads(validation)
+            except (TypeError, ValueError):
+                validation = {}
+        failed.append(
+            {
+                "code": row["code"],
+                "court": row["court"],
+                "class_name": row["class_name"],
+                "model": row["model"],
+                "prompt_version": row["prompt_version"],
+                "validation": validation if isinstance(validation, dict) else {},
+                "generation_ms": row["generation_ms"],
+                "created_at": (
+                    row["created_at"].isoformat() if row["created_at"] is not None else None
+                ),
+            }
+        )
+    return failed

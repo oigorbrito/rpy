@@ -7,6 +7,11 @@ from typing import Any
 
 _DIGITS_11_14_RE = re.compile(r"(?<!\d)\d{11}(?:\d{3})?(?!\d)")
 _CNJ_RE = re.compile(r"\b\d{7}-?\d{2}\.?\d{4}\.?\d\.?\d{2}\.?\d{4}\b")
+# Long unbroken numeric runs (protocol numbers, legacy autos numbers, unformatted
+# foreign identifiers) that do not match CNJ format still must match the payload
+# code. Shorter runs are not inspected to avoid false positives from dates, years,
+# amounts and small legible counts.
+_LONG_DIGITS_RE = re.compile(r"(?<!\d)\d{11,}(?!\d)")
 _CLASS_RE = re.compile(r"\bclass\s*=", re.IGNORECASE)
 _FORECAST_RE = re.compile(
     r"provavelmente\s+ser[áa]\s+condenad|chances?\s+de|tende\s+a\s+ganhar|recomendo\s+que",
@@ -98,6 +103,12 @@ def validar(*, text: str, code: str, parties: list[dict[str, Any]]) -> Validatio
 
     expected_cnj = _normalize_digits(code)
     for found in _CNJ_RE.findall(text):
+        if _normalize_digits(found) != expected_cnj:
+            errors.append(f"CNJ mismatch: {found}")
+
+    # Any long numeric reference that is not the exact payload code indicates a
+    # hallucinated/foreign process identifier, even without CNJ separators.
+    for found in _LONG_DIGITS_RE.findall(text):
         if _normalize_digits(found) != expected_cnj:
             errors.append(f"CNJ mismatch: {found}")
 
