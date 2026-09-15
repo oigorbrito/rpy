@@ -113,8 +113,35 @@ async def test_ambiguous_provider_failure_is_terminal_and_not_automatically_retr
         async with pool.acquire() as conn:
             request_status=await conn.fetchval("SELECT status FROM tenant_judit_requests WHERE tenant_id=$1 AND process_code=$2",tenant_id,CNJ)
             job=await conn.fetchrow("SELECT status::text AS status, attempts, max_attempts FROM jobs WHERE task_name='request_judit_process'")
-        assert request_status=="failed"
+        assert request_status=="failed_ambiguous"
         assert job and job["status"]=="dead" and int(job["attempts"])==1 and int(job["max_attempts"])==1
         assert calls==1
+    finally:
+        await pool.close()
+
+@pytest.mark.asyncio
+async def test_explicit_provider_rejection_can_be_retried_without_new_request_row(monkeypatch):
+    pool,tenant_id,token=await _setup(monkeypatch); calls=0
+    async def create(code):
+        nonlocal calls; calls+=1
+        if calls == 1: raise JuditRequestError("Judit request failed with HTTP 429", retry_safe=True)
+        return JuditRequestResult(request_id="req-recovered")
+    monkeypatch.setattr(process_requests,"create_lawsuit_request",create)
+    transport=httpx.ASGITransport(app=app)
+    try:
+        async with httpx.AsyncClient(transport=transport,base_url="http://test") as client:
+            headers={"Authorization":f"Bearer {token}"}
+            first=await client.post(f"/processes/{CNJ}/request",headers=headers)
+            assert first.status_code==202 and first.json()["created"] is True
+            assert await _worker(pool).process_one() is True
+            retry=await client.post(f"/processes/{CNJ}/request",headers=headers)
+            assert retry.status_code==202 and retry.json()["created"] is True
+            assert await _worker(pool).process_one() is True
+        async with pool.acquire() as conn:
+            row=await conn.fetchrow("SELECT status, attempt_number, judit_request_id FROM tenant_judit_requests WHERE tenant_id=$1 AND process_code=$2",tenant_id,CNJ)
+            jobs=await conn.fetch("SELECT status::text AS status FROM jobs WHERE task_name='request_judit_process' ORDER BY created_at")
+        assert row and row["status"]=="processing" and int(row["attempt_number"])==2 and row["judit_request_id"]=="req-recovered"
+        assert [job["status"] for job in jobs]==["dead","completed"]
+        assert calls==2
     finally:
         await pool.close()

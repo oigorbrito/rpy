@@ -19,6 +19,16 @@ class ProcessRequestResult:
     created: bool
 
 
+async def _enqueue_acquisition(conn: asyncpg.Connection, *, request_row_id: UUID, attempt: int) -> None:
+    await enqueue(
+        conn,
+        task_name="request_judit_process",
+        payload={"tenant_request_id": str(request_row_id)},
+        max_attempts=1,
+        idempotency_key=f"judit-acquire:{request_row_id}:{attempt}",
+    )
+
+
 async def request_process(
     pool: asyncpg.Pool,
     *,
@@ -27,38 +37,42 @@ async def request_process(
 ) -> ProcessRequestResult:
     """Durably register a tenant/CNJ acquisition without provider I/O.
 
-    The tenant does not gain access merely because the CNJ already exists for
-    another tenant. Provider work is delegated to the PostgreSQL job queue.
+    Explicit provider rejections may be retried by a later user request. An
+    ambiguous transport/provider failure is never retried automatically because
+    the provider may already have accepted a paid asynchronous request.
     """
     async with pool.acquire() as conn:
         async with conn.transaction():
             existing = await conn.fetchrow(
-                "SELECT id, judit_request_id, status FROM tenant_judit_requests WHERE tenant_id=$1 AND process_code=$2 FOR UPDATE",
+                "SELECT id, judit_request_id, status, attempt_number FROM tenant_judit_requests WHERE tenant_id=$1 AND process_code=$2 FOR UPDATE",
                 tenant_id,
                 code,
             )
             if existing is not None:
+                if existing["status"] == "failed_retryable" and int(existing["attempt_number"]) < 100:
+                    attempt = int(existing["attempt_number"]) + 1
+                    await conn.execute(
+                        "UPDATE tenant_judit_requests SET status='processing', attempt_number=$2 WHERE id=$1",
+                        existing["id"],
+                        attempt,
+                    )
+                    await _enqueue_acquisition(conn, request_row_id=existing["id"], attempt=attempt)
+                    return ProcessRequestResult(request_id="", created=True)
                 return ProcessRequestResult(
                     request_id=str(existing["judit_request_id"] or ""), created=False
                 )
 
             row = await conn.fetchrow(
                 """
-                INSERT INTO tenant_judit_requests (tenant_id, process_code, status)
-                VALUES ($1, $2, 'processing')
+                INSERT INTO tenant_judit_requests (tenant_id, process_code, status, attempt_number)
+                VALUES ($1, $2, 'processing', 1)
                 RETURNING id
                 """,
                 tenant_id,
                 code,
             )
             request_row_id = row["id"]
-            await enqueue(
-                conn,
-                task_name="request_judit_process",
-                payload={"tenant_request_id": str(request_row_id)},
-                max_attempts=1,
-                idempotency_key=f"judit-acquire:{request_row_id}",
-            )
+            await _enqueue_acquisition(conn, request_row_id=request_row_id, attempt=1)
             return ProcessRequestResult(request_id="", created=True)
 
 
@@ -109,13 +123,13 @@ async def request_judit_process_task(payload: dict[str, Any]) -> dict[str, Any]:
         try:
             provider = await create_lawsuit_request(str(request_row["process_code"]))
         except JuditRequestError as exc:
+            failure_status = "failed_retryable" if exc.retry_safe else "failed_ambiguous"
             async with pool.acquire() as conn:
                 await conn.execute(
-                    "UPDATE tenant_judit_requests SET status='failed' WHERE id=$1 AND judit_request_id IS NULL",
+                    "UPDATE tenant_judit_requests SET status=$2 WHERE id=$1 AND judit_request_id IS NULL",
                     tenant_request_id,
+                    failure_status,
                 )
-            # Provider acceptance is unknowable after an ambiguous transport failure;
-            # do not retry automatically and risk duplicate paid requests.
             raise PermanentTaskError("process provider request failed") from exc
 
         async with pool.acquire() as conn:
