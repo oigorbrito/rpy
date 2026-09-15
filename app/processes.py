@@ -91,7 +91,7 @@ async def stage_version(
             """
             INSERT INTO processes (code)
             VALUES ($1)
-            ON CONFLICT (code) DO UPDATE SET updated_at = NOW()
+            ON CONFLICT (code) DO UPDATE SET code = EXCLUDED.code
             RETURNING id
             """,
             code,
@@ -102,7 +102,7 @@ async def stage_version(
             await grant_process_access(
                 conn, tenant_id=tenant_id, process_id=process_id
             )
-        version_id = await conn.fetchval(
+        version = await conn.fetchrow(
             """
             INSERT INTO process_versions (
                 process_id,
@@ -116,12 +116,27 @@ async def stage_version(
             VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)
             ON CONFLICT (process_id, source_request_id)
             DO UPDATE SET
-                source_cached_response = EXCLUDED.source_cached_response,
-                source_payload = EXCLUDED.source_payload,
-                judit_request_id = COALESCE(EXCLUDED.judit_request_id, process_versions.judit_request_id),
-                judit_response_id = COALESCE(EXCLUDED.judit_response_id, process_versions.judit_response_id),
-                judit_callback_id = COALESCE(EXCLUDED.judit_callback_id, process_versions.judit_callback_id)
-            RETURNING id
+                source_cached_response = CASE
+                    WHEN process_versions.finalized THEN process_versions.source_cached_response
+                    ELSE EXCLUDED.source_cached_response
+                END,
+                source_payload = CASE
+                    WHEN process_versions.finalized THEN process_versions.source_payload
+                    ELSE EXCLUDED.source_payload
+                END,
+                judit_request_id = CASE
+                    WHEN process_versions.finalized THEN process_versions.judit_request_id
+                    ELSE COALESCE(EXCLUDED.judit_request_id, process_versions.judit_request_id)
+                END,
+                judit_response_id = CASE
+                    WHEN process_versions.finalized THEN process_versions.judit_response_id
+                    ELSE COALESCE(EXCLUDED.judit_response_id, process_versions.judit_response_id)
+                END,
+                judit_callback_id = CASE
+                    WHEN process_versions.finalized THEN process_versions.judit_callback_id
+                    ELSE COALESCE(EXCLUDED.judit_callback_id, process_versions.judit_callback_id)
+                END
+            RETURNING id, finalized
             """,
             process_id,
             source_request_id,
@@ -131,7 +146,14 @@ async def stage_version(
             judit_response_id,
             judit_callback_id,
         )
-    return process_id, version_id
+        if version is None:
+            raise RuntimeError("staged process version was not returned")
+        if not bool(version["finalized"]):
+            await conn.execute(
+                "UPDATE processes SET updated_at = NOW() WHERE id = $1",
+                process_id,
+            )
+    return process_id, version["id"]
 
 
 async def preferred_judit_version(
@@ -150,7 +172,6 @@ async def preferred_judit_version(
         FROM process_versions pv
         JOIN processes p ON p.id = pv.process_id
         WHERE pv.judit_request_id = $1
-          AND pv.judit_response_id IS NOT NULL
         ORDER BY pv.source_cached_response ASC, pv.created_at DESC
         LIMIT 1
         """,
@@ -175,7 +196,8 @@ async def finalize_version(
 
     The process row is locked so concurrent Judit requests for the same CNJ cannot
     let an older response overwrite a newer current version. Historical versions
-    are still finalized and retain their own steps for auditability.
+    are still finalized and retain their own steps for auditability. Reprocessing
+    an already-finalized version is a no-op and reports whether it is still current.
     """
     async with conn.transaction():
         process = await conn.fetchrow(
@@ -192,7 +214,7 @@ async def finalize_version(
 
         candidate = await conn.fetchrow(
             """
-            SELECT created_at
+            SELECT created_at, finalized
             FROM process_versions
             WHERE id = $1 AND process_id = $2
             FOR UPDATE
@@ -203,8 +225,11 @@ async def finalize_version(
         if candidate is None:
             raise LookupError("process version does not exist")
 
-        current_created_at = None
         current_version_id = process["current_version_id"]
+        if bool(candidate["finalized"]):
+            return current_version_id == version_id
+
+        current_created_at = None
         if current_version_id is not None:
             current_created_at = await conn.fetchval(
                 "SELECT created_at FROM process_versions WHERE id = $1",

@@ -354,11 +354,52 @@ async def _persist_summary(
     return row is not None
 
 
+async def _load_publishable_summary(
+    pool: asyncpg.Pool,
+    process_id: UUID,
+    version_id: UUID,
+) -> dict[str, Any] | None:
+    """Return an already accepted summary only while the version is still current."""
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT ps.validation, ps.model, ps.prompt_version, ps.generation_ms
+            FROM process_summaries ps
+            JOIN processes p
+              ON p.id = ps.process_id
+             AND p.current_version_id = ps.version_id
+            WHERE ps.process_id = $1
+              AND ps.version_id = $2
+              AND COALESCE((ps.validation->>'passed')::boolean, false) = true
+            """,
+            process_id,
+            version_id,
+        )
+    if row is None:
+        return None
+    return {
+        "validation": decode_json_object(row["validation"], label="summary validation"),
+        "model": row["model"],
+        "prompt_version": row["prompt_version"],
+        "generation_ms": int(row["generation_ms"] or 0),
+    }
+
+
 async def generate_summary(
     pool: asyncpg.Pool,
     process_id: UUID,
     version_id: UUID,
 ) -> dict[str, Any]:
+    existing = await _load_publishable_summary(pool, process_id, version_id)
+    if existing is not None:
+        return {
+            "validation": existing["validation"],
+            "model": existing["model"],
+            "generation_ms": existing["generation_ms"],
+            "persisted": False,
+            "reused": True,
+        }
+
     started = perf_counter()
     context = await _load_context(pool, process_id, version_id)
 
@@ -411,6 +452,7 @@ async def generate_summary(
         "model": model,
         "generation_ms": generation_ms,
         "persisted": persisted,
+        "reused": False,
     }
 
 

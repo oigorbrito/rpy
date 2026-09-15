@@ -11,22 +11,18 @@ from fastapi import FastAPI, HTTPException, Request
 
 from app.auth import configured_bearer_tokens, tenant_from_request
 from app.db import create_pool
+from app.frontend import router as frontend_router
+from app.http_auth_config import validate_http_auth_config
 from app.http_limits import JuditWebhookBodyLimitMiddleware, judit_webhook_max_body_bytes
 from app.json_utils import decode_json_object
-from app.judit import parse_event
-from app.observability import (
-    collect_operational_metrics,
-    list_failed_summaries,
-    operational_thresholds,
-)
+from app.judit import normalize_cnj, parse_event
+from app.judit_client import JuditRequestError
+from app.observability import collect_operational_metrics, list_failed_summaries, operational_thresholds
+from app.process_requests import grant_request_tenants, request_process
 from app.processes import get_authorized_process, log_access, stage_version
 from app.tenancy import configured_webhook_tenant, validate_carteira_seed
 from app.queue import enqueue
-from app.webhook_security import (
-    JuditWebhookSecretRedactionMiddleware,
-    webhook_token_from_scope,
-)
-
+from app.webhook_security import JuditWebhookSecretRedactionMiddleware, webhook_token_from_scope
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -40,56 +36,44 @@ async def lifespan(app: FastAPI):
     app.state.bearer_tokens = configured_bearer_tokens()
     app.state.webhook_tenant_id = configured_webhook_tenant()
     validate_carteira_seed()
+    validate_http_auth_config()
     app.state.pool = await create_pool(database_url)
     try:
         yield
     finally:
         await app.state.pool.close()
 
+app=FastAPI(title="Rpy",lifespan=lifespan); app.add_middleware(JuditWebhookBodyLimitMiddleware); app.add_middleware(JuditWebhookSecretRedactionMiddleware); app.include_router(frontend_router)
+def _valid_webhook_token(token:str)->bool:
+    expected=os.environ.get("JUDIT_WEBHOOK_TOKEN",""); return bool(expected) and hmac.compare_digest(token,expected)
+def _valid_ops_request(request:Request)->bool:
+    expected=os.environ.get("RPY_OPS_TOKEN",""); authorization=request.headers.get("authorization","")
+    if not expected or not authorization.startswith("Bearer "): return False
+    supplied=authorization.removeprefix("Bearer ").strip(); return bool(supplied) and hmac.compare_digest(supplied,expected)
+def _json_value(value,*,fallback):
+    if value is None:return fallback
+    if isinstance(value,str):
+        try:return json.loads(value)
+        except json.JSONDecodeError:return fallback
+    return value
 
-app = FastAPI(title="Rpy", lifespan=lifespan)
-app.add_middleware(JuditWebhookBodyLimitMiddleware)
-# Added after the body-limit middleware so it is the outermost application
-# middleware and the secret is removed from the shared ASGI scope immediately.
-app.add_middleware(JuditWebhookSecretRedactionMiddleware)
-
-
-def _valid_webhook_token(token: str) -> bool:
-    expected = os.environ.get("JUDIT_WEBHOOK_TOKEN", "")
-    return bool(expected) and hmac.compare_digest(token, expected)
-
-
-def _valid_ops_request(request: Request) -> bool:
-    expected = os.environ.get("RPY_OPS_TOKEN", "")
-    authorization = request.headers.get("authorization", "")
-    if not expected or not authorization.startswith("Bearer "):
-        return False
-    supplied = authorization.removeprefix("Bearer ").strip()
-    return bool(supplied) and hmac.compare_digest(supplied, expected)
-
+def _summary_status(summary, job_status:str|None, cached_response:bool)->str:
+    if summary is not None:return "available"
+    if cached_response:return "not_generated"
+    if job_status in {"pending","processing"}:return "processing"
+    if job_status=="dead":return "unavailable"
+    return "not_generated"
 
 @app.get("/health")
-async def health() -> dict[str, bool]:
-    """Process liveness probe; deliberately does not depend on PostgreSQL."""
-    return {"ok": True}
-
-
+async def health()->dict[str,bool]:return {"ok":True}
 @app.get("/ready")
-async def ready(request: Request) -> dict[str, bool]:
-    """Readiness probe: traffic is accepted only while PostgreSQL is reachable."""
-    pool: asyncpg.Pool = request.app.state.pool
-
-    async def _probe() -> None:
-        async with pool.acquire() as conn:
-            await conn.fetchval("SELECT 1")
-
-    try:
-        await asyncio.wait_for(_probe(), timeout=2.0)
-    except (asyncpg.PostgresError, asyncpg.InterfaceError, OSError, TimeoutError):
-        raise HTTPException(status_code=503, detail="database unavailable") from None
-    return {"ok": True}
-
-
+async def ready(request:Request)->dict[str,bool]:
+    pool:asyncpg.Pool=request.app.state.pool
+    async def _probe():
+        async with pool.acquire() as conn:await conn.fetchval("SELECT 1")
+    try:await asyncio.wait_for(_probe(),timeout=2.0)
+    except (asyncpg.PostgresError,asyncpg.InterfaceError,OSError,TimeoutError):raise HTTPException(status_code=503,detail="database unavailable") from None
+    return {"ok":True}
 @app.get("/ops/metrics")
 async def operational_metrics(request: Request) -> dict:
     # Hide the existence of the operational surface when the token is absent/invalid.
@@ -111,19 +95,32 @@ async def failed_summaries(request: Request) -> dict:
         return {"failed_summaries": await list_failed_summaries(conn)}
 
 
+@app.post("/processes/{code}/request",status_code=202)
+async def create_process_request(code:str,request:Request)->dict:
+    tenant_id=tenant_from_request(request)
+    try:canonical_code=normalize_cnj(code)
+    except ValueError:raise HTTPException(status_code=400,detail="invalid process code") from None
+    try:result=await request_process(request.app.state.pool,tenant_id=tenant_id,code=canonical_code)
+    except JuditRequestError:raise HTTPException(status_code=503,detail="process provider unavailable") from None
+    async with request.app.state.pool.acquire() as conn:
+        process=await get_authorized_process(conn,tenant_id=tenant_id,code=canonical_code)
+        await log_access(conn,tenant_id=tenant_id,process_id=process["id"] if process else None,process_code=canonical_code,action="request_process",metadata={"created":result.created})
+    return {"code":canonical_code,"status":"available" if process else "processing","created":result.created}
 @app.get("/processes/{code}")
-async def get_process_summary(code: str, request: Request) -> dict:
-    tenant_id = tenant_from_request(request)
-    pool: asyncpg.Pool = request.app.state.pool
+async def get_process_summary(code:str,request:Request)->dict:
+    tenant_id=tenant_from_request(request)
+    try:canonical_code=normalize_cnj(code)
+    except ValueError:raise HTTPException(status_code=400,detail="invalid process code") from None
+    pool:asyncpg.Pool=request.app.state.pool
     async with pool.acquire() as conn:
-        process = await get_authorized_process(conn, tenant_id=tenant_id, code=code)
+        process = await get_authorized_process(conn, tenant_id=tenant_id, code=canonical_code)
         if process is None:
             raise HTTPException(status_code=404, detail="process not found")
         await log_access(
             conn,
             tenant_id=tenant_id,
             process_id=process["id"],
-            process_code=code,
+            process_code=canonical_code,
             action="read_process_summary",
         )
         summary = await conn.fetchrow(
@@ -135,6 +132,11 @@ async def get_process_summary(code: str, request: Request) -> dict:
             process["id"],
             process["current_version_id"],
         )
+        steps=[]; summary_job_status=None; cached_response=False
+        if process["current_version_id"] is not None:
+            steps=await conn.fetch("SELECT step_number, occurred_at, title, text FROM process_steps WHERE process_id=$1 AND version_id=$2 ORDER BY occurred_at DESC NULLS LAST, step_number DESC LIMIT 20", process["id"], process["current_version_id"])
+            cached_response=bool(await conn.fetchval("SELECT source_cached_response FROM process_versions WHERE id=$1 AND process_id=$2", process["current_version_id"], process["id"]))
+            summary_job_status=await conn.fetchval("SELECT status::text FROM jobs WHERE task_name='generate_process_summary' AND idempotency_key=$1 ORDER BY created_at DESC LIMIT 1", f"summary:{process['current_version_id']}")
 
     summary_data = dict(summary) if summary else None
     if summary_data is not None:
@@ -145,6 +147,7 @@ async def get_process_summary(code: str, request: Request) -> dict:
     # The external legal dashboard reads the generated markdown as iaSummary;
     # summary retains the structured envelope for backward compatibility.
     ia_summary = summary_data["markdown"] if summary_data else None
+    parties=_json_value(process["parties"],fallback=[]); subjects=_json_value(process["subjects"],fallback=[]); header=_json_value(process["header"],fallback={})
 
     return {
         "code": process["code"],
@@ -152,6 +155,12 @@ async def get_process_summary(code: str, request: Request) -> dict:
         "court": process["court"],
         "summary": summary_data,
         "iaSummary": ia_summary,
+        "parties": parties if isinstance(parties,list) else [],
+        "subjects": subjects if isinstance(subjects,list) else [],
+        "header": header if isinstance(header,dict) else {},
+        "updated_at": process["updated_at"],
+        "summary_status": _summary_status(summary, summary_job_status, cached_response),
+        "recent_steps": [dict(step) for step in steps],
     }
 
 
@@ -173,28 +182,21 @@ async def _record_delivery(conn: asyncpg.Connection, event) -> bool:
     )
     return inserted is not None
 
-
+async def _record_request_completion(conn,request_id:str)->None:
+    await conn.execute("INSERT INTO judit_request_completions (request_id) VALUES ($1) ON CONFLICT (request_id) DO NOTHING",request_id)
+    await conn.execute("UPDATE tenant_judit_requests SET completed_at=COALESCE(completed_at,NOW()) WHERE judit_request_id=$1",request_id)
+async def _request_was_completed(conn,request_id:str)->bool:return bool(await conn.fetchval("SELECT EXISTS(SELECT 1 FROM judit_request_completions WHERE request_id=$1)",request_id))
+async def _enqueue_finalize(conn,*,request_id:str,idempotency_key:str)->None:await enqueue(conn,task_name="finalize_judit_request",payload={"request_id":request_id},idempotency_key=idempotency_key)
 @app.post("/webhooks/judit/{token}")
-async def judit_webhook(token: str, request: Request) -> dict[str, bool]:
-    supplied_token = webhook_token_from_scope(request.scope, token)
-    if not _valid_webhook_token(supplied_token):
-        raise HTTPException(status_code=404, detail="not found")
-
-    try:
-        body = await request.json()
-        event = parse_event(body)
-    except (ValueError, TypeError):
-        raise HTTPException(status_code=400, detail="invalid payload") from None
-
-    pool: asyncpg.Pool = request.app.state.pool
+async def judit_webhook(token:str,request:Request)->dict[str,bool]:
+    supplied_token=webhook_token_from_scope(request.scope,token)
+    if not _valid_webhook_token(supplied_token):raise HTTPException(status_code=404,detail="not found")
+    try:body=await request.json(); event=parse_event(body)
+    except (ValueError,TypeError):raise HTTPException(status_code=400,detail="invalid payload") from None
+    pool:asyncpg.Pool=request.app.state.pool
     async with pool.acquire() as conn:
-        # Delivery dedupe and its corresponding durable side effect are one unit.
-        # If staging/enqueue fails, the delivery row rolls back so Judit can retry
-        # the same callback_id without the event being discarded as a duplicate.
         async with conn.transaction():
-            if not await _record_delivery(conn, event):
-                return {"ok": True}
-
+            if not await _record_delivery(conn,event):return {"ok":True}
             if event.is_lawsuit_response:
                 source_id = event.response_id or event.callback_id
                 await stage_version(
@@ -211,12 +213,10 @@ async def judit_webhook(token: str, request: Request) -> dict[str, bool]:
                     ),
                 )
 
+                source_id=event.response_id or event.callback_id
+                process_id,_=await stage_version(conn,code=str(event.code),source_request_id=source_id,cached_response=event.cached_response,payload=event.raw,judit_request_id=event.request_id,judit_response_id=event.response_id,judit_callback_id=event.callback_id)
+                if event.request_id:await grant_request_tenants(conn,request_id=str(event.request_id),process_id=process_id)
+                if await _request_was_completed(conn,str(event.request_id)):await _enqueue_finalize(conn,request_id=str(event.request_id),idempotency_key=f"judit-finalize-repair:{event.request_id}:{source_id}")
             elif event.request_completed and event.request_id:
-                await enqueue(
-                    conn,
-                    task_name="finalize_judit_request",
-                    payload={"request_id": event.request_id},
-                    idempotency_key=f"judit-finalize:{event.request_id}",
-                )
-
-    return {"ok": True}
+                await _record_request_completion(conn,event.request_id); await _enqueue_finalize(conn,request_id=event.request_id,idempotency_key=f"judit-finalize:{event.request_id}")
+    return {"ok":True}

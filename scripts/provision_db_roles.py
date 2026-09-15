@@ -6,71 +6,25 @@ from urllib.parse import unquote, urlparse
 
 import asyncpg
 
-RUNTIME_ROLES = (
-    ("rpy_api", "API_DATABASE_URL"),
-    ("rpy_worker", "WORKER_DATABASE_URL"),
-    ("rpy_scheduler", "SCHEDULER_DATABASE_URL"),
-    ("rpy_backup", "BACKUP_DATABASE_URL"),
-)
+RUNTIME_ROLES = (("rpy_api","API_DATABASE_URL"),("rpy_worker","WORKER_DATABASE_URL"),("rpy_scheduler","SCHEDULER_DATABASE_URL"),("rpy_backup","BACKUP_DATABASE_URL"))
+API_READ_TABLES = ("processes","process_versions","process_summaries","tenant_processes","tenant_judit_requests","jobs","judit_deliveries","judit_request_completions","backup_runs")
 
-API_READ_TABLES = (
-    "processes",
-    "process_versions",
-    "process_summaries",
-    "tenant_processes",
-    "jobs",
-    "judit_deliveries",
-    "backup_runs",
-)
-
-
-def _quote_ident(value: str) -> str:
-    return '"' + value.replace('"', '""') + '"'
-
-
-def _quote_literal(value: str) -> str:
-    return "'" + value.replace("'", "''") + "'"
-
-
-def _credentials(env_name: str, expected_user: str) -> tuple[str, str]:
-    raw = os.environ.get(env_name)
-    if not raw:
-        raise RuntimeError(f"{env_name} is required")
-    parsed = urlparse(raw)
-    username = unquote(parsed.username or "")
-    password = unquote(parsed.password or "")
-    if username != expected_user:
-        raise RuntimeError(
-            f"{env_name} must use PostgreSQL role {expected_user!r}, got {username!r}"
-        )
-    if not password:
-        raise RuntimeError(f"{env_name} must include a password")
-    return username, password
-
-
-async def _ensure_login_role(conn: asyncpg.Connection, *, name: str, password: str) -> None:
-    exists = await conn.fetchval("SELECT 1 FROM pg_roles WHERE rolname = $1", name)
-    ident = _quote_ident(name)
-    password_sql = _quote_literal(password)
-    statement = "ALTER ROLE" if exists else "CREATE ROLE"
-    await conn.execute(
-        f"{statement} {ident} WITH LOGIN PASSWORD {password_sql} "
-        "NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS"
-    )
-
-
-async def provision(database_url: str) -> None:
-    credentials = {
-        role_name: _credentials(env_name, role_name)
-        for role_name, env_name in RUNTIME_ROLES
-    }
-    conn = await asyncpg.connect(database_url)
+def _quote_ident(value:str)->str:return '"'+value.replace('"','""')+'"'
+def _quote_literal(value:str)->str:return "'"+value.replace("'","''")+"'"
+def _credentials(env_name:str,expected_user:str)->tuple[str,str]:
+    raw=os.environ.get(env_name)
+    if not raw:raise RuntimeError(f"{env_name} is required")
+    parsed=urlparse(raw); username=unquote(parsed.username or ""); password=unquote(parsed.password or "")
+    if username!=expected_user:raise RuntimeError(f"{env_name} must use PostgreSQL role {expected_user!r}, got {username!r}")
+    if not password:raise RuntimeError(f"{env_name} must include a password")
+    return username,password
+async def _ensure_login_role(conn:asyncpg.Connection,*,name:str,password:str)->None:
+    exists=await conn.fetchval("SELECT 1 FROM pg_roles WHERE rolname = $1",name); ident=_quote_ident(name); password_sql=_quote_literal(password); statement="ALTER ROLE" if exists else "CREATE ROLE"
+    await conn.execute(f"{statement} {ident} WITH LOGIN PASSWORD {password_sql} NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS")
+async def provision(database_url:str)->None:
+    credentials={role_name:_credentials(env_name,role_name) for role_name,env_name in RUNTIME_ROLES}; conn=await asyncpg.connect(database_url)
     try:
-        current_user = str(await conn.fetchval("SELECT current_user"))
-        database_name = str(await conn.fetchval("SELECT current_database()"))
-        migrator_ident = _quote_ident(current_user)
-        database_ident = _quote_ident(database_name)
-
+        current_user=str(await conn.fetchval("SELECT current_user")); database_name=str(await conn.fetchval("SELECT current_database()")); migrator_ident=_quote_ident(current_user); database_ident=_quote_ident(database_name)
         async with conn.transaction():
             for role_name, _ in RUNTIME_ROLES:
                 _, password = credentials[role_name]
@@ -94,54 +48,19 @@ async def provision(database_url: str) -> None:
             await conn.execute(
                 f"GRANT SELECT ON {', '.join(_quote_ident(t) for t in API_READ_TABLES)} TO {api}"
             )
-            await conn.execute(f"GRANT INSERT, UPDATE ON processes, process_versions TO {api}")
+            await conn.execute(f"GRANT INSERT, UPDATE ON processes, process_versions, tenant_judit_requests TO {api}")
             await conn.execute(
-                "GRANT INSERT ON tenant_processes, access_log, judit_deliveries, jobs TO "
+                "GRANT INSERT ON tenant_processes, access_log, judit_deliveries, judit_request_completions, jobs TO "
                 f"{api}"
             )
             await conn.execute(f"GRANT USAGE, SELECT ON SEQUENCE access_log_id_seq TO {api}")
-
-            worker = _quote_ident("rpy_worker")
-            await conn.execute(f"GRANT SELECT, INSERT, UPDATE ON jobs TO {worker}")
-            await conn.execute(f"GRANT SELECT, UPDATE ON processes, process_versions TO {worker}")
-            await conn.execute(
-                f"GRANT SELECT, INSERT, UPDATE, DELETE ON process_steps TO {worker}"
-            )
-            await conn.execute(
-                f"GRANT SELECT, INSERT, UPDATE ON process_summaries TO {worker}"
-            )
-
-            scheduler = _quote_ident("rpy_scheduler")
-            await conn.execute(f"GRANT SELECT, DELETE ON processes TO {scheduler}")
-            await conn.execute(f"GRANT SELECT ON process_versions TO {scheduler}")
-            await conn.execute(f"GRANT DELETE ON judit_deliveries, jobs TO {scheduler}")
-
-            backup = _quote_ident("rpy_backup")
-            await conn.execute(f"GRANT SELECT ON ALL TABLES IN SCHEMA public TO {backup}")
-            await conn.execute(f"GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO {backup}")
-            await conn.execute(f"GRANT INSERT ON backup_runs TO {backup}")
-
-            # Future objects created by the migration role remain private by default.
-            # Only the backup role receives read access automatically; runtime DML
-            # for new tables must be granted explicitly alongside the migration.
-            await conn.execute(
-                f"ALTER DEFAULT PRIVILEGES FOR ROLE {migrator_ident} IN SCHEMA public "
-                f"GRANT SELECT ON TABLES TO {backup}"
-            )
-            await conn.execute(
-                f"ALTER DEFAULT PRIVILEGES FOR ROLE {migrator_ident} IN SCHEMA public "
-                f"GRANT SELECT ON SEQUENCES TO {backup}"
-            )
-    finally:
-        await conn.close()
-
-
-async def _main() -> None:
-    database_url = os.environ.get("MIGRATION_DATABASE_URL") or os.environ.get("DATABASE_URL")
-    if not database_url:
-        raise RuntimeError("MIGRATION_DATABASE_URL is required")
+            worker=_quote_ident("rpy_worker"); await conn.execute(f"GRANT SELECT, INSERT, UPDATE ON jobs TO {worker}"); await conn.execute(f"GRANT SELECT, UPDATE ON processes, process_versions TO {worker}"); await conn.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON process_steps TO {worker}"); await conn.execute(f"GRANT SELECT, INSERT, UPDATE ON process_summaries TO {worker}")
+            scheduler=_quote_ident("rpy_scheduler"); await conn.execute(f"GRANT SELECT, DELETE ON processes TO {scheduler}"); await conn.execute(f"GRANT SELECT ON process_versions TO {scheduler}"); await conn.execute(f"GRANT DELETE ON judit_deliveries, jobs TO {scheduler}"); await conn.execute(f"GRANT SELECT, DELETE ON judit_request_completions TO {scheduler}")
+            backup=_quote_ident("rpy_backup"); await conn.execute(f"GRANT SELECT ON ALL TABLES IN SCHEMA public TO {backup}"); await conn.execute(f"GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO {backup}"); await conn.execute(f"GRANT INSERT ON backup_runs TO {backup}")
+            await conn.execute(f"ALTER DEFAULT PRIVILEGES FOR ROLE {migrator_ident} IN SCHEMA public GRANT SELECT ON TABLES TO {backup}"); await conn.execute(f"ALTER DEFAULT PRIVILEGES FOR ROLE {migrator_ident} IN SCHEMA public GRANT SELECT ON SEQUENCES TO {backup}")
+    finally:await conn.close()
+async def _main()->None:
+    database_url=os.environ.get("MIGRATION_DATABASE_URL") or os.environ.get("DATABASE_URL")
+    if not database_url:raise RuntimeError("MIGRATION_DATABASE_URL is required")
     await provision(database_url)
-
-
-if __name__ == "__main__":
-    asyncio.run(_main())
+if __name__=="__main__":asyncio.run(_main())
