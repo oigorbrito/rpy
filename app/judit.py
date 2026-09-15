@@ -19,7 +19,17 @@ class JuditEvent:
 
     @property
     def request_completed(self) -> bool:
-        return self.event_type == "request_completed"
+        if self.event_type == "request_completed":
+            return True
+        if self.event_type != "response_created" or self.response_type != "application_info":
+            return False
+        data = self.response_data or {}
+        message = str(data.get("message") or "").strip().upper()
+        try:
+            info_code = int(data.get("code")) if data.get("code") is not None else None
+        except (TypeError, ValueError):
+            info_code = None
+        return message == "REQUEST_COMPLETED" or info_code == 600
 
     @property
     def is_lawsuit_response(self) -> bool:
@@ -33,11 +43,14 @@ def parse_event(body: dict[str, Any]) -> JuditEvent:
     event_type = str(body.get("event_type") or "").strip().lower()
     payload = body.get("payload") if isinstance(body.get("payload"), dict) else {}
 
+    # For tracking webhooks, reference_id is the tracking_id, not the request
+    # execution id. Prefer payload.request_id so lawsuit and completion callbacks
+    # from the same execution are staged/finalized under the same durable key.
     request_id = (
-        body.get("reference_id")
-        or payload.get("request_id")
+        payload.get("request_id")
         or body.get("request_id")
         or body.get("requestId")
+        or body.get("reference_id")
     )
     callback_id = body.get("callback_id")
     response_id = payload.get("response_id")
