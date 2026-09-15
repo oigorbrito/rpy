@@ -38,6 +38,7 @@ jobs:
 
       - name: Production compose contract
         env:
+          RPY_IMAGE: ghcr.io/oigorbrito/rpy@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
           POSTGRES_PASSWORD: ci-production-password
           DATABASE_URL: postgresql://rpy:ci-production-password@postgres:5432/rpy
           ANTHROPIC_API_KEY: ci-anthropic-key
@@ -54,6 +55,11 @@ jobs:
 
       - name: Unit tests
         run: pytest -q tests --ignore=tests/integration
+
+      - name: Container image smoke
+        run: |
+          docker build -t "rpy-ci:${GITHUB_SHA}" .
+          docker run --rm "rpy-ci:${GITHUB_SHA}" python -c "import app.api, app.worker, app.scheduler"
 
       - name: PostgreSQL integration tests
         run: pytest -q tests/integration
