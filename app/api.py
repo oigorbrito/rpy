@@ -61,6 +61,17 @@ def _valid_ops_request(request: Request) -> bool:
     return bool(supplied) and hmac.compare_digest(supplied, expected)
 
 
+def _json_value(value, *, fallback):
+    if value is None:
+        return fallback
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return fallback
+    return value
+
+
 @app.get("/health")
 async def health() -> dict[str, bool]:
     return {"ok": True}
@@ -123,6 +134,19 @@ async def get_process_summary(code: str, request: Request) -> dict:
             process["id"],
             process["current_version_id"],
         )
+        steps = []
+        if process["current_version_id"] is not None:
+            steps = await conn.fetch(
+                """
+                SELECT step_number, occurred_at, title, text
+                FROM process_steps
+                WHERE process_id = $1 AND version_id = $2
+                ORDER BY occurred_at DESC NULLS LAST, step_number DESC
+                LIMIT 20
+                """,
+                process["id"],
+                process["current_version_id"],
+            )
 
     summary_data = dict(summary) if summary else None
     if summary_data is not None:
@@ -130,11 +154,20 @@ async def get_process_summary(code: str, request: Request) -> dict:
             summary_data.get("validation"), label="summary validation"
         )
 
+    parties = _json_value(process["parties"], fallback=[])
+    subjects = _json_value(process["subjects"], fallback=[])
+    header = _json_value(process["header"], fallback={})
+
     return {
         "code": process["code"],
         "class_name": process["class_name"],
         "court": process["court"],
+        "parties": parties if isinstance(parties, list) else [],
+        "subjects": subjects if isinstance(subjects, list) else [],
+        "header": header if isinstance(header, dict) else {},
+        "updated_at": process["updated_at"],
         "summary": summary_data,
+        "recent_steps": [dict(step) for step in steps],
     }
 
 
