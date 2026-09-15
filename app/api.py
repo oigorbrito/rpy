@@ -11,6 +11,7 @@ from fastapi import FastAPI, HTTPException, Request
 
 from app.auth import tenant_from_request
 from app.db import create_pool
+from app.http_limits import JuditWebhookBodyLimitMiddleware, judit_webhook_max_body_bytes
 from app.json_utils import decode_json_object
 from app.judit import parse_event
 from app.observability import collect_operational_metrics
@@ -23,6 +24,9 @@ async def lifespan(app: FastAPI):
     database_url = os.environ.get("DATABASE_URL")
     if not database_url:
         raise RuntimeError("DATABASE_URL is required")
+    # Fail deployment startup on an invalid limit instead of discovering it only
+    # after the first webhook arrives.
+    judit_webhook_max_body_bytes()
     app.state.pool = await create_pool(database_url)
     try:
         yield
@@ -31,6 +35,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Rpy", lifespan=lifespan)
+app.add_middleware(JuditWebhookBodyLimitMiddleware)
 
 
 def _valid_webhook_token(token: str) -> bool:
