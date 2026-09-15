@@ -69,7 +69,7 @@ async def _reconcile_tenant_access(
         """
         SELECT process_id
         FROM process_versions
-        WHERE source_request_id = $1
+        WHERE judit_request_id = $1
         ORDER BY created_at DESC
         LIMIT 1
         """,
