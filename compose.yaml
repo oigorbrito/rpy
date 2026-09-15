@@ -36,6 +36,7 @@ services:
       JUDIT_WEBHOOK_TOKEN: ${JUDIT_WEBHOOK_TOKEN:-dev-webhook-token}
       RPY_BEARER_TOKENS: ${RPY_BEARER_TOKENS:-{}}
       RETENTION_DAYS: ${RETENTION_DAYS:-365}
+      JOB_RETENTION_DAYS: ${JOB_RETENTION_DAYS:-30}
     ports:
       - "8000:8000"
     depends_on:
