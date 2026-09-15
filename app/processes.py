@@ -116,7 +116,6 @@ async def preferred_judit_version(
         FROM process_versions pv
         JOIN processes p ON p.id = pv.process_id
         WHERE pv.judit_request_id = $1
-          AND pv.judit_response_id IS NOT NULL
         ORDER BY pv.source_cached_response ASC, pv.created_at DESC
         LIMIT 1
         """,
