@@ -6,18 +6,24 @@ from typing import Any
 from uuid import UUID
 
 import asyncpg
-from openai import AsyncOpenAI
+
+from app.providers import (
+    call_with_retries,
+    embedding_settings,
+    is_retryable_openai_error,
+    openai_client,
+)
 
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
 VECTOR_DIMENSIONS = 1536
 EMBEDDING_BATCH_SIZE = 64
 
 
-def _client() -> AsyncOpenAI:
+def _client():
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY is required when vector retrieval is used")
-    return AsyncOpenAI(api_key=api_key)
+    return openai_client(api_key)
 
 
 def _request_kwargs(texts: Sequence[str]) -> dict[str, Any]:
@@ -58,7 +64,17 @@ async def embed_texts(texts: Sequence[str]) -> list[list[float]]:
     if any(not str(text).strip() for text in texts):
         raise ValueError("embedding inputs must be non-empty text")
 
-    response = await _client().embeddings.create(**_request_kwargs(texts))
+    client = _client()
+    settings = embedding_settings()
+
+    async def create_embedding():
+        return await client.embeddings.create(**_request_kwargs(texts))
+
+    response = await call_with_retries(
+        create_embedding,
+        is_retryable=is_retryable_openai_error,
+        settings=settings,
+    )
     return _validate_response(response.data, expected_count=len(texts))
 
 

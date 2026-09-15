@@ -7,12 +7,17 @@ from typing import Any
 from uuid import UUID
 
 import asyncpg
-from anthropic import AsyncAnthropic
 
 from app.db import create_pool
 from app.embeddings import embed_query, ensure_step_embeddings
 from app.json_utils import decode_json_list, decode_json_object
 from app.prompts import PROCESS_SUMMARY_SYSTEM_PROMPT
+from app.providers import (
+    anthropic_client,
+    anthropic_settings,
+    call_with_retries,
+    is_retryable_anthropic_error,
+)
 from app.retrieval import load_steps, rank_steps, vector_search
 from app.tasks import task
 from app.validation import ValidationResult, validar
@@ -123,7 +128,7 @@ async def _load_context(
 
 
 async def _generate(
-    client: AsyncAnthropic,
+    client: Any,
     context: dict[str, Any],
     validation_errors: list[str] | None = None,
 ) -> str:
@@ -163,7 +168,14 @@ async def _generate(
     if SONNET_5_SUPPORTS_CUSTOM_TEMPERATURE:
         request["temperature"] = REQUESTED_TEMPERATURE
 
-    message = await client.messages.create(**request)
+    async def create_message():
+        return await client.messages.create(**request)
+
+    message = await call_with_retries(
+        create_message,
+        is_retryable=is_retryable_anthropic_error,
+        settings=anthropic_settings(),
+    )
     return _message_text(message)
 
 
@@ -229,7 +241,7 @@ async def generate_summary(
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         raise RuntimeError("ANTHROPIC_API_KEY is required")
-    client = AsyncAnthropic(api_key=api_key)
+    client = anthropic_client(api_key)
 
     text = await _generate(client, context)
     result: ValidationResult = validar(
