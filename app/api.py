@@ -198,23 +198,8 @@ async def judit_webhook(token:str,request:Request)->dict[str,bool]:
         async with conn.transaction():
             if not await _record_delivery(conn,event):return {"ok":True}
             if event.is_lawsuit_response:
-                source_id = event.response_id or event.callback_id
-                await stage_version(
-                    conn,
-                    code=str(event.code),
-                    source_request_id=source_id,
-                    cached_response=event.cached_response,
-                    payload=event.raw,
-                    judit_request_id=event.request_id,
-                    judit_response_id=event.response_id,
-                    judit_callback_id=event.callback_id,
-                    tenant_id=getattr(
-                        request.app.state, "webhook_tenant_id", None
-                    ),
-                )
-
                 source_id=event.response_id or event.callback_id
-                process_id,_=await stage_version(conn,code=str(event.code),source_request_id=source_id,cached_response=event.cached_response,payload=event.raw,judit_request_id=event.request_id,judit_response_id=event.response_id,judit_callback_id=event.callback_id)
+                process_id,_=await stage_version(conn,code=str(event.code),source_request_id=source_id,cached_response=event.cached_response,payload=event.raw,judit_request_id=event.request_id,judit_response_id=event.response_id,judit_callback_id=event.callback_id,tenant_id=getattr(request.app.state,"webhook_tenant_id",None))
                 if event.request_id:await grant_request_tenants(conn,request_id=str(event.request_id),process_id=process_id)
                 if await _request_was_completed(conn,str(event.request_id)):await _enqueue_finalize(conn,request_id=str(event.request_id),idempotency_key=f"judit-finalize-repair:{event.request_id}:{source_id}")
             elif event.request_completed and event.request_id:
