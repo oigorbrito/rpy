@@ -46,14 +46,16 @@ async def test_requested_cnj_reaches_tenant_scoped_published_summary(monkeypatch
  try:
   await _reset(pool)
   async with pool.acquire() as conn:await conn.execute("INSERT INTO tenants(id,name) VALUES($1,'request tenant')",tenant_id)
+  worker=_worker(pool)
   async with httpx.AsyncClient(transport=transport,base_url="http://test") as client:
    headers={"Authorization":f"Bearer {token}"}; assert (await client.get(f"/processes/{code}",headers=headers)).status_code==404
    requested=await client.post(f"/processes/{code}/request",headers=headers); assert requested.status_code==202; assert requested.json()=={"code":code,"status":"processing","created":True}; assert "request_id" not in requested.json()
-   repeated=await client.post(f"/processes/{code}/request",headers=headers); assert repeated.status_code==202; assert repeated.json()["created"] is False; assert provider_calls==1
+   repeated=await client.post(f"/processes/{code}/request",headers=headers); assert repeated.status_code==202; assert repeated.json()["created"] is False; assert provider_calls==0
+   assert await worker.process_one() is True; assert provider_calls==1
    assert (await client.post("/webhooks/judit/e2e-request-webhook",json=lawsuit)).status_code==200
    visible=await client.get(f"/processes/{code}",headers=headers); assert visible.status_code==200; assert visible.json()["summary"] is None
    assert (await client.post("/webhooks/judit/e2e-request-webhook",json=completion)).status_code==200
-  worker=_worker(pool); assert await worker.process_one() is True; assert await worker.process_one() is True; assert await worker.process_one() is False
+  assert await worker.process_one() is True; assert await worker.process_one() is True; assert await worker.process_one() is False
   async with httpx.AsyncClient(transport=transport,base_url="http://test") as client:
    published=await client.get(f"/processes/{code}",headers={"Authorization":f"Bearer {token}"})
   assert published.status_code==200; body=published.json(); assert body["summary_status"]=="available"; assert body["summary"]["validation"]["passed"] is True; assert code in body["summary"]["markdown"]

@@ -13,6 +13,7 @@ from uuid import UUID, uuid4
 import asyncpg
 
 import app.judit_tasks  # noqa: F401 - imports task registrations
+import app.process_requests  # noqa: F401 - imports task registrations
 import app.rag  # noqa: F401 - imports task registrations
 from app.db import create_pool
 from app.json_utils import decode_json_object
@@ -75,7 +76,6 @@ def _decode_payload(value: Any) -> dict[str, Any]:
 
 
 def _resolve_job_contract(row: asyncpg.Record) -> tuple[Any, dict[str, Any]]:
-    """Resolve a claimed job without allowing poison data to escape the slot loop."""
     try:
         handler = resolve_task(str(row["task_name"]))
         payload = _decode_payload(row["payload"])
@@ -95,8 +95,6 @@ class Worker:
         self.stop_event = asyncio.Event()
 
     async def _heartbeat_loop(self, job_id: UUID) -> None:
-        # A process shutdown must not stop heartbeating work that is intentionally
-        # draining. This loop is cancelled by _run_job when that specific job exits.
         while True:
             await asyncio.sleep(self.settings.heartbeat_interval_seconds)
             async with self.pool.acquire() as conn:
@@ -178,44 +176,20 @@ class Worker:
                 pass
 
     async def run(self) -> None:
-        slot_tasks = [
-            asyncio.create_task(self._slot_loop(slot))
-            for slot in range(self.settings.concurrency)
-        ]
+        slot_tasks = [asyncio.create_task(self._slot_loop(slot)) for slot in range(self.settings.concurrency)]
         reclaimer_task = asyncio.create_task(self._reclaimer_loop())
-
         await self.stop_event.wait()
-        logger.info(
-            "worker %s draining active jobs for up to %.1fs",
-            self.worker_id,
-            self.settings.shutdown_grace_seconds,
-        )
-
-        # Reclaiming belongs to an active worker. Once shutdown begins, stop that
-        # background responsibility immediately and only drain already-claimed jobs.
+        logger.info("worker %s draining active jobs for up to %.1fs", self.worker_id, self.settings.shutdown_grace_seconds)
         reclaimer_task.cancel()
         with suppress(asyncio.CancelledError):
             await reclaimer_task
-
-        done, pending = await asyncio.wait(
-            slot_tasks,
-            timeout=self.settings.shutdown_grace_seconds,
-        )
+        done, pending = await asyncio.wait(slot_tasks, timeout=self.settings.shutdown_grace_seconds)
         if pending:
-            logger.warning(
-                "worker %s shutdown grace expired; cancelling %s active slot(s)",
-                self.worker_id,
-                len(pending),
-            )
+            logger.warning("worker %s shutdown grace expired; cancelling %s active slot(s)", self.worker_id, len(pending))
             for item in pending:
                 item.cancel()
-
         await asyncio.gather(*slot_tasks, return_exceptions=True)
-        logger.info(
-            "worker %s shutdown complete (%s slot(s) drained)",
-            self.worker_id,
-            len(done),
-        )
+        logger.info("worker %s shutdown complete (%s slot(s) drained)", self.worker_id, len(done))
 
     def stop(self) -> None:
         self.stop_event.set()
@@ -225,23 +199,16 @@ async def _main() -> None:
     parser = argparse.ArgumentParser(description="Rpy PostgreSQL worker")
     parser.add_argument("--concurrency", type=int)
     args = parser.parse_args()
-
     settings = WorkerSettings.from_env()
     app.rag.provider_context_limits()
     if args.concurrency is not None:
         settings.concurrency = args.concurrency
         settings.validate()
-
-    pool = await create_pool(
-        settings.database_url,
-        min_size=1,
-        max_size=max(4, settings.concurrency + 2),
-    )
+    pool = await create_pool(settings.database_url, min_size=1, max_size=max(4, settings.concurrency + 2))
     worker = Worker(pool, settings)
     loop = asyncio.get_running_loop()
     for signal_name in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(signal_name, worker.stop)
-
     try:
         await worker.run()
     finally:
