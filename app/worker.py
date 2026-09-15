@@ -169,6 +169,9 @@ async def _main() -> None:
     args = parser.parse_args()
 
     settings = WorkerSettings.from_env()
+    # Fail deployment startup before opening a DB pool or claiming work if the
+    # deterministic provider context envelope is internally inconsistent.
+    app.rag.provider_context_limits()
     if args.concurrency is not None:
         settings.concurrency = args.concurrency
         settings.validate()

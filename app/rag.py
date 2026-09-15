@@ -34,6 +34,10 @@ RETRIEVAL_QUERY = (
     "sentença acórdão citação decisão audiência pedido objeto situação atual "
     "trânsito em julgado"
 )
+DEFAULT_PROVIDER_PROMPT_MAX_CHARS = 120_000
+DEFAULT_PROVIDER_STEP_TEXT_MAX_CHARS = 12_000
+DEFAULT_PROVIDER_STEPS_TEXT_MAX_CHARS = 80_000
+TRUNCATION_MARKER = "… [truncated]"
 _SECRET_HEADER_FIELDS = (
     ("instance", "Instância"),
     ("area", "Área"),
@@ -44,6 +48,48 @@ _SECRET_HEADER_FIELDS = (
 )
 
 
+def _positive_env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be an integer") from exc
+    if value <= 0:
+        raise RuntimeError(f"{name} must be greater than zero")
+    return value
+
+
+def provider_context_limits() -> tuple[int, int, int]:
+    prompt_max = _positive_env_int(
+        "PROVIDER_PROMPT_MAX_CHARS", DEFAULT_PROVIDER_PROMPT_MAX_CHARS
+    )
+    step_max = _positive_env_int(
+        "PROVIDER_STEP_TEXT_MAX_CHARS", DEFAULT_PROVIDER_STEP_TEXT_MAX_CHARS
+    )
+    steps_total_max = _positive_env_int(
+        "PROVIDER_STEPS_TEXT_MAX_CHARS", DEFAULT_PROVIDER_STEPS_TEXT_MAX_CHARS
+    )
+    if step_max > steps_total_max:
+        raise RuntimeError(
+            "PROVIDER_STEP_TEXT_MAX_CHARS must not exceed PROVIDER_STEPS_TEXT_MAX_CHARS"
+        )
+    if steps_total_max >= prompt_max:
+        raise RuntimeError(
+            "PROVIDER_STEPS_TEXT_MAX_CHARS must be lower than PROVIDER_PROMPT_MAX_CHARS"
+        )
+    return prompt_max, step_max, steps_total_max
+
+
+def _truncate_text(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    if limit <= len(TRUNCATION_MARKER):
+        return text[:limit]
+    return text[: limit - len(TRUNCATION_MARKER)] + TRUNCATION_MARKER
+
+
 def _message_text(message: Any) -> str:
     return "\n".join(
         block.text for block in message.content if getattr(block, "type", None) == "text"
@@ -51,14 +97,29 @@ def _message_text(message: Any) -> str:
 
 
 def _serialize_steps(ranked: list[Any]) -> list[dict[str, Any]]:
+    _, step_max, steps_total_max = provider_context_limits()
+    texts = [_truncate_text(str(item.step.text or ""), step_max) for item in ranked]
+
+    if sum(len(text) for text in texts) > steps_total_max:
+        bounded: list[str] = []
+        remaining = steps_total_max
+        remaining_items = len(texts)
+        for text in texts:
+            allowance = remaining // remaining_items if remaining_items else 0
+            rendered = _truncate_text(text, allowance)
+            bounded.append(rendered)
+            remaining -= len(rendered)
+            remaining_items -= 1
+        texts = bounded
+
     return [
         {
             "step_number": item.step.step_number,
             "occurred_at": str(item.step.occurred_at) if item.step.occurred_at else None,
             "title": item.step.title,
-            "text": item.step.text,
+            "text": text,
         }
-        for item in ranked
+        for item, text in zip(ranked, texts, strict=True)
     ]
 
 
@@ -210,6 +271,11 @@ async def _generate(
         + correction
         + "\nProduza o resumo processual agora."
     )
+    prompt_max, _, _ = provider_context_limits()
+    if len(user_prompt) > prompt_max:
+        raise ValueError(
+            f"provider prompt exceeds PROVIDER_PROMPT_MAX_CHARS ({len(user_prompt)} > {prompt_max})"
+        )
 
     request: dict[str, Any] = {
         "model": MODEL,
