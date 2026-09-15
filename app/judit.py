@@ -83,10 +83,7 @@ def parse_event(body: dict[str, Any]) -> JuditEvent:
         if value:
             code = str(value).strip() or None
 
-    if event_type == "response_created" and response_type == "lawsuit" and not code:
-        raise ValueError("lawsuit response missing process code")
-
-    return JuditEvent(
+    event = JuditEvent(
         event_type=event_type,
         request_id=str(request_id) if request_id else None,
         callback_id=str(callback_id) if callback_id else None,
@@ -97,6 +94,19 @@ def parse_event(body: dict[str, Any]) -> JuditEvent:
         raw=body,
         response_data=response_data,
     )
+
+    if event.is_lawsuit_response:
+        if not event.code:
+            raise ValueError("lawsuit response missing process code")
+        if not event.request_id:
+            raise ValueError("lawsuit response missing request id")
+        if not (event.response_id or event.callback_id):
+            raise ValueError("lawsuit response missing stable response identifier")
+
+    if event.request_completed and not event.request_id:
+        raise ValueError("request completion missing request id")
+
+    return event
 
 
 def _safe_parties(process: dict[str, Any]) -> list[dict[str, Any]]:
