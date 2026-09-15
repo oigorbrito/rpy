@@ -82,11 +82,26 @@ async def stage_version(
             VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)
             ON CONFLICT (process_id, source_request_id)
             DO UPDATE SET
-                source_cached_response = EXCLUDED.source_cached_response,
-                source_payload = EXCLUDED.source_payload,
-                judit_request_id = COALESCE(EXCLUDED.judit_request_id, process_versions.judit_request_id),
-                judit_response_id = COALESCE(EXCLUDED.judit_response_id, process_versions.judit_response_id),
-                judit_callback_id = COALESCE(EXCLUDED.judit_callback_id, process_versions.judit_callback_id)
+                source_cached_response = CASE
+                    WHEN process_versions.finalized THEN process_versions.source_cached_response
+                    ELSE EXCLUDED.source_cached_response
+                END,
+                source_payload = CASE
+                    WHEN process_versions.finalized THEN process_versions.source_payload
+                    ELSE EXCLUDED.source_payload
+                END,
+                judit_request_id = CASE
+                    WHEN process_versions.finalized THEN process_versions.judit_request_id
+                    ELSE COALESCE(EXCLUDED.judit_request_id, process_versions.judit_request_id)
+                END,
+                judit_response_id = CASE
+                    WHEN process_versions.finalized THEN process_versions.judit_response_id
+                    ELSE COALESCE(EXCLUDED.judit_response_id, process_versions.judit_response_id)
+                END,
+                judit_callback_id = CASE
+                    WHEN process_versions.finalized THEN process_versions.judit_callback_id
+                    ELSE COALESCE(EXCLUDED.judit_callback_id, process_versions.judit_callback_id)
+                END
             RETURNING id
             """,
             process_id,
