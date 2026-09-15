@@ -151,8 +151,8 @@ O último movimento fornecido é uma sentença.
             ),
         )
 
-        assert await worker.process_one() is True  # finalize_judit_request
-        assert await worker.process_one() is True  # generate_process_summary
+        assert await worker.process_one() is True
+        assert await worker.process_one() is True
         assert await worker.process_one() is False
         assert len(generation_attempts) == 2
         assert generation_attempts[0] is None
@@ -192,7 +192,7 @@ O último movimento fornecido é uma sentença.
             validation = decode_json_object(summary["validation"], label="summary validation")
             assert validation["passed"] is True
             assert summary["model"] == "claude-sonnet-5"
-            assert summary["prompt_version"] == "process-summary-v1"
+            assert summary["prompt_version"] == "process-summary-v2"
 
             await conn.execute(
                 "INSERT INTO tenants (id, name) VALUES ($1, 'e2e tenant')",
@@ -229,6 +229,8 @@ O último movimento fornecido é uma sentença.
         assert body["code"] == code
         assert body["summary"]["validation"]["passed"] is True
         assert body["summary"]["model"] == "claude-sonnet-5"
+        assert body["iaSummary"] == body["summary"]["markdown"]
+        assert code in body["iaSummary"]
 
         async with pool.acquire() as conn:
             assert await conn.fetchval(

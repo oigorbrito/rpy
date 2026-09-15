@@ -21,42 +21,47 @@ async def finalize_judit_request_task(payload: dict[str, Any]) -> dict[str, Any]
     pool = await create_pool(database_url, min_size=1, max_size=3)
     try:
         async with pool.acquire() as conn:
-            staged = await preferred_judit_version(conn, request_id=request_id)
-            if staged is None:
-                return {"request_id": request_id, "status": "no_lawsuit_response"}
+            # Promotion and summary enqueue are one durable unit. finalize_version()
+            # uses a nested transaction/savepoint, so an enqueue failure rolls the
+            # entire promotion back and lets the finalizer job retry safely.
+            async with conn.transaction():
+                staged = await preferred_judit_version(conn, request_id=request_id)
+                if staged is None:
+                    return {"request_id": request_id, "status": "no_lawsuit_response"}
 
-            source_payload = decode_json_object(
-                staged["source_payload"], label="staged Judit source payload"
-            )
-            staged_event = parse_event(source_payload)
-            if not staged_event.response_data:
-                return {"request_id": request_id, "status": "missing_response_data"}
-
-            fields = extract_promotable_fields(staged_event.response_data)
-            await finalize_version(
-                conn,
-                process_id=staged["process_id"],
-                version_id=staged["version_id"],
-                **fields,
-            )
-
-            summary_enqueued = False
-            if not bool(staged["source_cached_response"]):
-                job = await enqueue(
-                    conn,
-                    task_name="generate_process_summary",
-                    payload={
-                        "process_id": str(staged["process_id"]),
-                        "version_id": str(staged["version_id"]),
-                        "code": staged["code"],
-                    },
-                    idempotency_key=f"summary:{staged['version_id']}",
+                source_payload = decode_json_object(
+                    staged["source_payload"], label="staged Judit source payload"
                 )
-                summary_enqueued = job is not None
+                staged_event = parse_event(source_payload)
+                if not staged_event.response_data:
+                    return {"request_id": request_id, "status": "missing_response_data"}
+
+                fields = extract_promotable_fields(staged_event.response_data)
+                promoted = await finalize_version(
+                    conn,
+                    process_id=staged["process_id"],
+                    version_id=staged["version_id"],
+                    **fields,
+                )
+
+                summary_enqueued = False
+                if promoted and not bool(staged["source_cached_response"]):
+                    job = await enqueue(
+                        conn,
+                        task_name="generate_process_summary",
+                        payload={
+                            "process_id": str(staged["process_id"]),
+                            "version_id": str(staged["version_id"]),
+                            "code": staged["code"],
+                        },
+                        idempotency_key=f"summary:{staged['version_id']}",
+                    )
+                    summary_enqueued = job is not None
 
         return {
             "request_id": request_id,
-            "status": "finalized",
+            "status": "finalized" if promoted else "finalized_stale",
+            "promoted": promoted,
             "cached_response": bool(staged["source_cached_response"]),
             "summary_enqueued": summary_enqueued,
         }

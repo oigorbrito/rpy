@@ -7,6 +7,8 @@ from uuid import UUID
 
 import asyncpg
 
+MAX_JOB_ERROR_LOG_CHARS = 16_000
+
 CLAIM_JOB_SQL = """
 UPDATE jobs
 SET status = 'processing',
@@ -53,13 +55,16 @@ RETURNING id;
 FAIL_SQL = """
 UPDATE jobs
 SET status = CASE
-        WHEN attempts >= max_attempts THEN 'dead'::job_status
+        WHEN $5::boolean OR attempts >= max_attempts THEN 'dead'::job_status
         ELSE 'pending'::job_status
     END,
-    run_at = CASE WHEN attempts >= max_attempts THEN run_at ELSE $3 END,
+    run_at = CASE
+        WHEN $5::boolean OR attempts >= max_attempts THEN run_at
+        ELSE $3
+    END,
     worker_id = NULL,
     last_heartbeat = NULL,
-    error_log = COALESCE(error_log, '') || $4,
+    error_log = RIGHT(COALESCE(error_log, '') || $4, $6),
     updated_at = NOW()
 WHERE id = $1 AND worker_id = $2 AND status = 'processing'
 RETURNING status;
@@ -80,7 +85,10 @@ SET status = CASE
     END,
     worker_id = NULL,
     last_heartbeat = NULL,
-    error_log = COALESCE(error_log, '') || E'\nWorker heartbeat timed out.',
+    error_log = RIGHT(
+        COALESCE(error_log, '') || E'\nWorker heartbeat timed out.',
+        $2
+    ),
     updated_at = NOW()
 FROM stale
 WHERE j.id = stale.id
@@ -138,6 +146,7 @@ async def fail(
     *,
     attempts: int,
     error: str,
+    permanent: bool = False,
 ) -> str | None:
     backoff_seconds = min(300, 2 ** max(1, attempts))
     retry_at = datetime.now(UTC) + timedelta(seconds=backoff_seconds)
@@ -147,9 +156,13 @@ async def fail(
         worker_id,
         retry_at,
         f"\n[{datetime.now(UTC).isoformat()}] {error}",
+        permanent,
+        MAX_JOB_ERROR_LOG_CHARS,
     )
     return str(row["status"]) if row else None
 
 
 async def reclaim_stale(conn: asyncpg.Connection, timeout_seconds: int = 30) -> list[asyncpg.Record]:
-    return list(await conn.fetch(RECLAIM_SQL, timeout_seconds))
+    return list(
+        await conn.fetch(RECLAIM_SQL, timeout_seconds, MAX_JOB_ERROR_LOG_CHARS)
+    )

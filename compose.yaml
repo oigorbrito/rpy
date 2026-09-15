@@ -34,13 +34,28 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
       JUDIT_WEBHOOK_TOKEN: ${JUDIT_WEBHOOK_TOKEN:-dev-webhook-token}
+      JUDIT_WEBHOOK_MAX_BODY_BYTES: ${JUDIT_WEBHOOK_MAX_BODY_BYTES:-5242880}
+      JUDIT_WEBHOOK_TENANT_ID: ${JUDIT_WEBHOOK_TENANT_ID:-}
+      RPY_TENANT_PROCESSES: ${RPY_TENANT_PROCESSES:-{}}
       RPY_BEARER_TOKENS: ${RPY_BEARER_TOKENS:-{}}
+      RPY_OPS_TOKEN: ${RPY_OPS_TOKEN:-dev-ops-token}
       RETENTION_DAYS: ${RETENTION_DAYS:-365}
+      JOB_RETENTION_DAYS: ${JOB_RETENTION_DAYS:-30}
     ports:
       - "8000:8000"
     depends_on:
       migrate:
         condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=2).read()"
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
     restart: unless-stopped
 
   worker-1:

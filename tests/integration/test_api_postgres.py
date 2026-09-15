@@ -24,6 +24,15 @@ async def api_client(monkeypatch: pytest.MonkeyPatch):
     assert TEST_DATABASE_URL is not None
     await migrate(TEST_DATABASE_URL)
     pool = await create_pool(TEST_DATABASE_URL, min_size=1, max_size=4)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            TRUNCATE jobs, judit_deliveries, process_summaries, process_steps,
+                     tenant_processes, access_log, process_versions, processes,
+                     tenants
+            RESTART IDENTITY CASCADE
+            """
+        )
     app.state.pool = pool
     monkeypatch.setenv("JUDIT_WEBHOOK_TOKEN", "integration-webhook")
     transport = httpx.ASGITransport(app=app)
@@ -84,6 +93,63 @@ async def test_response_created_is_staged_without_summary_job(api_client) -> Non
 
 
 @pytest.mark.asyncio
+async def test_webhook_with_tenant_binding_grants_carteira(api_client, monkeypatch: pytest.MonkeyPatch) -> None:
+    """JUDIT_WEBHOOK_TENANT_ID binds ingested processes to the tenant portfolio."""
+    client, pool = api_client
+    tenant_id = uuid4()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO tenants (id, name) VALUES ($1, 'webhook-bounded')",
+            tenant_id,
+        )
+    monkeypatch.setenv("JUDIT_WEBHOOK_TENANT_ID", str(tenant_id))
+    monkeypatch.setattr(app.state, "webhook_tenant_id", tenant_id, raising=False)
+
+    await client.post(
+        "/webhooks/judit/integration-webhook",
+        json={
+            "callback_id": f"cb-tenant-{uuid4()}",
+            "event_type": "response_created",
+            "reference_type": "request",
+            "reference_id": f"req-tenant-{uuid4()}",
+            "payload": {
+                "request_id": f"req-tenant-{uuid4()}",
+                "response_id": f"resp-tenant-{uuid4()}",
+                "response_type": "lawsuit",
+                "response_data": {
+                    "code": "0000000-00.0000.0.00.0103",
+                    "classifications": [{"name": "Execução Fiscal"}],
+                    "parties": [{"name": "Município de São Paulo", "person_type": "JURIDICA"}],
+                },
+            },
+        },
+    )
+
+    async with pool.acquire() as conn:
+        process_id = await conn.fetchval(
+            "SELECT id FROM processes WHERE code = '0000000-00.0000.0.00.0103'"
+        )
+        assert process_id is not None
+        bound = await conn.fetchval(
+            "SELECT process_id FROM tenant_processes WHERE tenant_id = $1 AND process_id = $2",
+            tenant_id,
+            process_id,
+        )
+        assert bound == process_id
+
+    monkeypatch.setenv(
+        "RPY_BEARER_TOKENS",
+        json.dumps({f"tenant-token-{tenant_id}": str(tenant_id)}),
+    )
+    response = await client.get(
+        "/processes/0000000-00.0000.0.00.0103",
+        headers={"Authorization": f"Bearer tenant-token-{tenant_id}"},
+    )
+    assert response.status_code == 200
+    assert response.json()["code"] == "0000000-00.0000.0.00.0103"
+
+
+@pytest.mark.asyncio
 async def test_request_completed_only_enqueues_finalizer_and_is_idempotent(api_client) -> None:
     client, pool = api_client
     request_id = f"req-{uuid4()}"
@@ -112,6 +178,45 @@ async def test_request_completed_only_enqueues_finalizer_and_is_idempotent(api_c
         )
     assert deliveries == 1
     assert jobs == 1
+
+
+@pytest.mark.asyncio
+async def test_tracking_application_info_enqueues_finalizer_for_payload_request_id(api_client) -> None:
+    client, pool = api_client
+    request_id = f"req-{uuid4()}"
+    tracking_id = f"tracking-{uuid4()}"
+    callback_id = f"cb-{uuid4()}"
+
+    response = await client.post(
+        "/webhooks/judit/integration-webhook",
+        json={
+            "callback_id": callback_id,
+            "event_type": "response_created",
+            "reference_type": "tracking",
+            "reference_id": tracking_id,
+            "payload": {
+                "request_id": request_id,
+                "response_id": f"resp-{uuid4()}",
+                "response_type": "application_info",
+                "response_data": {"code": 600, "message": "REQUEST_COMPLETED"},
+                "tags": {"cached_response": False},
+            },
+        },
+    )
+    assert response.status_code == 200
+
+    async with pool.acquire() as conn:
+        job = await conn.fetchrow(
+            "SELECT payload, idempotency_key FROM jobs WHERE idempotency_key = $1",
+            f"judit-finalize:{request_id}",
+        )
+        tracking_job_count = await conn.fetchval(
+            "SELECT count(*) FROM jobs WHERE idempotency_key = $1",
+            f"judit-finalize:{tracking_id}",
+        )
+    assert job is not None
+    assert job["idempotency_key"] == f"judit-finalize:{request_id}"
+    assert tracking_job_count == 0
 
 
 @pytest.mark.asyncio
@@ -164,3 +269,57 @@ async def test_process_read_is_tenant_scoped_and_audited(api_client, monkeypatch
             code,
         )
     assert audit_count == 1
+
+
+@pytest.mark.asyncio
+async def test_failed_summaries_endpoint_is_ops_scoped(api_client, monkeypatch: pytest.MonkeyPatch) -> None:
+    client, pool = api_client
+
+    no_token = await client.get("/ops/failed-summaries")
+    assert no_token.status_code == 404
+
+    monkeypatch.setenv("RPY_OPS_TOKEN", "ops-secret")
+    wrong_token = await client.get(
+        "/ops/failed-summaries", headers={"Authorization": "Bearer wrong"}
+    )
+    assert wrong_token.status_code == 404
+
+    code = f"0000000-00.0000.0.00.{uuid4().hex[:4]}"
+    async with pool.acquire() as conn:
+        process_id = uuid4()
+        version_id = uuid4()
+        await conn.execute(
+            "INSERT INTO processes (id, code, class_name, court) VALUES ($1, $2, 'Classe', 'TJ')",
+            process_id,
+            code,
+        )
+        await conn.execute(
+            "INSERT INTO process_versions (id, process_id, source_request_id) VALUES ($1, $2, $3)",
+            version_id,
+            process_id,
+            "req-failed-1",
+        )
+        await conn.execute(
+            """
+            INSERT INTO process_summaries
+                (process_id, version_id, markdown, validation, model, prompt_version, generation_ms)
+            VALUES
+                ($1, $2, 'summary', $3::jsonb, 'model-x', 'v1', 120),
+                ($1, $2, 'summary2', $4::jsonb, 'model-x', 'v1', 90)
+            ON CONFLICT (process_id, version_id) DO NOTHING
+            """,
+            process_id,
+            version_id,
+            json.dumps({"passed": False, "errors": ["hallucination"]}),
+            json.dumps({"passed": True}),
+        )
+
+    with_token = await client.get(
+        "/ops/failed-summaries", headers={"Authorization": "Bearer ops-secret"}
+    )
+    assert with_token.status_code == 200
+    rows = with_token.json()["failed_summaries"]
+    mine = [row for row in rows if row["code"] == code]
+    assert len(mine) == 1
+    assert mine[0]["validation"]["passed"] is False
+    assert mine[0]["validation"]["errors"] == ["hallucination"]

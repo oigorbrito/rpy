@@ -2,77 +2,92 @@ from __future__ import annotations
 
 import json
 import os
+from time import perf_counter
 from typing import Any
 from uuid import UUID
 
 import asyncpg
-from anthropic import AsyncAnthropic
 
 from app.db import create_pool
 from app.embeddings import embed_query, ensure_step_embeddings
 from app.json_utils import decode_json_list, decode_json_object
+from app.prompts import PROCESS_SUMMARY_SYSTEM_PROMPT
+from app.providers import (
+    anthropic_client,
+    anthropic_settings,
+    call_with_retries,
+    is_retryable_anthropic_error,
+)
 from app.retrieval import load_steps, rank_steps, vector_search
-from app.tasks import task
+from app.tasks import PermanentTaskError, task
 from app.validation import ValidationResult, validar
 
 MODEL = "claude-sonnet-5"
-PROMPT_VERSION = "process-summary-v1"
+PROMPT_VERSION = "process-summary-v2"
+SECRET_MODEL = "local-deterministic"
+SECRET_PROMPT_VERSION = "secret-summary-v1"
+REQUESTED_TEMPERATURE = 0.2
+# Historical design intent is temperature=0.2. Claude Sonnet 5 currently rejects
+# non-default sampling parameters, so the production request must omit temperature.
+SONNET_5_SUPPORTS_CUSTOM_TEMPERATURE = False
 RETRIEVAL_QUERY = (
     "sentença acórdão citação decisão audiência pedido objeto situação atual "
     "trânsito em julgado"
 )
+DEFAULT_PROVIDER_PROMPT_MAX_CHARS = 120_000
+DEFAULT_PROVIDER_STEP_TEXT_MAX_CHARS = 12_000
+DEFAULT_PROVIDER_STEPS_TEXT_MAX_CHARS = 80_000
+TRUNCATION_MARKER = "… [truncated]"
+_SECRET_HEADER_FIELDS = (
+    ("instance", "Instância"),
+    ("area", "Área"),
+    ("justice_description", "Justiça"),
+    ("county", "Comarca"),
+    ("state", "Estado"),
+    ("city", "Cidade"),
+)
 
-SYSTEM_PROMPT = """
-Você é um assistente jurídico responsável por produzir RESUMOS PROCESSUAIS factuais, auditáveis e estritamente fundamentados nos dados fornecidos.
 
-OBJETIVO
-Produza um resumo útil para leitura rápida do processo, preservando precisão cronológica e separando fatos processuais de inferências. O texto não é parecer jurídico e não deve fazer prognóstico de resultado.
+def _positive_env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be an integer") from exc
+    if value <= 0:
+        raise RuntimeError(f"{name} must be greater than zero")
+    return value
 
-REGRAS DE FUNDAMENTAÇÃO
-1. Use somente os dados presentes em <processo> e <movimentos>. Não invente fatos, partes, pedidos, decisões, datas, valores ou fundamentos.
-2. Se uma informação relevante estiver ausente ou ambígua, diga de forma curta que ela não consta no contexto fornecido.
-3. Nomes de partes somente podem ser reproduzidos quando constarem exatamente na lista de partes fornecida. Ao apresentar uma parte em campo estruturado, use <Party name="NOME EXATO" />.
-4. Nunca exponha CPF ou CNPJ em sequência limpa de 11 ou 14 dígitos. Se o dado vier sem máscara, omita ou masque.
-5. O número CNJ deve ser exatamente o número informado no campo code. Não crie, corrija ou substitua o CNJ.
-6. Não use linguagem prognóstica. São proibidas formulações como "provavelmente será condenado", "chances de", "tende a ganhar" ou "recomendo que".
-7. Descreva decisão judicial apenas pelo que consta nos movimentos. Não transforme despacho em sentença nem inferira trânsito em julgado sem registro explícito.
-8. Preserve a ordem temporal ao narrar os principais acontecimentos. Dê destaque a citação, audiência, decisão, sentença, acórdão e trânsito em julgado quando existirem.
-9. Não mencione que houve busca vetorial, BM25, RAG, seleção de chunks ou qualquer mecanismo interno.
 
-FORMATO
-A resposta deve ser Markdown e pode conter componentes JSX. Em JSX, sempre use className= e nunca class=. Tags JSX devem estar balanceadas.
+def provider_context_limits() -> tuple[int, int, int]:
+    prompt_max = _positive_env_int(
+        "PROVIDER_PROMPT_MAX_CHARS", DEFAULT_PROVIDER_PROMPT_MAX_CHARS
+    )
+    step_max = _positive_env_int(
+        "PROVIDER_STEP_TEXT_MAX_CHARS", DEFAULT_PROVIDER_STEP_TEXT_MAX_CHARS
+    )
+    steps_total_max = _positive_env_int(
+        "PROVIDER_STEPS_TEXT_MAX_CHARS", DEFAULT_PROVIDER_STEPS_TEXT_MAX_CHARS
+    )
+    if step_max > steps_total_max:
+        raise RuntimeError(
+            "PROVIDER_STEP_TEXT_MAX_CHARS must not exceed PROVIDER_STEPS_TEXT_MAX_CHARS"
+        )
+    if steps_total_max >= prompt_max:
+        raise RuntimeError(
+            "PROVIDER_STEPS_TEXT_MAX_CHARS must be lower than PROVIDER_PROMPT_MAX_CHARS"
+        )
+    return prompt_max, step_max, steps_total_max
 
-Use esta estrutura, omitindo seções sem informação:
 
-# Resumo do processo
-
-<ProcessHeader className="process-header">
-- Processo: [CNJ exato]
-- Classe: [classe]
-- Tribunal: [tribunal]
-</ProcessHeader>
-
-## Partes
-Liste apenas as partes recebidas. Para cada nome use <Party name="NOME EXATO" /> e, se disponível, seu papel processual.
-
-## Síntese
-Explique em poucos parágrafos o objeto aparente do processo e seu estado atual, apenas a partir do contexto.
-
-## Linha do tempo relevante
-Apresente os acontecimentos processuais mais relevantes em ordem cronológica. Prefira data + evento + consequência processual explícita.
-
-## Situação atual
-Indique o último estado processual observável. Não faça previsão.
-
-## Pontos de atenção
-Registre lacunas documentais, eventos relevantes ou inconsistências objetivas do material fornecido. Não dê recomendação jurídica.
-
-CASOS SOB SIGILO
-Se <processo secrecy_level> for maior que zero, você receberá somente cabeçalho sanitizado e classe processual. Não tente inferir nomes, movimentos, objeto, pedidos ou resultado. Produza apenas um resumo mínimo dizendo que os detalhes foram restringidos por sigilo.
-
-CRITÉRIO DE QUALIDADE
-Prefira afirmações curtas e verificáveis. Não aumente o texto com explicações jurídicas genéricas. Cada afirmação material deve ser rastreável ao conteúdo fornecido. Se houver conflito entre campos, reporte a inconsistência em vez de escolher uma versão por conta própria.
-""".strip()
+def _truncate_text(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    if limit <= len(TRUNCATION_MARKER):
+        return text[:limit]
+    return text[: limit - len(TRUNCATION_MARKER)] + TRUNCATION_MARKER
 
 
 def _message_text(message: Any) -> str:
@@ -82,14 +97,29 @@ def _message_text(message: Any) -> str:
 
 
 def _serialize_steps(ranked: list[Any]) -> list[dict[str, Any]]:
+    _, step_max, steps_total_max = provider_context_limits()
+    texts = [_truncate_text(str(item.step.text or ""), step_max) for item in ranked]
+
+    if sum(len(text) for text in texts) > steps_total_max:
+        bounded: list[str] = []
+        remaining = steps_total_max
+        remaining_items = len(texts)
+        for text in texts:
+            allowance = remaining // remaining_items if remaining_items else 0
+            rendered = _truncate_text(text, allowance)
+            bounded.append(rendered)
+            remaining -= len(rendered)
+            remaining_items -= 1
+        texts = bounded
+
     return [
         {
             "step_number": item.step.step_number,
             "occurred_at": str(item.step.occurred_at) if item.step.occurred_at else None,
             "title": item.step.title,
-            "text": item.step.text,
+            "text": text,
         }
-        for item in ranked
+        for item, text in zip(ranked, texts, strict=True)
     ]
 
 
@@ -168,8 +198,58 @@ async def _load_context(
     return base
 
 
+def _is_secret_context(context: dict[str, Any]) -> bool:
+    return int(context.get("secrecy_level") or 0) > 0
+
+
+def _secret_summary(context: dict[str, Any]) -> str:
+    """Build the minimum useful summary without invoking an external model."""
+    lines = [
+        "# Resumo do processo",
+        "",
+        "## Sigilo",
+        "Os detalhes processuais foram restringidos por sigilo.",
+    ]
+
+    allowed_lines: list[str] = []
+    class_name = str(context.get("class_name") or "").strip()
+    if class_name:
+        allowed_lines.append(f"- Classe: {class_name}")
+
+    header = context.get("header") if isinstance(context.get("header"), dict) else {}
+    for key, label in _SECRET_HEADER_FIELDS:
+        value = header.get(key)
+        if value is None:
+            continue
+        rendered = str(value).strip()
+        if rendered:
+            allowed_lines.append(f"- {label}: {rendered}")
+
+    if allowed_lines:
+        lines.extend(["", "## Dados permitidos", *allowed_lines])
+
+    return "\n".join(lines).strip()
+
+
+def _provider_payload(context: dict[str, Any]) -> tuple[dict[str, Any], list[Any]]:
+    """Return the exact data boundary allowed to leave the application."""
+    if _is_secret_context(context):
+        return (
+            {
+                "class_name": context.get("class_name"),
+                "header": context.get("header") or {},
+            },
+            [],
+        )
+
+    return (
+        {key: value for key, value in context.items() if key != "steps"},
+        list(context.get("steps", [])),
+    )
+
+
 async def _generate(
-    client: AsyncAnthropic,
+    client: Any,
     context: dict[str, Any],
     validation_errors: list[str] | None = None,
 ) -> str:
@@ -180,33 +260,98 @@ async def _generate(
             + "\n".join(f"- {error}" for error in validation_errors)
             + "\n</validation_errors>\nCorrija todos os erros acima sem alterar fatos."
         )
+
+    provider_process, provider_steps = _provider_payload(context)
     user_prompt = (
         "<processo>\n"
-        + json.dumps(
-            {key: value for key, value in context.items() if key != "steps"},
-            ensure_ascii=False,
-            default=str,
-        )
+        + json.dumps(provider_process, ensure_ascii=False, default=str)
         + "\n</processo>\n<movimentos>\n"
-        + json.dumps(context.get("steps", []), ensure_ascii=False, default=str)
+        + json.dumps(provider_steps, ensure_ascii=False, default=str)
         + "\n</movimentos>\n"
         + correction
         + "\nProduza o resumo processual agora."
     )
-    message = await client.messages.create(
-        model=MODEL,
-        max_tokens=5000,
-        temperature=0.2,
-        system=[
+    prompt_max, _, _ = provider_context_limits()
+    if len(user_prompt) > prompt_max:
+        raise PermanentTaskError(
+            f"provider prompt exceeds PROVIDER_PROMPT_MAX_CHARS ({len(user_prompt)} > {prompt_max})"
+        )
+
+    request: dict[str, Any] = {
+        "model": MODEL,
+        "max_tokens": 5000,
+        "system": [
             {
                 "type": "text",
-                "text": SYSTEM_PROMPT,
+                "text": PROCESS_SUMMARY_SYSTEM_PROMPT,
                 "cache_control": {"type": "ephemeral"},
             }
         ],
-        messages=[{"role": "user", "content": user_prompt}],
+        "messages": [{"role": "user", "content": user_prompt}],
+    }
+    if SONNET_5_SUPPORTS_CUSTOM_TEMPERATURE:
+        request["temperature"] = REQUESTED_TEMPERATURE
+
+    async def create_message():
+        return await client.messages.create(**request)
+
+    message = await call_with_retries(
+        create_message,
+        is_retryable=is_retryable_anthropic_error,
+        settings=anthropic_settings(),
     )
     return _message_text(message)
+
+
+async def _persist_summary(
+    conn: asyncpg.Connection,
+    *,
+    process_id: UUID,
+    version_id: UUID,
+    text: str,
+    validation: dict[str, Any],
+    generation_ms: int,
+    model: str = MODEL,
+    prompt_version: str = PROMPT_VERSION,
+) -> bool:
+    """Persist without allowing duplicate/stale executions to degrade a valid summary.
+
+    Invalid summaries may be replaced by later attempts. Once a valid summary exists,
+    only a valid result from a different prompt/model revision may replace it. An
+    invalid duplicate can therefore never overwrite content already accepted by the
+    validator.
+    """
+    row = await conn.fetchrow(
+        """
+        INSERT INTO process_summaries (
+            process_id, version_id, markdown, validation, model, prompt_version, generation_ms
+        ) VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)
+        ON CONFLICT (process_id, version_id)
+        DO UPDATE SET markdown = EXCLUDED.markdown,
+                      validation = EXCLUDED.validation,
+                      model = EXCLUDED.model,
+                      prompt_version = EXCLUDED.prompt_version,
+                      generation_ms = EXCLUDED.generation_ms,
+                      created_at = NOW()
+        WHERE COALESCE((process_summaries.validation->>'passed')::boolean, false) = false
+           OR (
+                COALESCE((EXCLUDED.validation->>'passed')::boolean, false) = true
+                AND (
+                    process_summaries.prompt_version IS DISTINCT FROM EXCLUDED.prompt_version
+                    OR process_summaries.model IS DISTINCT FROM EXCLUDED.model
+                )
+           )
+        RETURNING id
+        """,
+        process_id,
+        version_id,
+        text,
+        validation,
+        model,
+        prompt_version,
+        generation_ms,
+    )
+    return row is not None
 
 
 async def generate_summary(
@@ -214,49 +359,59 @@ async def generate_summary(
     process_id: UUID,
     version_id: UUID,
 ) -> dict[str, Any]:
+    started = perf_counter()
     context = await _load_context(pool, process_id, version_id)
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise RuntimeError("ANTHROPIC_API_KEY is required")
-    client = AsyncAnthropic(api_key=api_key)
+    model = MODEL
+    prompt_version = PROMPT_VERSION
+    if _is_secret_context(context):
+        text = _secret_summary(context)
+        result: ValidationResult = validar(
+            text=text,
+            code=context["code"],
+            parties=[],
+        )
+        model = SECRET_MODEL
+        prompt_version = SECRET_PROMPT_VERSION
+    else:
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise RuntimeError("ANTHROPIC_API_KEY is required")
+        client = anthropic_client(api_key)
 
-    text = await _generate(client, context)
-    result: ValidationResult = validar(
-        text=text,
-        code=context["code"],
-        parties=context.get("parties", []),
-    )
-    if not result.passed:
-        text = await _generate(client, context, result.errors)
+        text = await _generate(client, context)
         result = validar(
             text=text,
             code=context["code"],
             parties=context.get("parties", []),
         )
+        if not result.passed:
+            text = await _generate(client, context, result.errors)
+            result = validar(
+                text=text,
+                code=context["code"],
+                parties=context.get("parties", []),
+            )
 
+    generation_ms = max(0, round((perf_counter() - started) * 1000))
     validation = {"passed": result.passed, "errors": result.errors}
     async with pool.acquire() as conn:
-        await conn.execute(
-            """
-            INSERT INTO process_summaries (
-                process_id, version_id, markdown, validation, model, prompt_version
-            ) VALUES ($1, $2, $3, $4::jsonb, $5, $6)
-            ON CONFLICT (process_id, version_id)
-            DO UPDATE SET markdown = EXCLUDED.markdown,
-                          validation = EXCLUDED.validation,
-                          model = EXCLUDED.model,
-                          prompt_version = EXCLUDED.prompt_version,
-                          created_at = NOW()
-            """,
-            process_id,
-            version_id,
-            text,
-            json.dumps(validation),
-            MODEL,
-            PROMPT_VERSION,
+        persisted = await _persist_summary(
+            conn,
+            process_id=process_id,
+            version_id=version_id,
+            text=text,
+            validation=validation,
+            model=model,
+            prompt_version=prompt_version,
+            generation_ms=generation_ms,
         )
-    return {"validation": validation, "model": MODEL}
+    return {
+        "validation": validation,
+        "model": model,
+        "generation_ms": generation_ms,
+        "persisted": persisted,
+    }
 
 
 @task("generate_process_summary")

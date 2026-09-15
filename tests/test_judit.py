@@ -1,4 +1,13 @@
+import json
+from pathlib import Path
+
 from app.judit import extract_promotable_fields, parse_event
+
+FIXTURES = Path(__file__).parent / "fixtures" / "judit"
+
+
+def _fixture(name: str) -> dict:
+    return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
 
 
 def test_parse_current_lawsuit_response_envelope() -> None:
@@ -41,6 +50,36 @@ def test_request_completed_does_not_require_process_code() -> None:
     assert event.request_completed is True
     assert event.code is None
     assert event.request_id == "req-1"
+
+
+def test_tracking_lawsuit_prefers_payload_request_id_over_tracking_reference() -> None:
+    event = parse_event(_fixture("tracking_lawsuit_response.json"))
+
+    assert event.is_lawsuit_response is True
+    assert event.request_id == "request-abc"
+    assert event.request_id != "tracking-123"
+    assert event.response_id == "response-lawsuit-001"
+    assert event.cached_response is False
+    assert event.code == "0000000-00.2026.8.21.0001"
+
+
+def test_application_info_600_is_request_completion() -> None:
+    event = parse_event(_fixture("tracking_request_completed.json"))
+
+    assert event.is_lawsuit_response is False
+    assert event.request_completed is True
+    assert event.request_id == "request-abc"
+    assert event.response_type == "application_info"
+    assert event.code == "600"
+
+
+def test_application_info_without_completion_marker_is_not_complete() -> None:
+    payload = _fixture("tracking_request_completed.json")
+    payload["payload"]["response_data"] = {"code": 601, "message": "OTHER_INFO"}
+
+    event = parse_event(payload)
+
+    assert event.request_completed is False
 
 
 def test_extract_current_judit_steps_and_sanitizes_parties() -> None:
@@ -86,3 +125,20 @@ def test_extract_current_judit_steps_and_sanitizes_parties() -> None:
         {"name": "Parte A", "side": "Active", "person_type": "Autor"}
     ]
     assert "12345678901" not in str(fields["parties"])
+
+
+def test_extracts_promotable_fields_from_tracking_fixture_without_documents() -> None:
+    event = parse_event(_fixture("tracking_lawsuit_response.json"))
+    fields = extract_promotable_fields(event.response_data or {})
+
+    assert fields["court"] == "TJRS"
+    assert fields["class_name"] == "PROCEDIMENTO COMUM CÍVEL"
+    assert fields["header"]["state"] == "RS"
+    assert fields["header"]["city"] == "Porto Alegre"
+    assert len(fields["steps"]) == 2
+    assert fields["parties"][0] == {
+        "name": "PARTE AUTORA TESTE",
+        "side": "Active",
+        "person_type": "Autor",
+    }
+    assert "00000000000" not in str(fields["parties"])
