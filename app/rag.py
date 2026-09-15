@@ -127,6 +127,23 @@ async def _load_context(
     return base
 
 
+def _provider_payload(context: dict[str, Any]) -> tuple[dict[str, Any], list[Any]]:
+    """Return the exact data boundary allowed to leave the application."""
+    if int(context.get("secrecy_level") or 0) > 0:
+        return (
+            {
+                "class_name": context.get("class_name"),
+                "header": context.get("header") or {},
+            },
+            [],
+        )
+
+    return (
+        {key: value for key, value in context.items() if key != "steps"},
+        list(context.get("steps", [])),
+    )
+
+
 async def _generate(
     client: Any,
     context: dict[str, Any],
@@ -139,15 +156,13 @@ async def _generate(
             + "\n".join(f"- {error}" for error in validation_errors)
             + "\n</validation_errors>\nCorrija todos os erros acima sem alterar fatos."
         )
+
+    provider_process, provider_steps = _provider_payload(context)
     user_prompt = (
         "<processo>\n"
-        + json.dumps(
-            {key: value for key, value in context.items() if key != "steps"},
-            ensure_ascii=False,
-            default=str,
-        )
+        + json.dumps(provider_process, ensure_ascii=False, default=str)
         + "\n</processo>\n<movimentos>\n"
-        + json.dumps(context.get("steps", []), ensure_ascii=False, default=str)
+        + json.dumps(provider_steps, ensure_ascii=False, default=str)
         + "\n</movimentos>\n"
         + correction
         + "\nProduza o resumo processual agora."
