@@ -101,6 +101,7 @@ def queue_invariant_violations() -> list[str]:
 def rag_invariant_violations() -> list[str]:
     errors: list[str] = []
     rag = ROOT / "app" / "rag.py"
+    prompts = ROOT / "app" / "prompts.py"
     validation = ROOT / "app" / "validation.py"
     retrieval = ROOT / "app" / "retrieval.py"
     embeddings = ROOT / "app" / "embeddings.py"
@@ -114,14 +115,19 @@ def rag_invariant_violations() -> list[str]:
     rag_text = rag.read_text(encoding="utf-8", errors="ignore")
     validation_text = validation.read_text(encoding="utf-8", errors="ignore")
     retrieval_text = retrieval.read_text(encoding="utf-8", errors="ignore")
+    prompt_text = prompts.read_text(encoding="utf-8", errors="ignore") if prompts.exists() else ""
     if "validar(" not in rag_text:
         errors.append("RAG publishing path must call validar()")
     if 'MODEL = "claude-sonnet-5"' not in rag_text:
         errors.append("RAG must use Claude Sonnet 5")
-    if "temperature=0.2" not in rag_text.replace(" ", ""):
-        errors.append("RAG must use temperature 0.2")
+    if "REQUESTED_TEMPERATURE = 0.2" not in rag_text:
+        errors.append("RAG must preserve the requested temperature 0.2 design intent")
+    if "SONNET_5_SUPPORTS_CUSTOM_TEMPERATURE = False" not in rag_text:
+        errors.append("Sonnet 5 request must document current custom-temperature incompatibility")
     if '"cache_control"' not in rag_text:
         errors.append("system prompt must use Anthropic cache_control")
+    if not prompts.exists() or "PROCESS_SUMMARY_SYSTEM_PROMPT" not in prompt_text:
+        errors.append("cacheable system prompt must live in app/prompts.py")
     if "secrecy_level" not in rag_text or 'base["secrecy_level"] > 0' not in rag_text:
         errors.append("secret cases must be truncated before generation")
     if "class\\s*=" not in validation_text:
