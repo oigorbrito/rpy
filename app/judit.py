@@ -41,16 +41,21 @@ def parse_event(body: dict[str, Any]) -> JuditEvent:
         raise ValueError("invalid webhook envelope")
 
     event_type = str(body.get("event_type") or "").strip().lower()
+    reference_type = str(body.get("reference_type") or "").strip().lower()
     payload = body.get("payload") if isinstance(body.get("payload"), dict) else {}
 
-    # For tracking webhooks, reference_id is the tracking_id, not the request
-    # execution id. Prefer payload.request_id so lawsuit and completion callbacks
-    # from the same execution are staged/finalized under the same durable key.
-    request_id = (
+    # A tracking reference identifies the tracking subscription, not the concrete
+    # request execution. Never reuse tracking reference_id as request_id because
+    # that can correlate unrelated callbacks under the wrong durable request key.
+    explicit_request_id = (
         payload.get("request_id")
         or body.get("request_id")
         or body.get("requestId")
-        or body.get("reference_id")
+    )
+    request_id = (
+        explicit_request_id
+        if explicit_request_id
+        else (body.get("reference_id") if reference_type != "tracking" else None)
     )
     callback_id = body.get("callback_id")
     response_id = payload.get("response_id")
