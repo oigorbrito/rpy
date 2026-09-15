@@ -12,7 +12,7 @@ import pytest
 import app.process_requests as process_requests
 from app.api import app
 from app.db import create_pool
-from app.judit_client import JuditRequestResult
+from app.judit_client import JuditRequestError, JuditRequestResult
 from app.migrations import migrate
 from app.worker import Worker, WorkerSettings
 
@@ -93,3 +93,28 @@ async def test_callback_before_provider_mapping_is_reconciled(monkeypatch):
     assert await _worker(pool).process_one() is True; assert callback_sent
     async with pool.acquire() as conn: assert await conn.fetchval("SELECT EXISTS(SELECT 1 FROM tenant_processes tp JOIN processes p ON p.id=tp.process_id WHERE tp.tenant_id=$1 AND p.code=$2)",tenant_id,CNJ)
     await pool.close()
+
+@pytest.mark.asyncio
+async def test_ambiguous_provider_failure_is_terminal_and_not_automatically_retried(monkeypatch):
+    pool,tenant_id,token=await _setup(monkeypatch); calls=0
+    async def fail_create(code):
+        nonlocal calls; calls+=1; assert code==CNJ
+        raise JuditRequestError("Judit request failed")
+    monkeypatch.setattr(process_requests,"create_lawsuit_request",fail_create)
+    transport=httpx.ASGITransport(app=app)
+    try:
+        async with httpx.AsyncClient(transport=transport,base_url="http://test") as client:
+            headers={"Authorization":f"Bearer {token}"}
+            first=await client.post(f"/processes/{CNJ}/request",headers=headers)
+            assert first.status_code==202 and first.json()["created"] is True
+            assert await _worker(pool).process_one() is True
+            repeated=await client.post(f"/processes/{CNJ}/request",headers=headers)
+            assert repeated.status_code==202 and repeated.json()["created"] is False
+        async with pool.acquire() as conn:
+            request_status=await conn.fetchval("SELECT status FROM tenant_judit_requests WHERE tenant_id=$1 AND process_code=$2",tenant_id,CNJ)
+            job=await conn.fetchrow("SELECT status::text AS status, attempts, max_attempts FROM jobs WHERE task_name='request_judit_process'")
+        assert request_status=="failed"
+        assert job and job["status"]=="dead" and int(job["attempts"])==1 and int(job["max_attempts"])==1
+        assert calls==1
+    finally:
+        await pool.close()
