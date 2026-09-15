@@ -1,7 +1,7 @@
 x-rpy-image: &rpy-image ${RPY_IMAGE:?RPY_IMAGE immutable digest is required}
 
 x-api-env: &api-env
-  DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+  DATABASE_URL: ${API_DATABASE_URL:?API_DATABASE_URL is required}
   JUDIT_WEBHOOK_TOKEN: ${JUDIT_WEBHOOK_TOKEN:?JUDIT_WEBHOOK_TOKEN is required}
   JUDIT_WEBHOOK_MAX_BODY_BYTES: ${JUDIT_WEBHOOK_MAX_BODY_BYTES:-5242880}
   RPY_BEARER_TOKENS: ${RPY_BEARER_TOKENS:?RPY_BEARER_TOKENS is required}
@@ -16,7 +16,7 @@ x-api-env: &api-env
   OPS_GENERATION_P95_CRITICAL_MS: ${OPS_GENERATION_P95_CRITICAL_MS:-120000}
 
 x-worker-env: &worker-env
-  DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+  DATABASE_URL: ${WORKER_DATABASE_URL:?WORKER_DATABASE_URL is required}
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}
   OPENAI_API_KEY: ${OPENAI_API_KEY:?OPENAI_API_KEY is required}
   EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
@@ -27,7 +27,7 @@ x-worker-env: &worker-env
   WORKER_TASK_TIMEOUT_SECONDS: ${WORKER_TASK_TIMEOUT_SECONDS:-120}
 
 x-scheduler-env: &scheduler-env
-  DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+  DATABASE_URL: ${SCHEDULER_DATABASE_URL:?SCHEDULER_DATABASE_URL is required}
   RETENTION_DAYS: ${RETENTION_DAYS:-365}
   JOB_RETENTION_DAYS: ${JOB_RETENTION_DAYS:-30}
   EXPUNGE_INTERVAL_SECONDS: ${EXPUNGE_INTERVAL_SECONDS:-86400}
@@ -52,9 +52,18 @@ services:
 
   migrate:
     image: *rpy-image
-    command: ["python", "scripts/migrate.py"]
+    command:
+      - sh
+      - -c
+      - >-
+        python scripts/migrate.py --database-url "$$MIGRATION_DATABASE_URL" &&
+        python scripts/provision_db_roles.py
     environment:
-      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      MIGRATION_DATABASE_URL: ${MIGRATION_DATABASE_URL:?MIGRATION_DATABASE_URL is required}
+      API_DATABASE_URL: ${API_DATABASE_URL:?API_DATABASE_URL is required}
+      WORKER_DATABASE_URL: ${WORKER_DATABASE_URL:?WORKER_DATABASE_URL is required}
+      SCHEDULER_DATABASE_URL: ${SCHEDULER_DATABASE_URL:?SCHEDULER_DATABASE_URL is required}
+      BACKUP_DATABASE_URL: ${BACKUP_DATABASE_URL:?BACKUP_DATABASE_URL is required}
     depends_on:
       postgres:
         condition: service_healthy

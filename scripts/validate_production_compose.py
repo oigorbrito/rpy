@@ -5,6 +5,7 @@ import re
 import sys
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 EXPECTED_SERVICES = {
     "postgres",
@@ -48,8 +49,21 @@ SCHEDULER_REQUIRED_ENV = {
     "JOB_RETENTION_DAYS",
     "EXPUNGE_INTERVAL_SECONDS",
 }
+MIGRATE_REQUIRED_ENV = {
+    "MIGRATION_DATABASE_URL",
+    "API_DATABASE_URL",
+    "WORKER_DATABASE_URL",
+    "SCHEDULER_DATABASE_URL",
+    "BACKUP_DATABASE_URL",
+}
 HTTP_SECRETS = {"JUDIT_WEBHOOK_TOKEN", "RPY_BEARER_TOKENS", "RPY_OPS_TOKEN"}
 PROVIDER_SECRETS = {"ANTHROPIC_API_KEY", "OPENAI_API_KEY"}
+DB_ROLE_USERS = {
+    "api": "rpy_api",
+    "worker-1": "rpy_worker",
+    "worker-2": "rpy_worker",
+    "scheduler": "rpy_scheduler",
+}
 
 
 def _fail(message: str) -> None:
@@ -101,6 +115,51 @@ def _validate_application_image(services: dict[str, Any]) -> None:
         _fail(f"all application services must use the same image digest: {rendered}")
 
 
+def _database_user(url: str) -> str:
+    return urlparse(url).username or ""
+
+
+def _validate_database_isolation(services: dict[str, Any]) -> None:
+    runtime_urls: dict[str, str] = {}
+    for service_name, expected_user in DB_ROLE_USERS.items():
+        environment = _environment(services, service_name)
+        database_url = str(environment.get("DATABASE_URL") or "")
+        actual_user = _database_user(database_url)
+        if actual_user != expected_user:
+            _fail(
+                f"{service_name} DATABASE_URL must use role {expected_user!r}, got {actual_user!r}"
+            )
+        runtime_urls[service_name] = database_url
+
+    if runtime_urls["api"] == runtime_urls["worker-1"]:
+        _fail("api and worker database credentials must be distinct")
+    if runtime_urls["api"] == runtime_urls["scheduler"]:
+        _fail("api and scheduler database credentials must be distinct")
+    if runtime_urls["worker-1"] == runtime_urls["scheduler"]:
+        _fail("worker and scheduler database credentials must be distinct")
+    if runtime_urls["worker-1"] != runtime_urls["worker-2"]:
+        _fail("both workers must use the same worker database credential")
+
+    migrate_env = _environment(services, "migrate")
+    if set(migrate_env) != MIGRATE_REQUIRED_ENV:
+        _fail("migrate must receive only migration/runtime database provisioning URLs")
+    migration_url = str(migrate_env["MIGRATION_DATABASE_URL"])
+    migration_user = _database_user(migration_url)
+    if migration_user in set(DB_ROLE_USERS.values()) | {"rpy_backup"}:
+        _fail("migration credential must be distinct from every runtime database role")
+
+    expected_provisioning_users = {
+        "API_DATABASE_URL": "rpy_api",
+        "WORKER_DATABASE_URL": "rpy_worker",
+        "SCHEDULER_DATABASE_URL": "rpy_scheduler",
+        "BACKUP_DATABASE_URL": "rpy_backup",
+    }
+    for env_name, expected_user in expected_provisioning_users.items():
+        actual_user = _database_user(str(migrate_env[env_name]))
+        if actual_user != expected_user:
+            _fail(f"migrate {env_name} must use role {expected_user!r}")
+
+
 def validate(config: dict[str, Any]) -> None:
     services = config.get("services")
     if not isinstance(services, dict):
@@ -110,6 +169,7 @@ def validate(config: dict[str, Any]) -> None:
         _fail(f"unexpected services: {sorted(services)}")
 
     _validate_application_image(services)
+    _validate_database_isolation(services)
 
     postgres_image = str(services["postgres"].get("image") or "")
     if not IMMUTABLE_IMAGE_RE.fullmatch(postgres_image):
@@ -160,14 +220,14 @@ def validate(config: dict[str, Any]) -> None:
         _require_env(services, service_name, WORKER_REQUIRED_ENV)
     _require_env(services, "scheduler", SCHEDULER_REQUIRED_ENV)
 
-    migrate_env = _environment(services, "migrate")
-    if set(migrate_env) != {"DATABASE_URL"}:
-        _fail("migrate must receive only DATABASE_URL")
-
-    _forbid_env(services, "api", PROVIDER_SECRETS)
+    _forbid_env(services, "api", PROVIDER_SECRETS | MIGRATE_REQUIRED_ENV)
     for service_name in ("worker-1", "worker-2"):
-        _forbid_env(services, service_name, HTTP_SECRETS)
-    _forbid_env(services, "scheduler", HTTP_SECRETS | PROVIDER_SECRETS)
+        _forbid_env(services, service_name, HTTP_SECRETS | MIGRATE_REQUIRED_ENV)
+    _forbid_env(
+        services,
+        "scheduler",
+        HTTP_SECRETS | PROVIDER_SECRETS | MIGRATE_REQUIRED_ENV,
+    )
     _forbid_env(services, "migrate", HTTP_SECRETS | PROVIDER_SECRETS)
 
 
