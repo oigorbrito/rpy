@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
+
+_CNJ_CANONICAL_RE = re.compile(r"^\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}$")
+_CNJ_DIGITS_RE = re.compile(r"^\d{20}$")
 
 
 @dataclass(slots=True)
@@ -36,21 +40,37 @@ class JuditEvent:
         return self.event_type == "response_created" and self.response_type == "lawsuit"
 
 
+def normalize_cnj(value: str) -> str:
+    candidate = value.strip()
+    if not (
+        _CNJ_CANONICAL_RE.fullmatch(candidate)
+        or _CNJ_DIGITS_RE.fullmatch(candidate)
+    ):
+        raise ValueError("invalid CNJ process code")
+    digits = "".join(character for character in candidate if character.isdigit())
+    return (
+        f"{digits[:7]}-{digits[7:9]}."
+        f"{digits[9:13]}.{digits[13]}.{digits[14:16]}.{digits[16:20]}"
+    )
+
+
 def parse_event(body: dict[str, Any]) -> JuditEvent:
     if not isinstance(body, dict):
         raise ValueError("invalid webhook envelope")
 
     event_type = str(body.get("event_type") or "").strip().lower()
+    reference_type = str(body.get("reference_type") or "").strip().lower()
     payload = body.get("payload") if isinstance(body.get("payload"), dict) else {}
 
-    # For tracking webhooks, reference_id is the tracking_id, not the request
-    # execution id. Prefer payload.request_id so lawsuit and completion callbacks
-    # from the same execution are staged/finalized under the same durable key.
-    request_id = (
+    explicit_request_id = (
         payload.get("request_id")
         or body.get("request_id")
         or body.get("requestId")
-        or body.get("reference_id")
+    )
+    request_id = (
+        explicit_request_id
+        if explicit_request_id
+        else (body.get("reference_id") if reference_type != "tracking" else None)
     )
     callback_id = body.get("callback_id")
     response_id = payload.get("response_id")
@@ -83,10 +103,7 @@ def parse_event(body: dict[str, Any]) -> JuditEvent:
         if value:
             code = str(value).strip() or None
 
-    if event_type == "response_created" and response_type == "lawsuit" and not code:
-        raise ValueError("lawsuit response missing process code")
-
-    return JuditEvent(
+    event = JuditEvent(
         event_type=event_type,
         request_id=str(request_id) if request_id else None,
         callback_id=str(callback_id) if callback_id else None,
@@ -97,6 +114,20 @@ def parse_event(body: dict[str, Any]) -> JuditEvent:
         raw=body,
         response_data=response_data,
     )
+
+    if event.is_lawsuit_response:
+        if not event.code:
+            raise ValueError("lawsuit response missing process code")
+        event.code = normalize_cnj(event.code)
+        if not event.request_id:
+            raise ValueError("lawsuit response missing request id")
+        if not (event.response_id or event.callback_id):
+            raise ValueError("lawsuit response missing stable response identifier")
+
+    if event.request_completed and not event.request_id:
+        raise ValueError("request completion missing request id")
+
+    return event
 
 
 def _safe_parties(process: dict[str, Any]) -> list[dict[str, Any]]:

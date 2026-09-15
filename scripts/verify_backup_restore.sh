@@ -7,11 +7,12 @@ set -eu
 
 PG_CLIENT_IMAGE=${PG_CLIENT_IMAGE:-pgvector/pgvector:pg16@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b}
 workdir=.tmp/backup-restore
-backup="$workdir/rpy.dump"
+backup="$workdir/source/rpy.dump"
+relocated_backup="$workdir/off-host-copy/rpy.dump"
 restore_db=rpy_restore_test
 
 rm -rf "$workdir"
-mkdir -p "$workdir"
+mkdir -p "$(dirname "$backup")" "$(dirname "$relocated_backup")"
 
 run_client() {
   # Keep stdin attached so here-doc SQL is actually delivered to psql.
@@ -51,10 +52,23 @@ docker run --rm --network host \
   "$PG_CLIENT_IMAGE" \
   sh scripts/backup_database.sh "$backup"
 
+# The backup container writes with umask 077 as its own uid. Perform the simulated
+# off-host copy through the same client image rather than weakening backup modes.
 docker run --rm \
   -v "$PWD:/work" -w /work \
   "$PG_CLIENT_IMAGE" \
-  pg_restore --list "$backup" | grep -q "backup_restore_probe" || {
+  sh -c 'cp "$1" "$2" && cp "$1.sha256" "$2.sha256" && rm -rf "$(dirname "$1")"' \
+  sh "$backup" "$relocated_backup"
+
+docker run --rm \
+  -v "$PWD:/work" -w /work \
+  "$PG_CLIENT_IMAGE" \
+  sh scripts/verify_backup_bundle.sh "$relocated_backup"
+
+docker run --rm \
+  -v "$PWD:/work" -w /work \
+  "$PG_CLIENT_IMAGE" \
+  pg_restore --list "$relocated_backup" | grep -q "backup_restore_probe" || {
     echo "restore drill failed: sentinel table missing from backup TOC" >&2
     exit 1
   }
@@ -68,7 +82,7 @@ docker run --rm --network host \
   -e ALLOW_DESTRUCTIVE_RESTORE=YES \
   -v "$PWD:/work" -w /work \
   "$PG_CLIENT_IMAGE" \
-  sh scripts/restore_database.sh "$backup"
+  sh scripts/restore_database.sh "$relocated_backup"
 
 restored_probe=$(run_client psql "$TEST_RESTORE_DATABASE_URL" -Atc \
   "SELECT value FROM backup_restore_probe WHERE id = 1;")

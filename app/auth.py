@@ -16,18 +16,28 @@ def configured_bearer_tokens() -> dict[str, UUID]:
         raise RuntimeError("RPY_BEARER_TOKENS must be valid JSON") from exc
     if not isinstance(parsed, dict):
         raise RuntimeError("RPY_BEARER_TOKENS must be a JSON object mapping token to tenant UUID")
+    if not parsed:
+        raise RuntimeError("RPY_BEARER_TOKENS must configure at least one bearer token")
 
     configured: dict[str, UUID] = {}
     for token, tenant_id in parsed.items():
-        if not isinstance(token, str) or not token.strip():
+        if not isinstance(token, str) or not token:
             raise RuntimeError("RPY_BEARER_TOKENS contains an empty bearer token")
+        # HTTP Authorization credentials cannot reliably preserve whitespace as part
+        # of the token. tenant_from_request intentionally strips transport spacing,
+        # so accepting whitespace here would create a startup-successful credential
+        # that can never match (or whose meaning depends on intermediaries).
+        if token != token.strip() or any(char.isspace() for char in token):
+            raise RuntimeError(
+                "RPY_BEARER_TOKENS bearer tokens must not contain whitespace"
+            )
         if not isinstance(tenant_id, str):
             raise RuntimeError("RPY_BEARER_TOKENS tenant ids must be UUID strings")
         try:
             configured[token] = UUID(tenant_id)
         except (TypeError, ValueError, AttributeError) as exc:
             raise RuntimeError(
-                f"RPY_BEARER_TOKENS contains an invalid tenant UUID for one configured token"
+                "RPY_BEARER_TOKENS contains an invalid tenant UUID for one configured token"
             ) from exc
     return configured
 

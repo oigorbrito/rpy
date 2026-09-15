@@ -39,44 +39,67 @@ The ingress should enforce a request-body limit no greater than `JUDIT_WEBHOOK_M
 Production has no fallback values for:
 
 - `POSTGRES_PASSWORD`;
-- `DATABASE_URL`;
+- `MIGRATION_DATABASE_URL`;
+- `API_DATABASE_URL`;
+- `WORKER_DATABASE_URL`;
+- `SCHEDULER_DATABASE_URL`;
+- `BACKUP_DATABASE_URL`;
 - `ANTHROPIC_API_KEY`;
 - `OPENAI_API_KEY`;
 - `JUDIT_WEBHOOK_TOKEN`;
 - `RPY_BEARER_TOKENS`;
 - `RPY_OPS_TOKEN`.
 
-Inject them from the deployment platform's secret manager or equivalent environment mechanism. Do not place populated values in the repository or bake them into the image. `.env.production.example` is a shape-only template.
+Inject them from the deployment platform's secret manager or equivalent environment mechanism. Do not place populated values in the repository or bake them into the image. `.env.production.example` is a shape-only template. Staging and production must use separate secret sources; do not point both environments at the same PostgreSQL credentials or reuse HTTP/provider secrets between them.
+
+Database credentials are split by responsibility. The five URLs must use distinct PostgreSQL login roles and target the same application database:
+
+- `MIGRATION_DATABASE_URL` is the one-shot deploy/admin credential used by migrations and role provisioning;
+- `API_DATABASE_URL` is injected into `api` as its `DATABASE_URL`;
+- `WORKER_DATABASE_URL` is injected into both workers as their `DATABASE_URL`;
+- `SCHEDULER_DATABASE_URL` is injected into the singleton scheduler as its `DATABASE_URL`;
+- `BACKUP_DATABASE_URL` is reserved for backup jobs and role provisioning and is not injected into normal runtime services.
 
 Secrets are scoped by service instead of being copied to the whole stack:
 
-- `api` receives database access plus Judit, bearer-token and ops credentials;
-- `worker-*` receives database access plus Anthropic/OpenAI credentials and provider settings;
-- `scheduler` receives only database access and retention/scheduling settings;
-- `migrate` receives only `DATABASE_URL`;
+- `api` receives `API_DATABASE_URL` plus Judit, bearer-token and ops credentials;
+- `worker-*` receives `WORKER_DATABASE_URL` plus Anthropic/OpenAI credentials and provider settings;
+- `scheduler` receives only `SCHEDULER_DATABASE_URL` and retention/scheduling settings;
+- `migrate` receives the migration URL plus the four runtime/backup URLs needed to provision and rotate their roles;
 - provider keys must not be present in API, scheduler or migration environments;
 - HTTP-facing credentials must not be present in workers, scheduler or migration environments.
 
-If the PostgreSQL password contains reserved URL characters, URL-encode it in `DATABASE_URL`. `POSTGRES_PASSWORD` and the credentials encoded in `DATABASE_URL` must refer to the same database user.
+If a PostgreSQL password contains reserved URL characters, URL-encode it in the corresponding database URL. Do not reuse the migration/admin role for API, worker, scheduler or backup access.
 
 Bearer-token rotation is performed by temporarily mapping both old and new tokens to the same tenant, deploying that overlap, migrating clients, and then removing the old token in a later deploy.
 
 ## Deploy sequence
 
 1. Build and publish the application image in trusted CI, then record its immutable registry digest.
-2. Set `RPY_IMAGE` to that digest and inject required configuration and secrets.
-3. Render and validate the compose file with `docker compose -f compose.production.yaml config`.
-4. Pull the exact digest before changing running services.
-5. Start PostgreSQL or verify the managed PostgreSQL endpoint is healthy.
-6. Run the one-shot `migrate` service to completion using the same `RPY_IMAGE` digest.
-7. Start API, both workers, and the singleton scheduler using that digest.
-8. Route traffic only after `/ready` succeeds.
+2. Set `RPY_IMAGE` to that digest and inject the environment-specific configuration and secrets.
+3. Run `python scripts/validate_deploy_env.py` against the exported environment, or `python scripts/validate_deploy_env.py --env-file /secure/path/production.env` for a local secret-managed file.
+4. Render and validate the compose file with `docker compose -f compose.production.yaml config` and `scripts/validate_production_compose.py`.
+5. Pull the exact digest before changing running services.
+6. Start PostgreSQL or verify the managed PostgreSQL endpoint is healthy.
+7. Run the one-shot `migrate` service to completion using the same `RPY_IMAGE` digest. This applies migrations and provisions/rotates the runtime roles.
+8. Start API, both workers, and the singleton scheduler using that digest.
+9. Route traffic only after `/ready` succeeds through the TLS-terminating reverse proxy or ingress.
 
-A deploy must stop if migrations fail. Do not start a second scheduler to compensate for scheduler failure; restart or replace the singleton instance instead.
+A deploy must stop if preflight, compose validation or migrations fail. Do not start a second scheduler to compensate for scheduler failure; restart or replace the singleton instance instead.
 
 ## CI guardrail
 
-CI renders `compose.production.yaml` with non-secret fixture values and runs `scripts/validate_production_compose.py`. The validator rejects changes that:
+CI first runs `scripts/validate_deploy_env.py` with non-secret fixture values, then renders `compose.production.yaml` and runs `scripts/validate_production_compose.py`.
+
+The deploy-environment preflight rejects configuration that:
+
+- uses a mutable image reference instead of a full SHA-256 digest;
+- leaves required values empty or at documented placeholder values;
+- reuses a PostgreSQL login identity across migration/API/worker/scheduler/backup responsibilities;
+- points the role-specific URLs at different PostgreSQL databases;
+- supplies an invalid bearer-token-to-tenant mapping.
+
+The compose validator rejects changes that:
 
 - use `build:` for any application service;
 - use a mutable application image tag instead of a SHA-256 registry digest;

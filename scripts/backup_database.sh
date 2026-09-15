@@ -13,6 +13,7 @@ fi
 
 output=$1
 output_dir=$(dirname "$output")
+output_name=$(basename "$output")
 mkdir -p "$output_dir"
 
 umask 077
@@ -24,12 +25,17 @@ pg_dump \
   --file="$output" \
   "$DATABASE_URL"
 
-sha256sum "$output" > "$output.sha256"
+# Store only the archive basename in the sidecar. The dump/checksum pair can then
+# be copied to a different directory or host and still pass sha256sum -c there.
+(
+  cd "$output_dir"
+  sha256sum "$output_name" > "$output_name.sha256"
+)
 
 # Validate that the custom archive can be read before considering it a backup.
 pg_restore --list "$output" >/dev/null
 
-archive_name=$(basename "$output")
+archive_name=$output_name
 archive_bytes=$(wc -c < "$output" | tr -d ' ')
 archive_sha256=$(cut -d ' ' -f1 "$output.sha256")
 

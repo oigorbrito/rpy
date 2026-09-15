@@ -29,6 +29,10 @@ SKIP_DIRS = {".git", ".venv", "venv", "__pycache__", ".pytest_cache", "node_modu
 TEXT_SUFFIXES = {".py", ".sql", ".toml", ".yaml", ".yml", ".json", ".md"}
 
 
+def read(path: Path) -> str:
+    return path.read_text(encoding="utf-8", errors="ignore")
+
+
 def iter_files() -> list[Path]:
     out: list[Path] = []
     for path in ROOT.rglob("*"):
@@ -45,7 +49,7 @@ def python_import_violations(path: Path) -> list[str]:
     if path.suffix != ".py":
         return []
     try:
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        tree = ast.parse(read(path), filename=str(path))
     except SyntaxError as exc:
         return [f"syntax error: {exc}"]
 
@@ -69,12 +73,9 @@ def donor_identity_violations(path: Path) -> list[str]:
         return []
     if path.name in {"AGENTS.md", "LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"}:
         return []
-    if len(rel.parts) >= 2 and rel.parts[0] == "docs" and rel.parts[1] == "migrations":
+    if len(rel.parts) >= 2 and rel.parts[0] == "docs" and rel.parts[1] in {"migrations", "engineering"}:
         return []
-    try:
-        text = path.read_text(encoding="utf-8", errors="ignore").lower()
-    except OSError:
-        return []
+    text = read(path).lower()
     return [
         f"donor identity leaked into runtime/project file: {term}"
         for term in FORBIDDEN_RUNTIME_TERMS
@@ -86,7 +87,7 @@ def queue_invariant_violations() -> list[str]:
     path = ROOT / "app" / "queue.py"
     if not path.exists():
         return ["missing app/queue.py"]
-    text = path.read_text(encoding="utf-8", errors="ignore").lower()
+    text = read(path).lower()
     compact = re.sub(r"\s+", " ", text)
     errors: list[str] = []
     if "for update skip locked" not in compact:
@@ -95,6 +96,29 @@ def queue_invariant_violations() -> list[str]:
         errors.append("queue operations must enforce worker ownership")
     if "idempotency_key" not in text:
         errors.append("queue must support idempotent enqueue")
+    return errors
+
+
+def process_durability_violations() -> list[str]:
+    processes = ROOT / "app" / "processes.py"
+    migration = ROOT / "sql" / "011_finalized_version_immutability.sql"
+    errors: list[str] = []
+    if not processes.exists():
+        return ["missing app/processes.py"]
+    if not migration.exists():
+        errors.append("missing finalized-version immutability migration")
+        return errors
+
+    text = read(processes)
+    migration_text = read(migration).lower()
+    if "RETURNING id, finalized" not in text:
+        errors.append("staging must know whether an existing source version is finalized")
+    if 'if not bool(version["finalized"])' not in text:
+        errors.append("finalized source retries must not renew process activity")
+    if 'if bool(candidate["finalized"]):' not in text:
+        errors.append("finalize_version must short-circuit already-finalized versions")
+    if "raise exception" not in migration_text or "finalized" not in migration_text:
+        errors.append("database must reject mutation of finalized Judit source fields")
     return errors
 
 
@@ -112,10 +136,10 @@ def rag_invariant_violations() -> list[str]:
     if not retrieval.exists():
         return ["missing app/retrieval.py"]
 
-    rag_text = rag.read_text(encoding="utf-8", errors="ignore")
-    validation_text = validation.read_text(encoding="utf-8", errors="ignore")
-    retrieval_text = retrieval.read_text(encoding="utf-8", errors="ignore")
-    prompt_text = prompts.read_text(encoding="utf-8", errors="ignore") if prompts.exists() else ""
+    rag_text = read(rag)
+    validation_text = read(validation)
+    retrieval_text = read(retrieval)
+    prompt_text = read(prompts) if prompts.exists() else ""
     if "validar(" not in rag_text:
         errors.append("RAG publishing path must call validar()")
     if 'MODEL = "claude-sonnet-5"' not in rag_text:
@@ -130,6 +154,8 @@ def rag_invariant_violations() -> list[str]:
         errors.append("cacheable system prompt must live in app/prompts.py")
     if "secrecy_level" not in rag_text or 'base["secrecy_level"] > 0' not in rag_text:
         errors.append("secret cases must be truncated before generation")
+    if "SECRET_MODEL = \"local-deterministic\"" not in rag_text:
+        errors.append("secret cases must retain deterministic local generation")
     if "class\\s*=" not in validation_text:
         errors.append("validator must reject class= in JSX")
     if "0.5 * lexical" not in retrieval_text or "0.5 * vector" not in retrieval_text:
@@ -148,8 +174,8 @@ def embedding_invariant_violations() -> list[str]:
     if not schema.exists():
         return ["missing sql/002_process_data.sql"]
 
-    embedding_text = embeddings.read_text(encoding="utf-8", errors="ignore")
-    schema_text = schema.read_text(encoding="utf-8", errors="ignore").lower()
+    embedding_text = read(embeddings)
+    schema_text = read(schema).lower()
     if "VECTOR_DIMENSIONS = 1536" not in embedding_text:
         errors.append("embedding provider must stay aligned to vector(1536)")
     if "embedding vector(1536)" not in schema_text:
@@ -171,10 +197,9 @@ def webhook_invariant_violations() -> list[str]:
     if not judit_tasks.exists():
         return ["missing app/judit_tasks.py"]
 
-    api_text = api.read_text(encoding="utf-8", errors="ignore")
-    judit_text = judit.read_text(encoding="utf-8", errors="ignore")
-    task_text = judit_tasks.read_text(encoding="utf-8", errors="ignore")
-
+    api_text = read(api)
+    judit_text = read(judit)
+    task_text = read(judit_tasks)
     if "status_code=404" not in api_text:
         errors.append("invalid webhook token must return 404")
     if 'task_name="finalize_judit_request"' not in api_text:
@@ -194,11 +219,50 @@ def webhook_invariant_violations() -> list[str]:
     return errors
 
 
+def deployment_invariant_violations() -> list[str]:
+    compose = ROOT / "compose.production.yaml"
+    dockerfile = ROOT / "Dockerfile"
+    constraints = ROOT / "requirements" / "constraints.txt"
+    validator = ROOT / "scripts" / "validate_production_compose.py"
+    restore_drill = ROOT / "scripts" / "verify_backup_restore.sh"
+    errors: list[str] = []
+    for path in (compose, dockerfile, constraints, validator, restore_drill):
+        if not path.exists():
+            errors.append(f"missing {path.relative_to(ROOT)}")
+    if errors:
+        return errors
+
+    compose_text = read(compose)
+    docker_text = read(dockerfile)
+    validator_text = read(validator)
+    if "${RPY_IMAGE:?" not in compose_text:
+        errors.append("production application services must require RPY_IMAGE")
+    if "@sha256:" not in compose_text:
+        errors.append("production service images must include immutable digests")
+    if not re.search(r"^FROM\s+\S+@sha256:[0-9a-fA-F]{64}\s*$", docker_text, re.MULTILINE):
+        errors.append("Dockerfile base image must be pinned by sha256 digest")
+    if "--constraint" not in docker_text:
+        errors.append("Docker build must install Python dependencies under the constraints lock")
+    if "IMMUTABLE_IMAGE_RE" not in validator_text:
+        errors.append("production compose validator must enforce immutable image references")
+    return errors
+
+
+def documentation_invariant_violations() -> list[str]:
+    required = [
+        ROOT / "AGENTS.md",
+        ROOT / "docs" / "engineering" / "empirical-engineering.md",
+        ROOT / "docs" / "deployment" / "production.md",
+        ROOT / "docs" / "deployment" / "backup-restore.md",
+    ]
+    return [f"missing {path.relative_to(ROOT)}" for path in required if not path.exists()]
+
+
 def dependency_violations() -> list[str]:
     pyproject = ROOT / "pyproject.toml"
     if not pyproject.exists():
         return ["missing pyproject.toml"]
-    text = pyproject.read_text(encoding="utf-8").lower()
+    text = read(pyproject).lower()
     return [
         f"forbidden dependency declared: {name}"
         for name in FORBIDDEN_IMPORTS
@@ -217,16 +281,19 @@ def main() -> int:
         for msg in donor_identity_violations(path):
             violations.append((rel, msg))
 
-    for msg in dependency_violations():
-        violations.append(("pyproject.toml", msg))
-    for msg in queue_invariant_violations():
-        violations.append(("app/queue.py", msg))
-    for msg in rag_invariant_violations():
-        violations.append(("app/rag.py", msg))
-    for msg in embedding_invariant_violations():
-        violations.append(("app/embeddings.py", msg))
-    for msg in webhook_invariant_violations():
-        violations.append(("app/api.py", msg))
+    checks = [
+        ("pyproject.toml", dependency_violations),
+        ("app/queue.py", queue_invariant_violations),
+        ("app/processes.py", process_durability_violations),
+        ("app/rag.py", rag_invariant_violations),
+        ("app/embeddings.py", embedding_invariant_violations),
+        ("app/api.py", webhook_invariant_violations),
+        ("compose.production.yaml", deployment_invariant_violations),
+        ("docs/engineering/empirical-engineering.md", documentation_invariant_violations),
+    ]
+    for label, check in checks:
+        for msg in check():
+            violations.append((label, msg))
 
     if violations:
         print("Migration harness: FAILED")
@@ -234,7 +301,7 @@ def main() -> int:
             print(f" - {path}: {msg}")
         return 1
 
-    print(f"Migration harness: OK ({len(files)} project files checked)")
+    print(f"Migration harness: OK ({len(files)} project files checked; durable invariants verified)")
     return 0
 
 

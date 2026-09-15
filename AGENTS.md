@@ -2,11 +2,38 @@
 
 This repository is being assembled rapidly from verified open-source building blocks. The goal is to maximize reuse of expensive infrastructure while preventing unnecessary product identity, dependencies, abstractions, and behavior from entering Rpy.
 
+## Engineering decision model
+
+Agents must distinguish **invariants**, **hypotheses**, and **evidence**.
+
+- An invariant is a property whose violation can corrupt data, leak data, duplicate side effects, break recovery, or violate an explicit product contract. Encode stable, machine-checkable invariants in tests, database constraints/triggers, or `scripts/migration_harness.py`.
+- A hypothesis is an engineering belief not yet demonstrated in Rpy. Do not turn a hypothesis into a permanent harness rule merely because it is conventional wisdom.
+- Evidence is a reproducible observation: a test, CI run, restore drill, benchmark, production metric, incident, or relevant empirical study. Record enough context to reproduce or challenge it.
+
+Prefer repository-local evidence over generic claims. External studies guide risk prioritization and experimental design; they do not prove that a particular threshold or architecture is optimal for Rpy. When evidence is weak, say so and choose a reversible change.
+
+The harness is a guardrail, not a second test suite. It should cheaply reject architectural drift and high-consequence invariant violations. Behavioral correctness belongs primarily in unit/integration tests; operational claims belong in drills/metrics.
+
 ## Source-of-truth product constraints
 
-Rpy is a Python/FastAPI service for judicial-process summarization using PostgreSQL and pgvector. PostgreSQL is also the job queue. The queue must claim work with `FOR UPDATE SKIP LOCKED`. The main runtime services are API, workers, and one scheduler/reclaimer process.
+Rpy is a Python/FastAPI service for judicial-process summarization using PostgreSQL and pgvector. PostgreSQL is also the job queue. The queue must claim work with `FOR UPDATE SKIP LOCKED`. The main runtime services are API, workers, and exactly one scheduler/reclaimer process.
 
 Do not introduce Redis, Celery, RabbitMQ, BullMQ, Pinecone, LangChain, or LlamaIndex as core infrastructure unless the project owner explicitly changes that decision.
+
+## Change protocol
+
+For non-trivial changes:
+
+1. State the failure mode or measurable objective before editing code.
+2. Identify the invariant(s) at risk and the narrowest layer that can enforce them.
+3. Prefer a small coherent PR with one causal story over a mixed cleanup/feature PR. Small PRs are a reviewability strategy, not a numeric line-count target.
+4. Add the lowest-cost test that would have caught the bug. For concurrency, persistence, migrations, SQL semantics, retention, and recovery, include PostgreSQL integration coverage rather than relying on mocks.
+5. For schema evolution, preserve compatibility with the currently deployable application during rolling deployment. Prefer additive/expand-migrate-contract changes; destructive contraction requires explicit evidence that old readers/writers are gone and a rollback/recovery plan.
+6. For retries and externally repeated events, prove idempotency at the durable boundary. A retry must not mutate finalized historical source data, duplicate irreversible side effects, or renew retention clocks without new activity.
+7. For privacy/security boundaries, minimize data before the external boundary and test the exact outbound payload. Secret judicial cases must not call an external LLM.
+8. Run the migration harness, unit tests, container smoke, migration/restore checks, and PostgreSQL integration tests applicable to the change. Never report green until the actual CI run is green.
+9. Update operational or migration documentation when the change alters a durable invariant, deployment assumption, recovery procedure, retention behavior, or external data boundary.
+10. Keep rollback explicit. If a migration is intentionally irreversible, document why and how service/data recovery works instead.
 
 ## Migration policy
 
@@ -32,12 +59,10 @@ Current approved donors and intended scope:
 - `ALAN-PSUDO/HydraTask`
   - Allowed: PostgreSQL queue claim pattern, heartbeat, retry/backoff, stale-job reclaim, LISTEN/NOTIFY ideas, graceful worker shutdown, operational queue tests.
   - Drop by default: dashboard/frontend, DAG/dependency features, generic task marketplace/product concepts, webhook product surface, queue administration UI.
-
 - `Azure-Samples/rag-postgres-openai-python`
   - Allowed: PostgreSQL/pgvector retrieval SQL, lexical + vector retrieval, reciprocal-rank fusion patterns, async database integration patterns.
   - Adapt: provider-specific OpenAI/Azure code, English FTS configuration, unsafe/interpolated dynamic filters.
   - Drop by default: Azure infrastructure, frontend, sample domain models, chat-product surface.
-
 - `link178/legal-rag-engine`
   - Reference primarily: retrieval/context/generation separation, evidence/citation verification, evaluation organization.
   - Do not adopt its mock generation provider or its domain abstractions wholesale.
@@ -70,6 +95,14 @@ Reject or remove donor code that introduces any of the following without an expl
 - Stale processing jobs can be reclaimed safely.
 - Enqueue supports idempotency for externally repeated events.
 
+### Process/version durability
+
+- A finalized Judit source version is historical evidence and its source fields are immutable.
+- Restaging a finalized source is a no-op for source data and must not renew process retention activity.
+- Re-finalizing an already finalized version is idempotent: no step rewrite, timestamp renewal, or process mutation.
+- Promotion of a version and enqueue of its summary remain one durable transaction.
+- A stale/duplicate summary execution cannot degrade an already valid summary.
+
 ### Retrieval
 
 - Scalar process metadata is injected directly, not retrieved semantically.
@@ -80,29 +113,58 @@ Reject or remove donor code that introduces any of the following without an expl
 
 ### Generation and validation
 
-- LLM generation is provider-isolated behind a small module.
+- LLM generation is provider-isolated behind a small module with bounded timeouts/retries.
 - Validation runs before publication.
 - One regeneration attempt is allowed after validation failure.
 - A second validation failure is persisted explicitly rather than silently accepted.
+- Secret proceedings use the deterministic local summary path and do not instantiate/call an external LLM provider.
+- Provider payloads must exclude data outside the documented boundary; logs must never contain prompt/process payloads or secrets.
 
-### Security
+### Security, tenancy, audit, and retention
 
-- Tenant/process authorization must happen before sensitive process data is returned or sent to the LLM.
-- Secret cases are truncated before LLM processing.
-- Expunge deletes relational and vector data.
-- Access to judicial processes is auditable.
+- Tenant/process authorization happens before sensitive process data is returned or sent to an external provider.
+- Bearer-token configuration is validated at startup and token comparison is timing-safe.
+- Judit webhook secrets are redacted inside the application logging boundary; ingress/proxy redaction is a separate deployment responsibility.
+- Webhook bodies are bounded before JSON parsing and deliveries are durably deduplicated.
+- Expunge deletes relational and vector process data while immutable access audit survives process deletion.
+- Raw Judit delivery payloads have bounded retention.
+- Access to judicial processes is auditable without storing secrets or raw provider payloads in the audit trail.
 
-## Definition of done for a transplant
+### Deployment and recovery
 
-A migration is complete only when:
+- Production API, workers, scheduler, and migration job run the same application image digest; mutable application tags/builds are rejected.
+- Production base/runtime images are pinned by digest and dependency resolution is version-locked.
+- There is exactly one scheduler and at least two workers in the production topology contract.
+- Backup is not considered recovery until a restore drill verifies checksum, archive readability, schema migrations, sentinel data, and pgvector in a separate database.
+- RPO/RTO are measured operational properties, not promises inferred from configuration.
+
+## Empirical engineering policy
+
+Use empirical literature as a calibration layer:
+
+- Code review research supports treating review as a quality-control activity, but the literature uses heterogeneous datasets and hundreds of metrics; do not invent universal PR-size or review-time thresholds. Optimize for cohesive, independently testable changes and measure Rpy's own review/rework outcomes.
+- Database-evolution research consistently treats schema evolution as a data-preservation/compatibility problem. Prefer incremental compatible migrations and verify them against the real PostgreSQL engine.
+- SRE practice defines SLOs in terms of measured SLIs and error budgets. Do not create reliability percentages from intuition. Document measurement points, caveats, and the evidence behind thresholds; revise them as observations accumulate.
+- Automation/bots can change review throughput and communication patterns. Automated gates must therefore explain actionable violations and avoid noisy style policing that has no demonstrated risk reduction.
+
+See `docs/engineering/empirical-engineering.md` for the evidence ledger and how claims are translated into repository policy.
+
+## Definition of done for a transplant or architectural change
+
+A change is complete only when:
 
 - donor-specific names are absent from runtime code unless present only in attribution/docs;
 - no denied dependency was introduced;
 - imported files have an explicit reason to exist;
-- tests cover the reused expensive behavior;
+- the relevant expensive/risky behavior is covered at the appropriate test level;
 - `python scripts/migration_harness.py` passes;
+- migrations are compatible/recoverable according to the change protocol;
+- durable invariants and operational consequences are documented;
+- the actual CI head is green;
 - the code fits Rpy's current module boundaries rather than preserving donor folder structure for convenience.
 
 ## Working style for coding agents
 
 Prefer working behavior over speculative architecture. Make small vertical slices executable early. When an external implementation is already correct and generic, adapt it rather than rewriting it for stylistic reasons. When donor abstractions exceed Rpy's needs, delete them aggressively.
+
+Do not optimize for number of commits, lines changed, test count, or coverage percentage in isolation. Optimize for demonstrated risk reduction, reversibility, reproducibility, privacy, and recovery. When a claim cannot yet be demonstrated, leave it as a documented hypothesis with a measurement plan rather than encoding false certainty in the harness.
