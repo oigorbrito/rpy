@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timezone
 from uuid import uuid4
 
-import asyncpg
 import httpx
 import pytest
 
@@ -161,23 +161,24 @@ async def test_request_completed_only_enqueues_finalizer_and_is_idempotent(api_c
         "reference_id": request_id,
         "payload": {"status": "completed"},
     }
-
-    first = await client.post("/webhooks/judit/integration-webhook", json=body)
-    second = await client.post("/webhooks/judit/integration-webhook", json=body)
-    assert first.status_code == 200
-    assert second.status_code == 200
+    assert (await client.post("/webhooks/judit/integration-webhook", json=body)).status_code == 200
+    assert (await client.post("/webhooks/judit/integration-webhook", json=body)).status_code == 200
 
     async with pool.acquire() as conn:
-        deliveries = await conn.fetchval(
-            "SELECT count(*) FROM judit_deliveries WHERE callback_id = $1",
-            callback_id,
+        assert (
+            await conn.fetchval(
+                "SELECT count(*) FROM judit_deliveries WHERE callback_id = $1",
+                callback_id,
+            )
+            == 1
         )
-        jobs = await conn.fetchval(
-            "SELECT count(*) FROM jobs WHERE idempotency_key = $1",
-            f"judit-finalize:{request_id}",
+        assert (
+            await conn.fetchval(
+                "SELECT count(*) FROM jobs WHERE idempotency_key = $1",
+                f"judit-finalize:{request_id}",
+            )
+            == 1
         )
-    assert deliveries == 1
-    assert jobs == 1
 
 
 @pytest.mark.asyncio
@@ -185,12 +186,10 @@ async def test_tracking_application_info_enqueues_finalizer_for_payload_request_
     client, pool = api_client
     request_id = f"req-{uuid4()}"
     tracking_id = f"tracking-{uuid4()}"
-    callback_id = f"cb-{uuid4()}"
-
     response = await client.post(
         "/webhooks/judit/integration-webhook",
         json={
-            "callback_id": callback_id,
+            "callback_id": f"cb-{uuid4()}",
             "event_type": "response_created",
             "reference_type": "tracking",
             "reference_id": tracking_id,
@@ -206,69 +205,149 @@ async def test_tracking_application_info_enqueues_finalizer_for_payload_request_
     assert response.status_code == 200
 
     async with pool.acquire() as conn:
-        job = await conn.fetchrow(
-            "SELECT payload, idempotency_key FROM jobs WHERE idempotency_key = $1",
-            f"judit-finalize:{request_id}",
+        assert (
+            await conn.fetchval(
+                "SELECT count(*) FROM jobs WHERE idempotency_key = $1",
+                f"judit-finalize:{request_id}",
+            )
+            == 1
         )
-        tracking_job_count = await conn.fetchval(
-            "SELECT count(*) FROM jobs WHERE idempotency_key = $1",
-            f"judit-finalize:{tracking_id}",
+        assert (
+            await conn.fetchval(
+                "SELECT count(*) FROM jobs WHERE idempotency_key = $1",
+                f"judit-finalize:{tracking_id}",
+            )
+            == 0
         )
-    assert job is not None
-    assert job["idempotency_key"] == f"judit-finalize:{request_id}"
-    assert tracking_job_count == 0
+
+
+async def _seed_process(pool, *, tenant, code, cached=False, job_status=None):
+    process_id = uuid4()
+    version_id = uuid4()
+    now = datetime.now(timezone.utc)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO tenants(id, name) VALUES($1, $2)",
+            tenant,
+            f"tenant-{tenant}",
+        )
+        await conn.execute(
+            "INSERT INTO processes(id, code, class_name, court, parties, subjects, header) VALUES($1, $2, 'Classe', 'TJ', $3::jsonb, $4::jsonb, $5::jsonb)",
+            process_id,
+            code,
+            json.dumps([{"name": "Maria"}]),
+            json.dumps([{"name": "Contrato"}]),
+            json.dumps({"city": "Porto Alegre"}),
+        )
+        await conn.execute(
+            "INSERT INTO process_versions(id, process_id, source_request_id, source_cached_response, finalized, finalized_at) VALUES($1, $2, $3, $4, TRUE, NOW())",
+            version_id,
+            process_id,
+            f"source-{uuid4()}",
+            cached,
+        )
+        await conn.execute(
+            "UPDATE processes SET current_version_id = $2, updated_at = $3 WHERE id = $1",
+            process_id,
+            version_id,
+            now,
+        )
+        await conn.execute(
+            "INSERT INTO tenant_processes(tenant_id, process_id) VALUES($1, $2)",
+            tenant,
+            process_id,
+        )
+        await conn.execute(
+            "INSERT INTO process_steps(version_id, process_id, step_number, occurred_at, title, text) VALUES($1, $2, 1, $3, 'Distribuição', 'Processo distribuído')",
+            version_id,
+            process_id,
+            now,
+        )
+        if job_status:
+            await conn.execute(
+                "INSERT INTO jobs(task_name, payload, status, idempotency_key) VALUES('generate_process_summary', $1::jsonb, $2::job_status, $3)",
+                json.dumps(
+                    {"process_id": str(process_id), "version_id": str(version_id)}
+                ),
+                job_status,
+                f"summary:{version_id}",
+            )
+    return process_id, version_id
 
 
 @pytest.mark.asyncio
-async def test_process_read_is_tenant_scoped_and_audited(api_client, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_process_read_is_tenant_scoped_audited_and_returns_current_details(
+    api_client, monkeypatch: pytest.MonkeyPatch
+) -> None:
     client, pool = api_client
-    allowed_tenant = uuid4()
-    denied_tenant = uuid4()
-    process_id = uuid4()
+    allowed = uuid4()
+    denied = uuid4()
     code = "0000000-00.0000.0.00.0102"
+    await _seed_process(pool, tenant=allowed, code=code, job_status="pending")
 
     async with pool.acquire() as conn:
-        await conn.execute(
-            "INSERT INTO tenants (id, name) VALUES ($1, 'allowed'), ($2, 'denied')",
-            allowed_tenant,
-            denied_tenant,
-        )
-        await conn.execute(
-            "INSERT INTO processes (id, code, class_name, court) VALUES ($1, $2, 'Classe', 'TJ')",
-            process_id,
-            code,
-        )
-        await conn.execute(
-            "INSERT INTO tenant_processes (tenant_id, process_id) VALUES ($1, $2)",
-            allowed_tenant,
-            process_id,
-        )
+        await conn.execute("INSERT INTO tenants(id, name) VALUES($1, 'denied')", denied)
 
     monkeypatch.setenv(
         "RPY_BEARER_TOKENS",
-        json.dumps({"allowed-token": str(allowed_tenant), "denied-token": str(denied_tenant)}),
+        json.dumps({"allowed-token": str(allowed), "denied-token": str(denied)}),
     )
 
-    denied = await client.get(
-        f"/processes/{code}",
-        headers={"Authorization": "Bearer denied-token"},
-    )
-    assert denied.status_code == 404
+    assert (
+        await client.get(
+            f"/processes/{code}", headers={"Authorization": "Bearer denied-token"}
+        )
+    ).status_code == 404
 
-    allowed = await client.get(
-        f"/processes/{code}",
-        headers={"Authorization": "Bearer allowed-token"},
+    response = await client.get(
+        f"/processes/{code}", headers={"Authorization": "Bearer allowed-token"}
     )
-    assert allowed.status_code == 200
-    assert allowed.json()["code"] == code
+    assert response.status_code == 200
+    body = response.json()
+    assert body["code"] == code
+    assert body["summary_status"] == "processing"
+    assert body["parties"][0]["name"] == "Maria"
+    assert body["recent_steps"][0]["step_number"] == 1
+    assert body["iaSummary"] is None
+    assert body["summary"] is None
 
     async with pool.acquire() as conn:
-        audit_count = await conn.fetchval(
-            "SELECT count(*) FROM access_log WHERE tenant_id = $1 AND process_code = $2 AND action = 'read_process_summary'",
-            allowed_tenant,
-            code,
+        assert (
+            await conn.fetchval(
+                "SELECT count(*) FROM access_log WHERE tenant_id = $1 AND process_code = $2 AND action = 'read_process_summary'",
+                allowed,
+                code,
+            )
+            == 1
         )
-    assert audit_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("cached", "job_status", "expected"),
+    [
+        (True, None, "not_generated"),
+        (False, "processing", "processing"),
+        (False, "dead", "unavailable"),
+        (False, None, "not_generated"),
+    ],
+)
+async def test_summary_status_hides_job_internals(
+    api_client, monkeypatch, cached, job_status, expected
+) -> None:
+    client, pool = api_client
+    tenant = uuid4()
+    suffix = str(uuid4().int)[-4:]
+    code = f"0000000-00.0000.0.00.{suffix}"
+    await _seed_process(pool, tenant=tenant, code=code, cached=cached, job_status=job_status)
+    monkeypatch.setenv("RPY_BEARER_TOKENS", json.dumps({"token": str(tenant)}))
+    response = await client.get(
+        f"/processes/{code}", headers={"Authorization": "Bearer token"}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["summary_status"] == expected
+    assert "error_log" not in body and "attempts" not in body and "job" not in body
 
 
 @pytest.mark.asyncio
@@ -284,7 +363,7 @@ async def test_failed_summaries_endpoint_is_ops_scoped(api_client, monkeypatch: 
     )
     assert wrong_token.status_code == 404
 
-    code = f"0000000-00.0000.0.00.{uuid4().hex[:4]}"
+    code = f"0000000-00.0000.0.00.{str(uuid4().int)[-4:]}"
     async with pool.acquire() as conn:
         process_id = uuid4()
         version_id = uuid4()

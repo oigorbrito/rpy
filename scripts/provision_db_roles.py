@@ -6,6 +6,7 @@ from urllib.parse import unquote, urlparse
 
 import asyncpg
 
+
 RUNTIME_ROLES = (
     ("rpy_api", "API_DATABASE_URL"),
     ("rpy_worker", "WORKER_DATABASE_URL"),
@@ -18,8 +19,10 @@ API_READ_TABLES = (
     "process_versions",
     "process_summaries",
     "tenant_processes",
+    "tenant_judit_requests",
     "jobs",
     "judit_deliveries",
+    "judit_request_completions",
     "backup_runs",
 )
 
@@ -66,12 +69,12 @@ async def provision(database_url: str) -> None:
     }
     conn = await asyncpg.connect(database_url)
     try:
-        current_user = str(await conn.fetchval("SELECT current_user"))
-        database_name = str(await conn.fetchval("SELECT current_database()"))
-        migrator_ident = _quote_ident(current_user)
-        database_ident = _quote_ident(database_name)
-
         async with conn.transaction():
+            current_user = str(await conn.fetchval("SELECT current_user"))
+            database_name = str(await conn.fetchval("SELECT current_database()"))
+            migrator_ident = _quote_ident(current_user)
+            database_ident = _quote_ident(database_name)
+
             for role_name, _ in RUNTIME_ROLES:
                 _, password = credentials[role_name]
                 await _ensure_login_role(conn, name=role_name, password=password)
@@ -94,12 +97,13 @@ async def provision(database_url: str) -> None:
             await conn.execute(
                 f"GRANT SELECT ON {', '.join(_quote_ident(t) for t in API_READ_TABLES)} TO {api}"
             )
-            await conn.execute(f"GRANT INSERT, UPDATE ON processes, process_versions TO {api}")
             await conn.execute(
-                "GRANT INSERT ON tenant_processes, access_log, judit_deliveries, jobs TO "
+                f"GRANT INSERT, UPDATE ON processes, process_versions, tenant_judit_requests TO {api}"
+            )
+            await conn.execute(
+                "GRANT INSERT ON access_log, judit_deliveries, judit_request_completions, jobs, tenant_processes TO "
                 f"{api}"
             )
-            await conn.execute(f"GRANT USAGE, SELECT ON SEQUENCE access_log_id_seq TO {api}")
 
             worker = _quote_ident("rpy_worker")
             await conn.execute(f"GRANT SELECT, INSERT, UPDATE ON jobs TO {worker}")
@@ -115,6 +119,9 @@ async def provision(database_url: str) -> None:
             await conn.execute(f"GRANT SELECT, DELETE ON processes TO {scheduler}")
             await conn.execute(f"GRANT SELECT ON process_versions TO {scheduler}")
             await conn.execute(f"GRANT DELETE ON judit_deliveries, jobs TO {scheduler}")
+            await conn.execute(
+                f"GRANT SELECT, DELETE ON judit_request_completions TO {scheduler}"
+            )
 
             backup = _quote_ident("rpy_backup")
             await conn.execute(f"GRANT SELECT ON ALL TABLES IN SCHEMA public TO {backup}")

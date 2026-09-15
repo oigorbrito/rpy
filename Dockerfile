@@ -7,8 +7,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY pyproject.toml ./
+COPY requirements ./requirements
 COPY app ./app
-RUN pip install --upgrade pip && pip install .
+RUN python -m pip install pip==26.2.1 \
+    && python -m pip install --constraint requirements/constraints.txt .
 
 COPY sql ./sql
 COPY scripts ./scripts

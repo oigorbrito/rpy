@@ -1,10 +1,23 @@
 # Rpy
 
-MVP de RAG para resumo processual em Python/FastAPI, PostgreSQL e pgvector.
+MVP de RAG para consulta e resumo processual em Python/FastAPI, PostgreSQL e pgvector.
+
+## Fluxo do produto
+
+A interface web é servida pela própria API em `/`. O usuário informa um bearer token provisionado para seu tenant e um número CNJ. O fluxo suportado é:
+
+1. consultar um processo já autorizado;
+2. se o CNJ ainda não estiver disponível, solicitar a aquisição à Judit;
+3. acompanhar de forma limitada a chegada dos dados processuais;
+4. ler partes, assuntos, contexto e movimentações assim que a versão estiver disponível;
+5. acompanhar a geração do resumo enquanto `summary_status=processing`;
+6. ler e copiar o resumo validado quando publicado.
+
+O browser não recebe credenciais da Judit nem identificadores internos de request/job. O bearer token permanece apenas em memória da página; não é salvo em `localStorage` ou `sessionStorage`.
 
 ## Arquitetura
 
-- **API FastAPI**: recebe webhooks da Judit e expõe leitura tenant-scoped.
+- **API FastAPI + frontend server-served**: consulta tenant-scoped, solicitação de CNJ e webhooks Judit.
 - **PostgreSQL 16 + pgvector**: persistência, vetores e fila.
 - **2+ workers**: claim atômico com `FOR UPDATE SKIP LOCKED`, heartbeat, retry e reclaim.
 - **1 scheduler**: expurgo periódico protegido por advisory lock.
@@ -15,11 +28,12 @@ MVP de RAG para resumo processual em Python/FastAPI, PostgreSQL e pgvector.
 
 Pré-requisito: Docker com Compose.
 
-Defina, quando necessário:
+Para exercer o fluxo completo, configure:
 
 ```bash
 export ANTHROPIC_API_KEY='...'
 export OPENAI_API_KEY='...'
+export JUDIT_API_KEY='...'
 export JUDIT_WEBHOOK_TOKEN='...'
 export RPY_BEARER_TOKENS='{"seu-token":"00000000-0000-0000-0000-000000000000"}'
 ```
@@ -30,14 +44,7 @@ Então:
 docker compose up --build
 ```
 
-O stack local sobe:
-
-- PostgreSQL/pgvector em `localhost:5432`;
-- migration job de execução única;
-- API em `localhost:8000`;
-- `worker-1`;
-- `worker-2`;
-- exatamente um `scheduler`.
+O stack local sobe PostgreSQL/pgvector em `localhost:5432`, migration job, API/frontend em `localhost:8000`, dois workers e exatamente um scheduler.
 
 Health check:
 
@@ -45,19 +52,26 @@ Health check:
 curl http://localhost:8000/health
 ```
 
+Abra `http://localhost:8000/` para usar a interface.
+
+## Contrato HTTP principal
+
+- `GET /processes/{cnj}`: lê apenas processo autorizado ao tenant e retorna `404` fora do escopo.
+- `POST /processes/{cnj}/request`: solicita aquisição de CNJ ausente, com idempotência por tenant/CNJ; retorna apenas estado público.
+- `POST /webhooks/judit/{token}`: recebe callbacks assíncronos da Judit.
+- `GET /health`: liveness.
+- `GET /ready`: readiness com PostgreSQL.
+- `GET /ops/metrics`: métricas protegidas por credencial operacional separada.
+
+O estado público do resumo é `available`, `processing`, `not_generated` ou `unavailable`. Detalhes internos de fila, tentativas, worker, provider e erros não fazem parte do contrato público.
+
 ## Webhook Judit
-
-Endpoint:
-
-```text
-POST /webhooks/judit/{token}
-```
 
 Regras principais:
 
 - token inválido retorna `404`;
 - `callback_id` é persistido para idempotência;
-- `response_created` do tipo `lawsuit` é apenas staged;
+- `response_created` do tipo `lawsuit` é apenas staged e concede acesso aos tenants associados à solicitação correspondente;
 - `request_completed` enfileira a promoção no worker;
 - quando existe resposta fresca (`cached_response=false`), ela vence a cacheada;
 - resposta apenas cacheada pode ser promovida, mas não dispara LLM;
@@ -74,12 +88,13 @@ Regras principais:
 ## Segurança / LGPD
 
 - portfólio autorizado via `tenant_processes`;
-- bearer token resolve tenant antes da leitura;
-- processos sob sigilo são truncados antes de embeddings/LLM;
+- bearer token resolve tenant antes da leitura ou solicitação;
+- solicitação Judit é correlacionada de forma durável ao tenant antes de o callback conceder acesso;
+- processos sob sigilo não enviam conteúdo para embeddings/LLM externos;
 - `access_log` é imutável;
 - expurgo remove versões, JSONB, movimentos, vetores e callbacks brutos da Judit, preservando o registro histórico de acesso.
 
-## Testes e migration harness
+## Testes e evidência de release
 
 ```bash
 pip install -e '.[dev]'
@@ -87,7 +102,16 @@ python scripts/migration_harness.py
 pytest -q tests --ignore=tests/integration
 ```
 
-Os testes de integração PostgreSQL são executados automaticamente no GitHub Actions com PostgreSQL 16 + pgvector.
+O GitHub Actions executa também PostgreSQL 16 + pgvector, contrato de compose de produção, smoke da imagem e drill de backup/restore. A suíte E2E cobre o caminho de produto CNJ ausente → solicitação → callback → acesso tenant-scoped → finalização → resumo validado publicado, além de callback fora de ordem/retry e resposta cached sem LLM.
+
+A produção usa `compose.production.yaml`, imagem imutável por digest e credenciais PostgreSQL separadas por responsabilidade. Consulte `docs/deployment/production.md` e `docs/deployment/backup-restore.md` antes de publicar.
+
+## Limites atuais do MVP
+
+- autenticação é por bearer token provisionado; não existe login/autocadastro no produto;
+- não há dashboard, favoritos, alertas ou gestão de carteira;
+- o frontend não faz polling ilimitado: após a janela automática, o usuário pode repetir a consulta manualmente;
+- publicação real exige infraestrutura externa e credenciais válidas para registry, Judit e providers de IA.
 
 ## Contrato para agentes
 

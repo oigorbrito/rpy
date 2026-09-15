@@ -59,6 +59,9 @@ async def test_secret_generation_does_not_require_or_call_anthropic(monkeypatch)
     context = _secret_context()
     persisted: dict = {}
 
+    async def fake_load_publishable_summary(pool, process_id, version_id):
+        return None
+
     async def fake_load_context(pool, process_id, version_id):
         return context
 
@@ -69,6 +72,7 @@ async def test_secret_generation_does_not_require_or_call_anthropic(monkeypatch)
     def provider_must_not_be_created(api_key: str):
         raise AssertionError("Anthropic client must not be created for secret proceedings")
 
+    monkeypatch.setattr(rag, "_load_publishable_summary", fake_load_publishable_summary)
     monkeypatch.setattr(rag, "_load_context", fake_load_context)
     monkeypatch.setattr(rag, "_persist_summary", fake_persist_summary)
     monkeypatch.setattr(rag, "anthropic_client", provider_must_not_be_created)

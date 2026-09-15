@@ -44,10 +44,25 @@ def test_invalid_tenant_uuid_fails_configuration(monkeypatch) -> None:
         configured_bearer_tokens()
 
 
+def test_empty_map_fails_configuration(monkeypatch) -> None:
+    monkeypatch.setenv("RPY_BEARER_TOKENS", "{}")
+
+    with pytest.raises(RuntimeError, match="at least one bearer token"):
+        configured_bearer_tokens()
+
+
 def test_empty_token_fails_configuration(monkeypatch) -> None:
     monkeypatch.setenv("RPY_BEARER_TOKENS", json.dumps({"": str(uuid4())}))
 
     with pytest.raises(RuntimeError, match="empty bearer token"):
+        configured_bearer_tokens()
+
+
+@pytest.mark.parametrize("token", [" token-a", "token-a ", "token a", "token\ta", "token\na"])
+def test_whitespace_in_configured_token_fails_configuration(monkeypatch, token: str) -> None:
+    monkeypatch.setenv("RPY_BEARER_TOKENS", json.dumps({token: str(uuid4())}))
+
+    with pytest.raises(RuntimeError, match="must not contain whitespace"):
         configured_bearer_tokens()
 
 
