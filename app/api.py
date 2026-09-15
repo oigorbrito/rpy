@@ -14,7 +14,7 @@ from app.db import create_pool
 from app.http_auth_config import validate_http_auth_config
 from app.http_limits import JuditWebhookBodyLimitMiddleware, judit_webhook_max_body_bytes
 from app.json_utils import decode_json_object
-from app.judit import parse_event
+from app.judit import normalize_cnj, parse_event
 from app.observability import collect_operational_metrics, operational_thresholds
 from app.processes import get_authorized_process, log_access, stage_version
 from app.queue import enqueue
@@ -91,16 +91,25 @@ async def operational_metrics(request: Request) -> dict:
 @app.get("/processes/{code}")
 async def get_process_summary(code: str, request: Request) -> dict:
     tenant_id = tenant_from_request(request)
+    try:
+        canonical_code = normalize_cnj(code)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid process code") from None
+
     pool: asyncpg.Pool = request.app.state.pool
     async with pool.acquire() as conn:
-        process = await get_authorized_process(conn, tenant_id=tenant_id, code=code)
+        process = await get_authorized_process(
+            conn,
+            tenant_id=tenant_id,
+            code=canonical_code,
+        )
         if process is None:
             raise HTTPException(status_code=404, detail="process not found")
         await log_access(
             conn,
             tenant_id=tenant_id,
             process_id=process["id"],
-            process_code=code,
+            process_code=canonical_code,
             action="read_process_summary",
         )
         summary = await conn.fetchrow(
