@@ -8,6 +8,10 @@ TaskHandler = Callable[[dict[str, Any]], Awaitable[dict[str, Any] | None]]
 _TASKS: dict[str, TaskHandler] = {}
 
 
+class PermanentTaskError(Exception):
+    """Deterministic task failure that must not be retried by the durable queue."""
+
+
 def task(name: str) -> Callable[[TaskHandler], TaskHandler]:
     def register(handler: TaskHandler) -> TaskHandler:
         if name in _TASKS:

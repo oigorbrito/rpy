@@ -19,7 +19,7 @@ from app.providers import (
     is_retryable_anthropic_error,
 )
 from app.retrieval import load_steps, rank_steps, vector_search
-from app.tasks import task
+from app.tasks import PermanentTaskError, task
 from app.validation import ValidationResult, validar
 
 MODEL = "claude-sonnet-5"
@@ -273,7 +273,7 @@ async def _generate(
     )
     prompt_max, _, _ = provider_context_limits()
     if len(user_prompt) > prompt_max:
-        raise ValueError(
+        raise PermanentTaskError(
             f"provider prompt exceeds PROVIDER_PROMPT_MAX_CHARS ({len(user_prompt)} > {prompt_max})"
         )
 
