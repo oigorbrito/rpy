@@ -363,7 +363,7 @@ async def test_failed_summaries_endpoint_is_ops_scoped(api_client, monkeypatch: 
     )
     assert wrong_token.status_code == 404
 
-    code = f"0000000-00.0000.0.00.{uuid4().hex[:4]}"
+    code = f"0000000-00.0000.0.00.{str(uuid4().int)[-4:]}"
     async with pool.acquire() as conn:
         process_id = uuid4()
         version_id = uuid4()
