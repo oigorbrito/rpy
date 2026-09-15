@@ -63,12 +63,12 @@ async def stage_version(
             """
             INSERT INTO processes (code)
             VALUES ($1)
-            ON CONFLICT (code) DO UPDATE SET updated_at = NOW()
+            ON CONFLICT (code) DO UPDATE SET code = EXCLUDED.code
             RETURNING id
             """,
             code,
         )
-        version_id = await conn.fetchval(
+        version = await conn.fetchrow(
             """
             INSERT INTO process_versions (
                 process_id,
@@ -102,7 +102,7 @@ async def stage_version(
                     WHEN process_versions.finalized THEN process_versions.judit_callback_id
                     ELSE COALESCE(EXCLUDED.judit_callback_id, process_versions.judit_callback_id)
                 END
-            RETURNING id
+            RETURNING id, finalized
             """,
             process_id,
             source_request_id,
@@ -112,7 +112,14 @@ async def stage_version(
             judit_response_id,
             judit_callback_id,
         )
-    return process_id, version_id
+        if version is None:
+            raise RuntimeError("staged process version was not returned")
+        if not bool(version["finalized"]):
+            await conn.execute(
+                "UPDATE processes SET updated_at = NOW() WHERE id = $1",
+                process_id,
+            )
+    return process_id, version["id"]
 
 
 async def preferred_judit_version(
