@@ -5,6 +5,9 @@ from fastapi.testclient import TestClient
 from app.api import app
 
 
+FRONTEND = Path(__file__).parents[1] / "app" / "frontend"
+
+
 def test_frontend_routes_are_served_without_database_lifespan() -> None:
     client = TestClient(app)
 
@@ -13,6 +16,9 @@ def test_frontend_routes_are_served_without_database_lifespan() -> None:
     assert "Rpy" in index.text
     assert "Número do processo" in index.text
     assert "Bearer token" in index.text
+    assert "Ir para o conteúdo" in index.text
+    assert 'aria-live="polite"' in index.text
+    assert 'aria-describedby="process-code-hint process-code-error"' in index.text
 
     css = client.get("/app.css")
     assert css.status_code == 200
@@ -24,10 +30,25 @@ def test_frontend_routes_are_served_without_database_lifespan() -> None:
 
 
 def test_frontend_does_not_persist_bearer_token_or_render_model_html() -> None:
-    source = (Path(__file__).parents[1] / "app" / "frontend" / "app.js").read_text()
+    source = (FRONTEND / "app.js").read_text()
 
     assert "localStorage" not in source
     assert "sessionStorage" not in source
     assert "innerHTML" not in source
     assert "textContent" in source
     assert "Authorization" in source
+
+
+def test_frontend_has_explicit_accessibility_and_state_contracts() -> None:
+    javascript = (FRONTEND / "app.js").read_text()
+    stylesheet = (FRONTEND / "app.css").read_text()
+
+    assert "aria-invalid" in javascript
+    assert "aria-busy" in javascript
+    assert "NOT_FOUND" in javascript
+    assert "Sem conexão com o serviço" in javascript
+    assert "navigator.clipboard.writeText" in javascript
+    assert "prefers-reduced-motion" in javascript
+    assert ":focus-visible" in stylesheet
+    assert "prefers-reduced-motion" in stylesheet
+    assert ".skip-link" in stylesheet
