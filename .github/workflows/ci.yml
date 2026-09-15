@@ -2,9 +2,7 @@ name: ci
 
 on:
   push:
-    branches: [main, rag-mvp]
   pull_request:
-    branches: [main]
 
 jobs:
   test:

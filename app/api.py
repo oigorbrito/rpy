@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hmac
 import json
 import os
@@ -38,6 +39,23 @@ def _valid_webhook_token(token: str) -> bool:
 
 @app.get("/health")
 async def health() -> dict[str, bool]:
+    """Process liveness probe; deliberately does not depend on PostgreSQL."""
+    return {"ok": True}
+
+
+@app.get("/ready")
+async def ready(request: Request) -> dict[str, bool]:
+    """Readiness probe: traffic is accepted only while PostgreSQL is reachable."""
+    pool: asyncpg.Pool = request.app.state.pool
+
+    async def _probe() -> None:
+        async with pool.acquire() as conn:
+            await conn.fetchval("SELECT 1")
+
+    try:
+        await asyncio.wait_for(_probe(), timeout=2.0)
+    except (asyncpg.PostgresError, asyncpg.InterfaceError, OSError, TimeoutError):
+        raise HTTPException(status_code=503, detail="database unavailable") from None
     return {"ok": True}
 
 
