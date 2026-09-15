@@ -16,3 +16,7 @@ def test_frontend_requests_missing_process_and_polls_boundedly()->None:
  source=(FRONTEND/"app.js").read_text(); assert "/request" in source; assert "method:'POST'" in source; assert "MAX_POLL_ATTEMPTS=20" in source; assert "POLL_INTERVAL_MS=3000" in source; assert "setTimeout" in source; assert "setInterval" not in source; assert "pagehide" in source; assert "Já existe uma solicitação" in source; assert "Fonte processual temporariamente indisponível" in source
 def test_frontend_never_exposes_provider_request_identifier()->None:
  source=(FRONTEND/"app.js").read_text(); assert "request_id" not in source; assert "judit_request_id" not in source
+def test_frontend_follows_processing_summary_without_blocking_process_details()->None:
+ source=(FRONTEND/"app.js").read_text(); assert "MAX_SUMMARY_POLL_ATTEMPTS=20" in source; assert "SUMMARY_POLL_INTERVAL_MS=3000" in source; assert "scheduleSummaryCheck" in source; assert "checkSummary" in source; assert "Os dados processuais já estão disponíveis" in source; assert "O resumo desta versão foi atualizado automaticamente" in source; assert "data.summary_status==='processing'" in source
+def test_summary_followup_stops_on_terminal_state_and_keeps_manual_retry()->None:
+ source=(FRONTEND/"app.js").read_text(); assert "data.summary_status!=='processing'" in source; assert "O resumo continua em preparação" in source; assert "retry:true" in source; assert "stopPolling()" in source
