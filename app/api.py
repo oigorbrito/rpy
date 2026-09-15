@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 import asyncpg
 from fastapi import FastAPI, HTTPException, Request
 
-from app.auth import tenant_from_request
+from app.auth import configured_bearer_tokens, tenant_from_request
 from app.db import create_pool
 from app.http_limits import JuditWebhookBodyLimitMiddleware, judit_webhook_max_body_bytes
 from app.json_utils import decode_json_object
@@ -24,9 +24,10 @@ async def lifespan(app: FastAPI):
     database_url = os.environ.get("DATABASE_URL")
     if not database_url:
         raise RuntimeError("DATABASE_URL is required")
-    # Fail deployment startup on an invalid limit instead of discovering it only
-    # after the first webhook arrives.
+    # Fail deployment startup on invalid security/runtime configuration instead of
+    # discovering it only after the first production request arrives.
     judit_webhook_max_body_bytes()
+    app.state.bearer_tokens = configured_bearer_tokens()
     app.state.pool = await create_pool(database_url)
     try:
         yield
