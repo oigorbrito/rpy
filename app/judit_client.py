@@ -14,6 +14,10 @@ JUDIT_REQUESTS_URL = "https://requests.production.judit.io/requests/"
 class JuditRequestError(RuntimeError):
     """Safe provider-boundary failure; response bodies are deliberately discarded."""
 
+    def __init__(self, message: str, *, retry_safe: bool = False) -> None:
+        super().__init__(message)
+        self.retry_safe = retry_safe
+
 
 @dataclass(frozen=True, slots=True)
 class JuditRequestResult:
@@ -64,7 +68,12 @@ def _create_request_sync(code: str) -> JuditRequestResult:
             if len(raw) > 262144:
                 raise JuditRequestError("Judit response exceeded safe size")
     except urllib.error.HTTPError as exc:
-        raise JuditRequestError(f"Judit request failed with HTTP {exc.code}") from None
+        # A 4xx response is an explicit rejection: the provider did not accept a
+        # valid asynchronous request, so a later explicit retry is safe. 5xx and
+        # transport failures remain ambiguous and must never be retried blindly.
+        raise JuditRequestError(
+            f"Judit request failed with HTTP {exc.code}", retry_safe=400 <= exc.code < 500
+        ) from None
     except (urllib.error.URLError, TimeoutError, OSError):
         raise JuditRequestError("Judit request failed") from None
 
