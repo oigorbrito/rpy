@@ -30,23 +30,39 @@ async def test_operational_metrics_are_aggregate_and_protected(monkeypatch: pyte
     process_id = uuid4()
     version_id = uuid4()
     code = "0000000-00.0000.0.00.0301"
+    secret_markdown = "sensitive-summary-body-must-not-leak"
 
     try:
         async with pool.acquire() as conn:
-            await conn.execute("TRUNCATE jobs, process_summaries, process_steps, tenant_processes, process_versions, processes RESTART IDENTITY CASCADE")
+            await conn.execute(
+                "TRUNCATE backup_runs, judit_deliveries, jobs, process_summaries, process_steps, "
+                "tenant_processes, process_versions, processes RESTART IDENTITY CASCADE"
+            )
             await conn.execute(
                 """
-                INSERT INTO jobs (task_name, payload, status, created_at, updated_at)
+                INSERT INTO jobs (task_name, payload, status, run_at, created_at, updated_at)
                 VALUES
-                  ('a', '{}'::jsonb, 'pending', $1, $1),
-                  ('b', '{}'::jsonb, 'dead', NOW(), NOW()),
-                  ('c', '{}'::jsonb, 'completed', NOW(), NOW()),
-                  ('d', '{}'::jsonb, 'processing', NOW(), NOW())
+                  ('a', '{}'::jsonb, 'pending', $1, $1, $1),
+                  ('b', '{}'::jsonb, 'dead', NOW(), NOW(), NOW()),
+                  ('c', '{}'::jsonb, 'completed', NOW(), NOW(), NOW()),
+                  ('d', '{}'::jsonb, 'processing', NOW(), NOW(), NOW())
                 """,
                 old,
             )
             await conn.execute(
                 "UPDATE jobs SET last_heartbeat = NOW() - interval '120 seconds' WHERE task_name = 'd'"
+            )
+            await conn.execute(
+                """
+                INSERT INTO backup_runs (archive_name, archive_bytes, sha256)
+                VALUES ('rpy.dump', 123, repeat('a', 64))
+                """
+            )
+            await conn.execute(
+                """
+                INSERT INTO judit_deliveries (callback_id, request_id, event_type, raw_payload)
+                VALUES ('obs-callback', 'obs-request', 'lawsuit', '{}'::jsonb)
+                """
             )
             await conn.execute(
                 "INSERT INTO processes (id, code) VALUES ($1, $2)",
@@ -70,10 +86,11 @@ async def test_operational_metrics_are_aggregate_and_protected(monkeypatch: pyte
                 """
                 INSERT INTO process_summaries (
                     process_id, version_id, markdown, validation, model, prompt_version, generation_ms
-                ) VALUES ($1, $2, 'summary', $3::jsonb, 'model', 'prompt', 250)
+                ) VALUES ($1, $2, $3, $4::jsonb, 'model', 'prompt', 250)
                 """,
                 process_id,
                 version_id,
+                secret_markdown,
                 {"passed": False, "errors": ["x"]},
             )
 
@@ -91,21 +108,31 @@ async def test_operational_metrics_are_aggregate_and_protected(monkeypatch: pyte
         assert wrong.status_code == 404
         assert response.status_code == 200
         body = response.json()
-        assert body["queue"] == {
+        assert body["queue"]["counts"] == {
             "pending": 1,
             "processing": 1,
             "completed": 1,
             "dead": 1,
         }
-        assert body["oldest_pending_seconds"] >= 240
-        assert body["stale_processing"] == 1
+        assert body["queue"]["oldest_runnable_pending_seconds"] >= 240
+        assert body["queue"]["stale_processing"] == 1
+        assert body["queue"]["dead_last_24h"] == 1
+        assert body["queue"]["dead_by_task_last_24h"] == {"b": 1}
         assert body["summaries"]["total"] == 1
         assert body["summaries"]["validation_failed"] == 1
         assert body["summaries"]["validation_failure_rate"] == 1.0
         assert body["summaries"]["avg_generation_ms"] == 250.0
         assert body["summaries"]["p95_generation_ms"] == 250.0
+        assert body["webhooks"]["received_last_hour"] == 1
+        assert body["webhooks"]["seconds_since_last"] >= 0
+        assert body["backup"]["age_seconds"] >= 0
+        assert body["backup"]["last_completed_at"] is not None
+        assert body["operational_health"]["status"] == "critical"
+        signals = {alert["signal"] for alert in body["operational_health"]["alerts"]}
+        assert "stale_processing_jobs" in signals
+        assert "dead_jobs_24h" in signals
         serialized = str(body)
         assert code not in serialized
-        assert "summary" not in serialized
+        assert secret_markdown not in serialized
     finally:
         await pool.close()

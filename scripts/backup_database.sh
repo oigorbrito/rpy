@@ -29,5 +29,19 @@ sha256sum "$output" > "$output.sha256"
 # Validate that the custom archive can be read before considering it a backup.
 pg_restore --list "$output" >/dev/null
 
+archive_name=$(basename "$output")
+archive_bytes=$(wc -c < "$output" | tr -d ' ')
+archive_sha256=$(cut -d ' ' -f1 "$output.sha256")
+
+# Persist only successful, readable backups. The row is deliberately written after
+# pg_restore --list so backup age never advances for a corrupt/incomplete archive.
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+  -v archive_name="$archive_name" \
+  -v archive_bytes="$archive_bytes" \
+  -v archive_sha256="$archive_sha256" <<'SQL'
+INSERT INTO backup_runs (archive_name, archive_bytes, sha256)
+VALUES (:'archive_name', :'archive_bytes'::bigint, :'archive_sha256');
+SQL
+
 echo "backup created: $output"
 echo "checksum: $output.sha256"
