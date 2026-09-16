@@ -120,11 +120,49 @@ def test_extract_current_judit_steps_and_sanitizes_parties() -> None:
     assert fields["class_name"] == "PROCEDIMENTO COMUM CÍVEL"
     assert len(fields["steps"]) == 2
     assert fields["steps"][0]["step_number"] == 1
+    assert fields["steps"][0]["metadata"]["source_step_number"] is None
     assert "SENTENÇA" in fields["steps"][1]["text"]
     assert fields["parties"] == [
         {"name": "Parte A", "side": "Active", "person_type": "Autor"}
     ]
     assert "12345678901" not in str(fields["parties"])
+
+
+def test_preserves_explicit_source_step_numbers_without_changing_internal_order() -> None:
+    fields = extract_promotable_fields(
+        {
+            "code": "0000000-00.0000.0.00.0000",
+            "steps": [
+                {"step_number": 7, "content": "Primeiro movimento recebido"},
+                {"event_number": "9", "content": "Segundo movimento recebido"},
+                {"movement_number": 12, "content": "Terceiro movimento recebido"},
+                {"sequence_number": "15", "content": "Quarto movimento recebido"},
+            ],
+        }
+    )
+
+    assert [step["step_number"] for step in fields["steps"]] == [1, 2, 3, 4]
+    assert [
+        step["metadata"]["source_step_number"] for step in fields["steps"]
+    ] == [7, 9, 12, 15]
+
+
+def test_does_not_infer_source_step_number_from_step_id_or_invalid_values() -> None:
+    fields = extract_promotable_fields(
+        {
+            "code": "0000000-00.0000.0.00.0000",
+            "steps": [
+                {"step_id": "123", "content": "Sem número explícito"},
+                {"step_number": "evento-8", "content": "Número não estritamente inteiro"},
+                {"event_number": -1, "content": "Número negativo"},
+                {"movement_number": True, "content": "Booleano não é sequência"},
+            ],
+        }
+    )
+
+    assert [
+        step["metadata"]["source_step_number"] for step in fields["steps"]
+    ] == [None, None, None, None]
 
 
 def test_extracts_promotable_fields_from_tracking_fixture_without_documents() -> None:
