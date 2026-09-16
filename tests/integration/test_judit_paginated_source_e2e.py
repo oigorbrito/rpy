@@ -53,6 +53,7 @@ async def test_paginated_request_uses_only_lawsuit_for_rag_context(
     external_summary = "SUMMARY_SENTINEL_MUST_NOT_REACH_RAG_CONTEXT"
     summary_personal_id = "98765432100"
     lawsuit_personal_id = "12345678901"
+    party_personal_id = "11122233344"
     captured_provider_sources: list[str] = []
 
     async def fake_generate(client, context, validation_errors=None):
@@ -61,7 +62,11 @@ async def test_paginated_request_uses_only_lawsuit_for_rag_context(
         assert external_summary not in source
         assert summary_personal_id not in source
         assert lawsuit_personal_id not in source
+        assert party_personal_id not in source
+        assert "***.***.***-44" in source
         assert "[documento removido]" in source
+        assert "ELETRÔNICA REFER" in source
+        assert "ELETRÔNICAREFER" not in source
         assert "Sentença Proferida" in source
         assert "2026-06-10T09:00:00-03:00" in source
         assert "2026-06-11T09:00:00-03:00" in source
@@ -103,7 +108,14 @@ Nenhuma divergência objetiva identificada.
                 "instance": 1,
                 "classifications": [{"name": "Procedimento Comum"}],
                 "courts": [{"name": "TJRS"}],
-                "parties": [],
+                "parties": [
+                    {
+                        "name": "Parte Sintética",
+                        "side": "Active",
+                        "person_type": "Autor",
+                        "main_document": party_personal_id,
+                    }
+                ],
                 "subjects": [{"code": "1", "name": "Obrigação"}],
                 "steps": [
                     {
@@ -111,7 +123,7 @@ Nenhuma divergência objetiva identificada.
                         "step_number": 10,
                         "step_date": "2026-06-10T12:00:00Z",
                         "step_type": "DISTRIBUIÇÃO",
-                        "content": "10   ProcessoDistribuído nos autos.",
+                        "content": "10   ProcessoDistribuído ELETRÔNICAREFER nos autos.",
                     },
                     {
                         "step_id": "step-2",
@@ -178,12 +190,18 @@ Nenhuma divergência objetiva identificada.
 
         async with pool.acquire() as conn:
             process = await conn.fetchrow(
-                "SELECT id, current_version_id FROM processes WHERE code = $1",
+                "SELECT id, current_version_id, parties FROM processes WHERE code = $1",
                 code,
             )
             assert process is not None
             version_id = process["current_version_id"]
             assert version_id is not None
+
+            normalized_parties = process["parties"]
+            assert len(normalized_parties) == 1
+            assert normalized_parties[0]["name"] == "Parte Sintética"
+            assert normalized_parties[0]["masked_person_id"] == "***.***.***-44"
+            assert party_personal_id not in json.dumps(normalized_parties, ensure_ascii=False)
 
             version = await conn.fetchrow(
                 """
@@ -199,6 +217,8 @@ Nenhuma divergência objetiva identificada.
             assert version["judit_request_id"] == request_id
             assert external_summary not in rendered_source
             assert summary_personal_id not in rendered_source
+            assert party_personal_id in rendered_source
+            assert "ELETRÔNICAREFER" in rendered_source
 
             deliveries = await conn.fetch(
                 """
@@ -227,12 +247,13 @@ Nenhuma divergência objetiva identificada.
             )
             assert [row["step_number"] for row in steps] == [1, 2]
             assert [row["metadata"]["source_step_number"] for row in steps] == [10, 20]
-            assert steps[0]["text"] == "Processo Distribuído nos autos."
+            assert steps[0]["text"] == "Processo Distribuído ELETRÔNICA REFER nos autos."
             assert steps[1]["text"] == "Sentença Proferida CPF [documento removido]"
             assert steps[0]["metadata"]["occurred_at_sao_paulo"] == "2026-06-10T09:00:00-03:00"
             assert steps[1]["metadata"]["occurred_at_sao_paulo"] == "2026-06-11T09:00:00-03:00"
             assert external_summary not in "\n".join(row["text"] for row in steps)
             assert summary_personal_id not in "\n".join(row["text"] for row in steps)
+            assert party_personal_id not in "\n".join(row["text"] for row in steps)
 
             generation_jobs = await conn.fetch(
                 """
@@ -246,6 +267,7 @@ Nenhuma divergência objetiva identificada.
             job_payload = json.dumps(generation_jobs[0]["payload"], ensure_ascii=False)
             assert external_summary not in job_payload
             assert summary_personal_id not in job_payload
+            assert party_personal_id not in job_payload
 
             summary_rows = await conn.fetchval(
                 "SELECT count(*) FROM process_summaries WHERE process_id = $1",
