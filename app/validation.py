@@ -3,15 +3,19 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
-_DIGITS_11_14_RE = re.compile(r"(?<!\d)\d{11}(?:\d{3})?(?!\d)")
+_CPF_CNPJ_RE = re.compile(
+    r"(?<!\d)(?:\d{3}\.?\d{3}\.?\d{3}-?\d{2}|\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2})(?!\d)"
+)
 _CNJ_RE = re.compile(r"\b\d{7}-?\d{2}\.?\d{4}\.?\d\.?\d{2}\.?\d{4}\b")
-# Long unbroken numeric runs (protocol numbers, legacy autos numbers, unformatted
-# foreign identifiers) that do not match CNJ format still must match the payload
-# code. Shorter runs are not inspected to avoid false positives from dates, years,
-# amounts and small legible counts.
 _LONG_DIGITS_RE = re.compile(r"(?<!\d)\d{11,}(?!\d)")
+_PERSONAL_ID_KEY_RE = re.compile(
+    r"(?:^|_)(?:cpf|cnpj|document|document_number|tax_id|person_id|national_id|identifier|id)(?:$|_)",
+    re.IGNORECASE,
+)
+_IDENTIFIER_TOKEN_RE = re.compile(r"(?<!\d)(?:\d[\s./-]?){7,}\d(?!\d)")
 _CLASS_RE = re.compile(r"\bclass\s*=", re.IGNORECASE)
 _FORECAST_RE = re.compile(
     r"provavelmente\s+ser[áa]\s+condenad|chances?\s+de|tende\s+a\s+ganhar|recomendo\s+que",
@@ -32,6 +36,27 @@ _NAME_ROLE_RE = re.compile(
     rf"(?:(?i:na\s+qualidade\s+de|como)\s+)?(?:(?i:{_ROLE}))\b"
 )
 _JSX_TAG_RE = re.compile(r"<(/?)([A-Z][A-Za-z0-9]*)(?:\s[^<>]*?)?(/?)>")
+_ALLOWED_JSX_COMPONENTS = frozenset({"Party", "ProcessHeader"})
+_MOVEMENT_COUNT_RE = re.compile(
+    r"\b(?P<count>\d+)\s+(?:movimentos?|movimenta(?:ç|c)(?:ão|oes|ões))\b",
+    re.IGNORECASE,
+)
+_DATE_RE = re.compile(
+    r"(?<!\d)(?:\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])|"
+    r"(?:0?[1-9]|[12]\d|3[01])/(?:0?[1-9]|1[0-2])/\d{4})(?!\d)"
+)
+_ATTENTION_HEADING_RE = re.compile(
+    r"^#{1,6}\s+Pontos\s+de\s+aten(?:ç|c)(?:ão|ao)\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+_NEXT_HEADING_RE = re.compile(r"^#{1,6}\s+\S", re.MULTILINE)
+_HEADING_RE = re.compile(r"^#{1,6}\s+(?P<title>.+?)\s*$", re.MULTILINE)
+_CONDITIONAL_SECTION_ORDER = (
+    "Decisões",
+    "Prazos em curso",
+    "Processos relacionados",
+    "Anexos",
+)
 
 
 @dataclass(slots=True)
@@ -46,7 +71,9 @@ def _normalize_digits(value: str) -> str:
 
 def _normalize_party_name(value: str) -> str:
     decomposed = unicodedata.normalize("NFKD", value)
-    without_marks = "".join(character for character in decomposed if not unicodedata.combining(character))
+    without_marks = "".join(
+        character for character in decomposed if not unicodedata.combining(character)
+    )
     words = re.findall(r"[\w]+", without_marks.casefold(), flags=re.UNICODE)
     return " ".join(words)
 
@@ -73,14 +100,59 @@ def _mentioned_party_names(text: str) -> set[str]:
     }
 
 
+def _party_names_present_verbatim(text: str, parties: list[dict[str, Any]]) -> set[str]:
+    normalized_text = f" {_normalize_party_name(text)} "
+    return {
+        name
+        for name in _party_names(parties)
+        if f" {name} " in normalized_text
+    }
+
+
+def _personal_identifiers(value: Any, *, key: str = "") -> set[str]:
+    identifiers: set[str] = set()
+    if isinstance(value, dict):
+        for child_key, child_value in value.items():
+            identifiers.update(_personal_identifiers(child_value, key=str(child_key)))
+        return identifiers
+    if isinstance(value, list):
+        for child in value:
+            identifiers.update(_personal_identifiers(child, key=key))
+        return identifiers
+    if not _PERSONAL_ID_KEY_RE.search(key):
+        return identifiers
+    digits = _normalize_digits(str(value))
+    if len(digits) >= 8:
+        identifiers.add(digits)
+    return identifiers
+
+
+def _party_identifiers(parties: list[dict[str, Any]]) -> set[str]:
+    identifiers: set[str] = set()
+    for party in parties:
+        identifiers.update(_personal_identifiers(party))
+    return identifiers
+
+
+def _rendered_identifiers(text: str) -> set[str]:
+    return {
+        digits
+        for match in _IDENTIFIER_TOKEN_RE.finditer(text)
+        if len(digits := _normalize_digits(match.group(0))) >= 8
+    }
+
+
 def _jsx_errors(text: str) -> list[str]:
     errors: list[str] = []
     if _CLASS_RE.search(text):
         errors.append("JSX must use className= instead of class=")
 
     stack: list[str] = []
+    disallowed: set[str] = set()
     for match in _JSX_TAG_RE.finditer(text):
         closing, tag, self_closing = match.groups()
+        if tag not in _ALLOWED_JSX_COMPONENTS:
+            disallowed.add(tag)
         if self_closing:
             continue
         if closing:
@@ -92,34 +164,139 @@ def _jsx_errors(text: str) -> list[str]:
             stack.append(tag)
     if stack:
         errors.append(f"unclosed JSX tags: {', '.join(stack)}")
+    for tag in sorted(disallowed):
+        errors.append(f"JSX component is not allowed: {tag}")
     return errors
 
 
-def validar(*, text: str, code: str, parties: list[dict[str, Any]]) -> ValidationResult:
+def _conditional_section_order_errors(text: str) -> list[str]:
+    expected = {
+        _normalize_party_name(title): index
+        for index, title in enumerate(_CONDITIONAL_SECTION_ORDER)
+    }
+    observed: list[tuple[int, int, str]] = []
+    for match in _HEADING_RE.finditer(text):
+        title = match.group("title").strip()
+        normalized = _normalize_party_name(title)
+        if normalized in expected:
+            observed.append((match.start(), expected[normalized], title))
+
+    previous_order = -1
+    for _, order, title in observed:
+        if order < previous_order:
+            return [
+                "conditional sections must follow order: "
+                + " → ".join(_CONDITIONAL_SECTION_ORDER)
+                + f"; out-of-order section: {title}"
+            ]
+        previous_order = order
+    return []
+
+
+def _canonical_date(value: str) -> str | None:
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(value, fmt).date().isoformat()
+        except ValueError:
+            continue
+    return None
+
+
+def _dates(text: str) -> set[str]:
+    dates: set[str] = set()
+    for match in _DATE_RE.finditer(text):
+        if canonical := _canonical_date(match.group(0)):
+            dates.add(canonical)
+    return dates
+
+
+def _attention_body(text: str) -> str | None:
+    heading = _ATTENTION_HEADING_RE.search(text)
+    if heading is None:
+        return None
+    start = heading.end()
+    next_heading = _NEXT_HEADING_RE.search(text, start)
+    end = next_heading.start() if next_heading else len(text)
+    return text[start:end].strip()
+
+
+def validar(
+    *,
+    text: str,
+    code: str,
+    parties: list[dict[str, Any]],
+    steps: list[dict[str, Any]] | None = None,
+    expected_step_count: int | None = None,
+    source_text: str | None = None,
+    require_attention_section: bool = False,
+    required_attention_phrases: list[str] | None = None,
+    forbid_party_names: bool = False,
+) -> ValidationResult:
     errors: list[str] = []
 
-    if _DIGITS_11_14_RE.search(text):
+    if _CPF_CNPJ_RE.search(text):
         errors.append("possible unmasked CPF/CNPJ")
+
+    leaked_identifiers = _party_identifiers(parties) & _rendered_identifiers(text)
+    if leaked_identifiers:
+        errors.append("personal identifier from party data is prohibited")
 
     expected_cnj = _normalize_digits(code)
     for found in _CNJ_RE.findall(text):
         if _normalize_digits(found) != expected_cnj:
             errors.append(f"CNJ mismatch: {found}")
 
-    # Any long numeric reference that is not the exact payload code indicates a
-    # hallucinated/foreign process identifier, even without CNJ separators.
     for found in _LONG_DIGITS_RE.findall(text):
         if _normalize_digits(found) != expected_cnj:
             errors.append(f"CNJ mismatch: {found}")
 
-    allowed_parties = _party_names(parties)
-    mentioned_names = _mentioned_party_names(text)
-    unknown = sorted(name for name in mentioned_names if name not in allowed_parties)
-    if unknown:
-        errors.append("hallucinated parties: " + ", ".join(unknown))
+    if forbid_party_names:
+        if _party_names_present_verbatim(text, parties):
+            errors.append("party names are prohibited for secret summary")
+    else:
+        allowed_parties = _party_names(parties)
+        mentioned_names = _mentioned_party_names(text)
+        unknown = sorted(name for name in mentioned_names if name not in allowed_parties)
+        if unknown:
+            errors.append("hallucinated parties: " + ", ".join(unknown))
 
     if _FORECAST_RE.search(text):
         errors.append("prognostic language is prohibited")
 
+    count_to_validate = expected_step_count
+    if count_to_validate is None and steps is not None:
+        count_to_validate = len(steps)
+    if count_to_validate is not None:
+        for match in _MOVEMENT_COUNT_RE.finditer(text):
+            stated_count = int(match.group("count"))
+            if stated_count != count_to_validate:
+                errors.append(
+                    f"movement count mismatch: stated {stated_count}, expected {count_to_validate}"
+                )
+
+    if source_text is not None:
+        allowed_dates = _dates(source_text)
+        for generated_date in sorted(_dates(text) - allowed_dates):
+            errors.append(f"date not present in source context: {generated_date}")
+
+    attention_body = _attention_body(text)
+    if require_attention_section:
+        if attention_body is None:
+            errors.append("Pontos de atenção section is required")
+        elif not attention_body:
+            errors.append("Pontos de atenção section must not be empty")
+
+    if required_attention_phrases:
+        if attention_body is None:
+            if "Pontos de atenção section is required" not in errors:
+                errors.append("Pontos de atenção section is required")
+        else:
+            normalized_attention = _normalize_party_name(attention_body)
+            for phrase in required_attention_phrases:
+                normalized_phrase = _normalize_party_name(phrase)
+                if normalized_phrase and normalized_phrase not in normalized_attention:
+                    errors.append(f"required attention fact missing: {phrase}")
+
     errors.extend(_jsx_errors(text))
+    errors.extend(_conditional_section_order_errors(text))
     return ValidationResult(passed=not errors, errors=errors)

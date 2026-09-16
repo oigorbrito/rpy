@@ -8,9 +8,20 @@ from uuid import UUID
 
 import asyncpg
 
+SHORT_PROCESS_ALL_STEPS_MAX = 40
+DEFAULT_RANK_LIMIT = 20
+LEXICAL_WEIGHT = 0.5
+VECTOR_WEIGHT = 0.5
+RECENCY_BOOST_MAX = 0.3
+MANDATORY_RECENT_STEPS = 5
+
 _TOKEN_RE = re.compile(r"[\wÀ-ÿ]+", re.UNICODE)
 MILESTONE_RE = re.compile(
-    r"\b(SENTEN[CÇ]A|AC[ÓO]RD[ÃA]O|CITA[CÇ][ÃA]O|DECIS[ÃA]O|TR[ÂA]NSITO\s+EM\s+JULGADO|AUDI[ÊE]NCIA)\b",
+    r"\b("
+    r"SENTEN[CÇ]A|AC[ÓO]RD[ÃA]O|LIMINAR|TUTELA|CITA[CÇ][ÃA]O|AUDI[ÊE]NCIA|"
+    r"TR[ÂA]NSITO\s+EM\s+JULGADO|ARQUIVAMENTO|EXTIN[CÇ][ÃA]O|PER[ÍI]CIA|PENHORA|"
+    r"BAIXA\s+DEFINITIVA|RECURSO|APELA[CÇ][ÃA]O|EMBARGOS|DECIS[ÃA]O"
+    r")\b",
     re.IGNORECASE,
 )
 
@@ -22,6 +33,7 @@ class Step:
     text: str
     title: str | None = None
     occurred_at: Any = None
+    source_step_number: int | None = None
 
     @property
     def searchable_text(self) -> str:
@@ -32,6 +44,7 @@ class Step:
 class RankedStep:
     step: Step
     bm25: float = 0.0
+    lexical: float = 0.0
     vector: float = 0.0
     score: float = 0.0
     forced: bool = False
@@ -41,7 +54,18 @@ def tokenize(text: str) -> list[str]:
     return [match.group(0).casefold() for match in _TOKEN_RE.finditer(text)]
 
 
-def bm25_scores(query: str, steps: Sequence[Step], *, k1: float = 1.5, b: float = 0.75) -> dict[UUID, float]:
+def bm25_scores(
+    query: str,
+    steps: Sequence[Step],
+    *,
+    k1: float = 1.5,
+    b: float = 0.75,
+) -> dict[UUID, float]:
+    """Deterministic in-memory lexical fallback and comparison baseline.
+
+    Production PostgreSQL retrieval supplies lexical_scores from lexical_search().
+    BM25 remains useful for unit tests and evidence-based comparison without DB I/O.
+    """
     if not steps:
         return {}
     query_terms = tokenize(query)
@@ -87,25 +111,34 @@ def rank_steps(
     *,
     query: str,
     steps: Sequence[Step],
+    lexical_scores: dict[UUID, float] | None = None,
     vector_scores: dict[UUID, float] | None = None,
-    limit: int = 20,
+    limit: int = DEFAULT_RANK_LIMIT,
 ) -> list[RankedStep]:
-    if len(steps) <= 40:
-        return [RankedStep(step=step, forced=True, score=1.0) for step in sorted(steps, key=lambda item: item.step_number)]
+    if len(steps) <= SHORT_PROCESS_ALL_STEPS_MAX:
+        return [
+            RankedStep(step=step, forced=True, score=1.0)
+            for step in sorted(steps, key=lambda item: item.step_number)
+        ]
 
-    lexical = _normalize(bm25_scores(query, steps))
+    bm25 = _normalize(bm25_scores(query, steps))
+    lexical = _normalize(lexical_scores if lexical_scores is not None else bm25)
     vector = _normalize(vector_scores or {})
     max_step = max(step.step_number for step in steps) or 1
 
     ranked: list[RankedStep] = []
     for step in steps:
-        base_score = 0.5 * lexical.get(step.id, 0.0) + 0.5 * vector.get(step.id, 0.0)
-        recency = 1.0 + 0.3 * (step.step_number / max_step)
+        base_score = (
+            LEXICAL_WEIGHT * lexical.get(step.id, 0.0)
+            + VECTOR_WEIGHT * vector.get(step.id, 0.0)
+        )
+        recency = 1.0 + RECENCY_BOOST_MAX * (step.step_number / max_step)
         forced = bool(MILESTONE_RE.search(step.searchable_text))
         ranked.append(
             RankedStep(
                 step=step,
-                bm25=lexical.get(step.id, 0.0),
+                bm25=bm25.get(step.id, 0.0),
+                lexical=lexical.get(step.id, 0.0),
                 vector=vector.get(step.id, 0.0),
                 score=base_score * recency,
                 forced=forced,
@@ -114,7 +147,7 @@ def rank_steps(
 
     by_number = sorted(ranked, key=lambda item: item.step.step_number)
     mandatory_ids = {by_number[0].step.id, by_number[-1].step.id}
-    mandatory_ids.update(item.step.id for item in by_number[-5:])
+    mandatory_ids.update(item.step.id for item in by_number[-MANDATORY_RECENT_STEPS:])
     mandatory_ids.update(item.step.id for item in ranked if item.forced)
 
     selected: dict[UUID, RankedStep] = {
@@ -131,7 +164,16 @@ def rank_steps(
 async def load_steps(conn: asyncpg.Connection, *, version_id: UUID) -> list[Step]:
     rows = await conn.fetch(
         """
-        SELECT id, step_number, title, text, occurred_at
+        SELECT id,
+               step_number,
+               title,
+               text,
+               occurred_at,
+               CASE
+                   WHEN (metadata->>'source_step_number') ~ '^[0-9]+$'
+                   THEN (metadata->>'source_step_number')::integer
+                   ELSE NULL
+               END AS source_step_number
         FROM process_steps
         WHERE version_id = $1
         ORDER BY step_number ASC
@@ -145,9 +187,42 @@ async def load_steps(conn: asyncpg.Connection, *, version_id: UUID) -> list[Step
             title=row["title"],
             text=row["text"],
             occurred_at=row["occurred_at"],
+            source_step_number=(
+                int(row["source_step_number"])
+                if row["source_step_number"] is not None
+                else None
+            ),
         )
         for row in rows
     ]
+
+
+async def lexical_search(
+    conn: asyncpg.Connection,
+    *,
+    version_id: UUID,
+    query: str,
+    limit: int = 40,
+) -> dict[UUID, float]:
+    rows = await conn.fetch(
+        """
+        SELECT id,
+               ts_rank_cd(
+                   to_tsvector('portuguese', coalesce(title, '') || ' ' || text),
+                   websearch_to_tsquery('portuguese', $2)
+               ) AS lexical_rank
+        FROM process_steps
+        WHERE version_id = $1
+          AND to_tsvector('portuguese', coalesce(title, '') || ' ' || text)
+              @@ websearch_to_tsquery('portuguese', $2)
+        ORDER BY lexical_rank DESC, step_number DESC
+        LIMIT $3
+        """,
+        version_id,
+        query,
+        limit,
+    )
+    return {row["id"]: max(0.0, float(row["lexical_rank"])) for row in rows}
 
 
 async def vector_search(

@@ -2,14 +2,20 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timezone
 from time import perf_counter
 from typing import Any
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 import asyncpg
 
 from app.db import create_pool
-from app.embeddings import embed_query, ensure_step_embeddings
+from app.embeddings import (
+    embed_query,
+    ensure_step_embeddings,
+    vector_retrieval_configured,
+)
 from app.json_utils import decode_json_list, decode_json_object
 from app.prompts import PROCESS_SUMMARY_SYSTEM_PROMPT
 from app.providers import (
@@ -18,7 +24,7 @@ from app.providers import (
     call_with_retries,
     is_retryable_anthropic_error,
 )
-from app.retrieval import load_steps, rank_steps, vector_search
+from app.retrieval import lexical_search, load_steps, rank_steps, vector_search
 from app.tasks import PermanentTaskError, task
 from app.validation import ValidationResult, validar
 
@@ -27,17 +33,17 @@ PROMPT_VERSION = "process-summary-v2"
 SECRET_MODEL = "local-deterministic"
 SECRET_PROMPT_VERSION = "secret-summary-v1"
 REQUESTED_TEMPERATURE = 0.2
-# Historical design intent is temperature=0.2. Claude Sonnet 5 currently rejects
-# non-default sampling parameters, so the production request must omit temperature.
 SONNET_5_SUPPORTS_CUSTOM_TEMPERATURE = False
 RETRIEVAL_QUERY = (
     "sentença acórdão citação decisão audiência pedido objeto situação atual "
     "trânsito em julgado"
 )
+EMPTY_STEPS_WARNING = "Nenhum movimento processual foi fornecido no payload."
 DEFAULT_PROVIDER_PROMPT_MAX_CHARS = 120_000
 DEFAULT_PROVIDER_STEP_TEXT_MAX_CHARS = 12_000
 DEFAULT_PROVIDER_STEPS_TEXT_MAX_CHARS = 80_000
 TRUNCATION_MARKER = "… [truncated]"
+_SAO_PAULO = ZoneInfo("America/Sao_Paulo")
 _SECRET_HEADER_FIELDS = (
     ("instance", "Instância"),
     ("area", "Área"),
@@ -96,6 +102,16 @@ def _message_text(message: Any) -> str:
     ).strip()
 
 
+def _provider_datetime(value: Any) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, datetime):
+        return str(value)
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(_SAO_PAULO).isoformat()
+
+
 def _serialize_steps(ranked: list[Any]) -> list[dict[str, Any]]:
     _, step_max, steps_total_max = provider_context_limits()
     texts = [_truncate_text(str(item.step.text or ""), step_max) for item in ranked]
@@ -115,12 +131,29 @@ def _serialize_steps(ranked: list[Any]) -> list[dict[str, Any]]:
     return [
         {
             "step_number": item.step.step_number,
-            "occurred_at": str(item.step.occurred_at) if item.step.occurred_at else None,
+            "occurred_at": _provider_datetime(item.step.occurred_at),
             "title": item.step.title,
             "text": text,
         }
         for item, text in zip(ranked, texts, strict=True)
     ]
+
+
+def _source_step_gap_warnings(steps: list[Any]) -> list[str]:
+    if len(steps) < 2:
+        return []
+    source_numbers = [step.source_step_number for step in steps]
+    if any(number is None for number in source_numbers):
+        return []
+
+    numbers = [int(number) for number in source_numbers if number is not None]
+    warnings: list[str] = []
+    for previous, current in zip(numbers, numbers[1:]):
+        if current > previous + 1:
+            warnings.append(
+                f"Há salto na numeração de movimentos da fonte: {previous}→{current}."
+            )
+    return warnings
 
 
 async def _load_process(
@@ -159,14 +192,13 @@ async def _load_context(
 ) -> dict[str, Any]:
     base = await _load_process(pool, process_id, version_id)
 
-    # LGPD blocker: secret proceedings expose only the allowed header and class;
-    # no parties, subjects, movement text or embeddings leave the database.
     if base["secrecy_level"] > 0:
         return {
             "code": base["code"],
             "class_name": base["class_name"],
             "secrecy_level": base["secrecy_level"],
             "header": base["header"],
+            "validation_parties": base["parties"],
             "parties": [],
             "subjects": [],
             "steps": [],
@@ -175,22 +207,39 @@ async def _load_context(
     async with pool.acquire() as conn:
         steps = await load_steps(conn, version_id=version_id)
 
+    base["step_count"] = len(steps)
+    source_warnings = (
+        [EMPTY_STEPS_WARNING] if not steps else _source_step_gap_warnings(steps)
+    )
+    if source_warnings:
+        base["source_warnings"] = source_warnings
+
+    lexical_scores: dict[UUID, float] | None = None
     vector_scores: dict[UUID, float] | None = None
     if len(steps) > 40:
-        # Embeddings are conditional: short proceedings never pay the vector cost.
-        await ensure_step_embeddings(pool, version_id=version_id)
-        query_vector = await embed_query(RETRIEVAL_QUERY)
         async with pool.acquire() as conn:
-            vector_scores = await vector_search(
+            lexical_scores = await lexical_search(
                 conn,
                 version_id=version_id,
-                embedding=query_vector,
+                query=RETRIEVAL_QUERY,
                 limit=40,
             )
+
+        if vector_retrieval_configured():
+            await ensure_step_embeddings(pool, version_id=version_id)
+            query_vector = await embed_query(RETRIEVAL_QUERY)
+            async with pool.acquire() as conn:
+                vector_scores = await vector_search(
+                    conn,
+                    version_id=version_id,
+                    embedding=query_vector,
+                    limit=40,
+                )
 
     ranked = rank_steps(
         query=RETRIEVAL_QUERY,
         steps=steps,
+        lexical_scores=lexical_scores,
         vector_scores=vector_scores,
         limit=20,
     )
@@ -203,7 +252,6 @@ def _is_secret_context(context: dict[str, Any]) -> bool:
 
 
 def _secret_summary(context: dict[str, Any]) -> str:
-    """Build the minimum useful summary without invoking an external model."""
     lines = [
         "# Resumo do processo",
         "",
@@ -232,7 +280,6 @@ def _secret_summary(context: dict[str, Any]) -> str:
 
 
 def _provider_payload(context: dict[str, Any]) -> tuple[dict[str, Any], list[Any]]:
-    """Return the exact data boundary allowed to leave the application."""
     if _is_secret_context(context):
         return (
             {
@@ -245,6 +292,27 @@ def _provider_payload(context: dict[str, Any]) -> tuple[dict[str, Any], list[Any
     return (
         {key: value for key, value in context.items() if key != "steps"},
         list(context.get("steps", [])),
+    )
+
+
+def _provider_source_text(context: dict[str, Any]) -> str:
+    provider_process, provider_steps = _provider_payload(context)
+    return json.dumps(
+        {"processo": provider_process, "movimentos": provider_steps},
+        ensure_ascii=False,
+        default=str,
+    )
+
+
+def _validate_provider_summary(text: str, context: dict[str, Any]) -> ValidationResult:
+    return validar(
+        text=text,
+        code=context["code"],
+        parties=context.get("parties", []),
+        expected_step_count=int(context.get("step_count") or 0),
+        source_text=_provider_source_text(context),
+        require_attention_section=True,
+        required_attention_phrases=list(context.get("source_warnings", [])),
     )
 
 
@@ -314,13 +382,6 @@ async def _persist_summary(
     model: str = MODEL,
     prompt_version: str = PROMPT_VERSION,
 ) -> bool:
-    """Persist without allowing duplicate/stale executions to degrade a valid summary.
-
-    Invalid summaries may be replaced by later attempts. Once a valid summary exists,
-    only a valid result from a different prompt/model revision may replace it. An
-    invalid duplicate can therefore never overwrite content already accepted by the
-    validator.
-    """
     row = await conn.fetchrow(
         """
         INSERT INTO process_summaries (
@@ -359,7 +420,6 @@ async def _load_publishable_summary(
     process_id: UUID,
     version_id: UUID,
 ) -> dict[str, Any] | None:
-    """Return an already accepted summary only while the version is still current."""
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
@@ -410,7 +470,8 @@ async def generate_summary(
         result: ValidationResult = validar(
             text=text,
             code=context["code"],
-            parties=[],
+            parties=context.get("validation_parties", []),
+            forbid_party_names=True,
         )
         model = SECRET_MODEL
         prompt_version = SECRET_PROMPT_VERSION
@@ -421,18 +482,10 @@ async def generate_summary(
         client = anthropic_client(api_key)
 
         text = await _generate(client, context)
-        result = validar(
-            text=text,
-            code=context["code"],
-            parties=context.get("parties", []),
-        )
+        result = _validate_provider_summary(text, context)
         if not result.passed:
             text = await _generate(client, context, result.errors)
-            result = validar(
-                text=text,
-                code=context["code"],
-                parties=context.get("parties", []),
-            )
+            result = _validate_provider_summary(text, context)
 
     generation_ms = max(0, round((perf_counter() - started) * 1000))
     validation = {"passed": result.passed, "errors": result.errors}

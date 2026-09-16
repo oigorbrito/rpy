@@ -4,9 +4,17 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     services:
       postgres:
         image: pgvector/pgvector:pg16@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
@@ -40,6 +48,7 @@ jobs:
         run: |
           python -m pip install pip==26.2.1
           python -m pip install --constraint requirements/constraints.txt -e '.[dev]'
+          python -m pip check
 
       - name: Production compose contract
         env:
@@ -64,11 +73,41 @@ jobs:
       - name: Migration harness
         run: python scripts/migration_harness.py
 
+      - name: Release harness
+        run: python scripts/release_harness.py
+
+      - name: Static Python quality
+        run: ruff check app scripts tests
+
       - name: Unit tests
         run: pytest -q tests --ignore=tests/integration
 
       - name: Offline RAG evaluation gate
         run: python scripts/evaluate_rag.py --dataset tests/evaluation/dataset_v1.json --baseline tests/evaluation/baseline_v1.json
+
+      - name: Synthetic RAG eval gate
+        env:
+          ANTHROPIC_API_KEY: ""
+          OPENAI_API_KEY: ""
+          JUDIT_API_KEY: ""
+          GEMINI_API_KEY: ""
+        run: python scripts/evaluate_synthetic_rag.py --check-baseline --output /tmp/synthetic-rag-eval.json
+
+      - name: Offline pipeline eval gate
+        env:
+          ANTHROPIC_API_KEY: ""
+          OPENAI_API_KEY: ""
+          JUDIT_API_KEY: ""
+          GEMINI_API_KEY: ""
+        run: python scripts/evaluate_offline_pipeline.py --check-baseline
+
+      - name: Offline generation eval gate
+        env:
+          ANTHROPIC_API_KEY: ""
+          OPENAI_API_KEY: ""
+          JUDIT_API_KEY: ""
+          GEMINI_API_KEY: ""
+        run: python scripts/evaluate_offline_generation.py --check-baseline
 
       - name: Frontend behavior tests
         run: node tests/frontend_behavior_test.mjs

@@ -6,7 +6,9 @@ build-backend = "setuptools.build_meta"
 name = "rpy"
 version = "0.1.0"
 description = "RAG de resumo processual com FastAPI, PostgreSQL e pgvector"
-requires-python = ">=3.11"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12,<3.13"
 dependencies = [
   "fastapi>=0.116,<1",
   "uvicorn[standard]>=0.35,<1",
@@ -23,7 +25,11 @@ dev = [
   "pytest>=8.4,<9",
   "pytest-asyncio>=1.1,<2",
   "httpx>=0.28,<1",
+  "ruff>=0.16,<0.17",
 ]
+
+[project.urls]
+Repository = "https://github.com/oigorbrito/rpy"
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -32,3 +38,13 @@ exclude = ["tests*", "scripts*", "sql*", "docs*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+# Keep the pre-v0 gate high-signal: syntax/runtime-invalid constructs,
+# undefined names, and invalid control-flow/import semantics. Style cleanup
+# remains intentionally out of scope for the release hardening pass.
+select = ["E9", "F63", "F7", "F82"]

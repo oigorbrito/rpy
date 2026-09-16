@@ -9,6 +9,10 @@ import asyncpg
 
 from app.db import create_pool
 from app.judit_client import JuditRequestError, create_lawsuit_request
+from app.public_lifecycle import (
+    link_summary_request_to_acquisition,
+    transition_requests_for_acquisition,
+)
 from app.queue import enqueue
 from app.tasks import PermanentTaskError, task
 
@@ -29,17 +33,48 @@ async def _enqueue_acquisition(conn: asyncpg.Connection, *, request_row_id: UUID
     )
 
 
+async def _link_public_request(
+    conn: asyncpg.Connection,
+    *,
+    public_summary_request_id: UUID | None,
+    tenant_id: UUID,
+    code: str,
+    tenant_judit_request_id: UUID,
+    already_fetching: bool,
+) -> None:
+    if public_summary_request_id is None:
+        return
+    await link_summary_request_to_acquisition(
+        conn,
+        request_id=public_summary_request_id,
+        tenant_id=tenant_id,
+        process_code=code,
+        tenant_judit_request_id=tenant_judit_request_id,
+    )
+    if already_fetching:
+        await transition_requests_for_acquisition(
+            conn,
+            tenant_judit_request_id=tenant_judit_request_id,
+            status="fetching",
+        )
+
+
 async def request_process(
     pool: asyncpg.Pool,
     *,
     tenant_id: UUID,
     code: str,
+    public_summary_request_id: UUID | None = None,
 ) -> ProcessRequestResult:
     """Durably register a tenant/CNJ acquisition without provider I/O.
 
     Explicit provider rejections may be retried by a later user request. An
     ambiguous transport/provider failure is never retried automatically because
     the provider may already have accepted a paid asynchronous request.
+
+    When a public summary request is supplied, it is linked atomically to the
+    shared tenant/CNJ acquisition. Multiple public jobs can therefore reuse one
+    Judit request without duplicating paid provider work.
     """
     async with pool.acquire() as conn:
         async with conn.transaction():
@@ -56,8 +91,25 @@ async def request_process(
                         existing["id"],
                         attempt,
                     )
+                    await _link_public_request(
+                        conn,
+                        public_summary_request_id=public_summary_request_id,
+                        tenant_id=tenant_id,
+                        code=code,
+                        tenant_judit_request_id=existing["id"],
+                        already_fetching=False,
+                    )
                     await _enqueue_acquisition(conn, request_row_id=existing["id"], attempt=attempt)
                     return ProcessRequestResult(request_id="", created=True)
+
+                await _link_public_request(
+                    conn,
+                    public_summary_request_id=public_summary_request_id,
+                    tenant_id=tenant_id,
+                    code=code,
+                    tenant_judit_request_id=existing["id"],
+                    already_fetching=bool(existing["judit_request_id"]),
+                )
                 return ProcessRequestResult(
                     request_id=str(existing["judit_request_id"] or ""), created=False
                 )
@@ -72,6 +124,14 @@ async def request_process(
                 code,
             )
             request_row_id = row["id"]
+            await _link_public_request(
+                conn,
+                public_summary_request_id=public_summary_request_id,
+                tenant_id=tenant_id,
+                code=code,
+                tenant_judit_request_id=request_row_id,
+                already_fetching=False,
+            )
             await _enqueue_acquisition(conn, request_row_id=request_row_id, attempt=1)
             return ProcessRequestResult(request_id="", created=True)
 
@@ -115,6 +175,12 @@ async def request_judit_process_task(payload: dict[str, Any]) -> dict[str, Any]:
                 "SELECT tenant_id, process_code, judit_request_id, status FROM tenant_judit_requests WHERE id=$1",
                 tenant_request_id,
             )
+            if request_row is not None:
+                await transition_requests_for_acquisition(
+                    conn,
+                    tenant_judit_request_id=tenant_request_id,
+                    status="fetching",
+                )
         if request_row is None:
             raise PermanentTaskError("tenant process request not found")
         if request_row["judit_request_id"]:
@@ -125,11 +191,18 @@ async def request_judit_process_task(payload: dict[str, Any]) -> dict[str, Any]:
         except JuditRequestError as exc:
             failure_status = "failed_retryable" if exc.retry_safe else "failed_ambiguous"
             async with pool.acquire() as conn:
-                await conn.execute(
-                    "UPDATE tenant_judit_requests SET status=$2 WHERE id=$1 AND judit_request_id IS NULL",
-                    tenant_request_id,
-                    failure_status,
-                )
+                async with conn.transaction():
+                    await conn.execute(
+                        "UPDATE tenant_judit_requests SET status=$2 WHERE id=$1 AND judit_request_id IS NULL",
+                        tenant_request_id,
+                        failure_status,
+                    )
+                    await transition_requests_for_acquisition(
+                        conn,
+                        tenant_judit_request_id=tenant_request_id,
+                        status="source_unavailable",
+                        error_code="source_unavailable",
+                    )
             raise PermanentTaskError("process provider request failed") from exc
 
         async with pool.acquire() as conn:

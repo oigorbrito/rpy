@@ -40,6 +40,9 @@ async def test_large_process_uses_offline_embeddings_and_hybrid_retrieval(
     monkeypatch.setenv("JUDIT_WEBHOOK_TOKEN", "vector-e2e-webhook")
     monkeypatch.setenv("DATABASE_URL", TEST_DATABASE_URL)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "offline-anthropic-key")
+    # This test proves the configured-vector path. All embedding/provider calls
+    # are replaced below with deterministic local fakes, so no network is used.
+    monkeypatch.setenv("OPENAI_API_KEY", "offline-openai-key")
 
     async with pool.acquire() as conn:
         await conn.execute(
@@ -93,6 +96,7 @@ async def test_large_process_uses_offline_embeddings_and_hybrid_retrieval(
         assert validation_errors is None
         generation_contexts.append(context)
         assert context["code"] == code
+        assert context["step_count"] == 45
         assert 1 <= len(context["steps"]) <= 20
         assert any("vetorial-prioritário" in step["text"] for step in context["steps"])
         return f"""# Resumo do processo
@@ -113,6 +117,9 @@ O processo possui histórico extenso e foi recuperado por seleção híbrida off
 
 ## Situação atual
 O último movimento fornecido integra a versão processual atual.
+
+## Pontos de atenção
+Nenhuma divergência objetiva identificada.
 """
 
     monkeypatch.setattr(embeddings, "embed_texts", fake_embed_texts)

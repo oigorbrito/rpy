@@ -94,7 +94,7 @@ SET status = CASE
     updated_at = NOW()
 FROM stale
 WHERE j.id = stale.id
-RETURNING j.id, j.status;
+RETURNING j.id, j.status, j.task_name, j.payload;
 """
 
 

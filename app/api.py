@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 import asyncpg
 from fastapi import FastAPI, HTTPException, Request
 
+from app.api_key_middleware import ApiKeySecurityMiddleware
 from app.auth import configured_bearer_tokens, tenant_from_request
 from app.db import create_pool
 from app.frontend import router as frontend_router
@@ -53,6 +54,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Rpy", lifespan=lifespan)
+# API-key authorization is registered inside the webhook guards; it ignores
+# webhook routes, while secret redaction remains the outermost middleware.
+app.add_middleware(ApiKeySecurityMiddleware)
 app.add_middleware(JuditWebhookBodyLimitMiddleware)
 # Added after the body-limit middleware so it is the outermost application
 # middleware and the secret is removed from the shared ASGI scope immediately.
@@ -193,7 +197,9 @@ async def get_process_summary(code: str, request: Request) -> dict:
             """
             SELECT markdown, validation, model, prompt_version, generation_ms, created_at
             FROM process_summaries
-            WHERE process_id = $1 AND version_id = $2
+            WHERE process_id = $1
+              AND version_id = $2
+              AND COALESCE((validation->>'passed')::boolean, false) = true
             """,
             process["id"],
             process["current_version_id"],

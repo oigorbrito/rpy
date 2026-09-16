@@ -1,57 +1,115 @@
 # Rpy
 
-MVP de RAG para consulta e resumo processual em Python/FastAPI, PostgreSQL e pgvector.
+Rpy é um serviço de RAG para consulta e resumo processual em Python/FastAPI, PostgreSQL 16 e pgvector. O foco do `v0.1.0` é um caminho operacional pequeno, auditável e reproduzível, com fila PostgreSQL, multitenancy, sigilo provider-free e validação offline sem credenciais pagas.
 
-## Fluxo do produto
+## Estado do projeto
 
-A interface web é servida pela própria API em `/`. O usuário informa um bearer token provisionado para seu tenant e um número CNJ. O fluxo suportado é:
+O caminho offline está qualificado por CI e por fresh clone real em Windows. A validação canônica reconstrói a imagem, aplica as migrations, executa API/fila/worker com dados sintéticos e termina com:
 
-1. consultar um processo já autorizado;
-2. se o CNJ ainda não estiver disponível, solicitar a aquisição à Judit;
-3. acompanhar de forma limitada a chegada dos dados processuais;
-4. ler partes, assuntos, contexto e movimentações assim que a versão estiver disponível;
-5. acompanhar a geração do resumo enquanto `summary_status=processing`;
-6. ler e copiar o resumo validado quando publicado.
+```text
+RPY OFFLINE SMOKE: PASS
+process=0000000-00.2026.8.21.0001
+summary=valid
+jobs=complete
+providers=0
+```
 
-O browser não recebe credenciais da Judit nem identificadores internos de request/job. O bearer token permanece apenas em memória da página; não é salvo em `localStorage` ou `sessionStorage`.
+Judit, Anthropic e OpenAI reais são uma etapa posterior de **Provider Acceptance**, opcional e não bloqueante para o release offline. Consulte `docs/release/offline-release-candidate.md` e `docs/release/v0.1.0.md`.
+
+## Princípios de engenharia
+
+- PostgreSQL é a fonte de verdade e também a fila de jobs.
+- Claims concorrentes usam `FOR UPDATE SKIP LOCKED` com ownership por `worker_id`.
+- Retries e callbacks externos são idempotentes em fronteiras duráveis.
+- Processos sigilosos não chamam LLM nem embeddings externos.
+- Migrations, recuperação, retenção e isolamento entre tenants são tratados como invariantes, não como detalhes de implementação.
+- Mudanças devem ser pequenas, reversíveis e sustentadas por testes/CI; o contrato completo para agentes e contribuições está em `AGENTS.md` e `CONTRIBUTING.md`.
 
 ## Arquitetura
 
-- **API FastAPI + frontend server-served**: consulta tenant-scoped, solicitação de CNJ e webhooks Judit.
-- **PostgreSQL 16 + pgvector**: persistência, vetores e fila.
-- **2+ workers**: claim atômico com `FOR UPDATE SKIP LOCKED`, heartbeat, retry e reclaim.
+- **FastAPI + frontend server-served**: consulta tenant-scoped, solicitação de CNJ e webhooks Judit.
+- **PostgreSQL 16 + pgvector**: dados processuais, embeddings, auditoria e fila.
+- **2+ workers**: claim atômico, heartbeat, retry, fencing e reclaim.
 - **1 scheduler**: expurgo periódico protegido por advisory lock.
-- **Claude Sonnet 5**: geração do resumo com prompt caching e validação pós-geração.
-- **Embeddings condicionais**: somente processos com mais de 40 movimentos usam busca vetorial.
+- **Claude Sonnet 5**: geração de resumo não sigiloso, prompt caching e validação pós-geração.
+- **Embeddings condicionais**: processos com mais de 40 movimentos usam retrieval lexical + vetorial.
 
-## Subir localmente
+Fluxo simplificado:
 
-### Validação offline (caminho recomendado)
+```text
+Browser/API
+    |
+    v
+FastAPI -----> Judit (opcional, provider real)
+    |
+    v
+PostgreSQL/pgvector <---- workers
+    |                    |
+    |                    +---- Anthropic/OpenAI (somente quando permitido)
+    |
+    +---- scheduler/reclaimer
+```
 
-Pré-requisitos: Git, Docker e Docker Compose. O host não precisa de Python,
-pytest ou credenciais de providers.
+## Quickstart offline
 
-No Windows:
+Pré-requisitos:
+
+- Git;
+- Docker;
+- Docker Compose;
+- Docker daemon em execução.
+
+O host não precisa de Python, pytest nem chaves de providers para o smoke offline.
+
+### Windows
 
 ```powershell
+git clone https://github.com/oigorbrito/rpy.git
+cd rpy
 .\scripts\smoke_offline.ps1
 ```
 
-No Unix:
+### Linux/macOS
 
 ```bash
+git clone https://github.com/oigorbrito/rpy.git
+cd rpy
 ./scripts/smoke_offline.sh
 ```
 
-O resultado esperado é `RPY OFFLINE SMOKE: PASS`, seguido de `summary=valid`,
-`jobs=complete` e `providers=0`. O smoke usa um projeto Compose, rede e volume
-descartáveis próprios. Para parar uma stack local criada manualmente, use
-`docker compose down`; não use limpeza global do Docker.
+O smoke usa projeto Compose, rede e volume descartáveis próprios. Não use comandos globais destrutivos de limpeza do Docker para executar ou encerrar esse fluxo.
 
-### Modo com providers reais (opcional)
+## Desenvolvimento local
 
-Para exercer o fluxo completo com Judit e geração externa, configure as chaves
-em um ambiente controlado:
+Para trabalhar fora do container, use Python 3.12 e instale as dependências sob o arquivo de constraints:
+
+```bash
+python -m pip install pip==26.2.1
+python -m pip install --constraint requirements/constraints.txt -e '.[dev]'
+```
+
+Checks rápidos:
+
+```bash
+python scripts/migration_harness.py
+python scripts/release_harness.py
+pytest -q tests --ignore=tests/integration
+node tests/frontend_behavior_test.mjs
+```
+
+Integração PostgreSQL:
+
+```bash
+pytest -q tests/integration
+```
+
+Antes de abrir PR, leia `CONTRIBUTING.md`. Mudanças arquiteturais, de migration, fila, retrieval, provider, sigilo ou deployment também devem respeitar `AGENTS.md`.
+
+## Modo com providers reais — opcional
+
+Use apenas ambiente controlado, credenciais rotacionáveis e orçamento explícito. Nunca use chaves reais no CI ou em exemplos commitados.
+
+Exemplo de variáveis esperadas:
 
 ```bash
 export ANTHROPIC_API_KEY='change-me'
@@ -67,20 +125,34 @@ Então:
 docker compose up --build
 ```
 
-O stack local sobe PostgreSQL/pgvector em `localhost:5432`, migration job, API/frontend em `localhost:8000`, dois workers e exatamente um scheduler.
+A stack local sobe PostgreSQL/pgvector em `localhost:5432`, migration job, API/frontend em `localhost:8000`, dois workers e exatamente um scheduler.
 
-Health check:
+Health/readiness:
 
 ```bash
 curl http://localhost:8000/health
+curl http://localhost:8000/ready
 ```
 
 Abra `http://localhost:8000/` para usar a interface.
 
+## Fluxo do produto
+
+A interface web é servida pela própria API em `/`. O usuário informa um bearer token provisionado para seu tenant e um número CNJ. O fluxo suportado é:
+
+1. consultar um processo já autorizado;
+2. se o CNJ ainda não estiver disponível, solicitar aquisição à Judit;
+3. acompanhar a chegada dos dados processuais;
+4. ler partes, assuntos, contexto e movimentações quando a versão estiver disponível;
+5. acompanhar a geração enquanto `summary_status=processing`;
+6. ler/copiar o resumo validado quando publicado.
+
+O browser não recebe credenciais da Judit nem identificadores internos de request/job. O bearer token permanece somente em memória da página e não é salvo em `localStorage`/`sessionStorage`.
+
 ## Contrato HTTP principal
 
 - `GET /processes/{cnj}`: lê apenas processo autorizado ao tenant e retorna `404` fora do escopo.
-- `POST /processes/{cnj}/request`: solicita aquisição de CNJ ausente, com idempotência por tenant/CNJ; retorna apenas estado público.
+- `POST /processes/{cnj}/request`: solicita aquisição de CNJ ausente, com idempotência por tenant/CNJ; retorna somente estado público.
 - `POST /webhooks/judit/{token}`: recebe callbacks assíncronos da Judit.
 - `GET /health`: liveness.
 - `GET /ready`: readiness com PostgreSQL.
@@ -90,52 +162,87 @@ O estado público do resumo é `available`, `processing`, `not_generated` ou `un
 
 ## Webhook Judit
 
-Regras principais:
-
 - token inválido retorna `404`;
 - `callback_id` é persistido para idempotência;
-- `response_created` do tipo `lawsuit` é apenas staged e concede acesso aos tenants associados à solicitação correspondente;
-- `request_completed` enfileira a promoção no worker;
-- quando existe resposta fresca (`cached_response=false`), ela vence a cacheada;
+- `response_created` do tipo `lawsuit` é staged e concede acesso somente aos tenants correlacionados à solicitação;
+- `request_completed` enfileira promoção no worker;
+- resposta fresca (`cached_response=false`) vence a cacheada;
 - resposta apenas cacheada pode ser promovida, mas não dispara LLM;
 - o handler HTTP não executa geração nem promoção pesada.
 
 ## Retrieval
 
-- até 40 movimentos: todos os movimentos entram no contexto, sem embeddings;
-- acima de 40: BM25 real + pgvector em peso `0.5 / 0.5`;
+- até 40 movimentos: todos entram no contexto, sem embeddings;
+- acima de 40: BM25 real + pgvector com pesos `0.5 / 0.5`;
 - boost de recência;
-- primeiro, último e cinco movimentos mais recentes são forçados;
-- milestones judiciais são forçados independentemente do score.
+- primeiro, último e cinco movimentos mais recentes são force-included;
+- milestones judiciais relevantes são force-included independentemente do score.
 
-## Segurança / LGPD
+## Segurança e LGPD
 
-- portfólio autorizado via `tenant_processes`;
+- autorização de portfólio via `tenant_processes`;
 - bearer token resolve tenant antes da leitura ou solicitação;
-- solicitação Judit é correlacionada de forma durável ao tenant antes de o callback conceder acesso;
-- processos sob sigilo não enviam conteúdo para embeddings/LLM externos;
+- solicitação Judit é correlacionada de forma durável ao tenant antes de callbacks concederem acesso;
+- processos sob sigilo usam caminho determinístico local e não enviam conteúdo para embeddings/LLM externos;
 - `access_log` é imutável;
-- expurgo remove versões, JSONB, movimentos, vetores e callbacks brutos da Judit, preservando o registro histórico de acesso.
+- expurgo remove versões, JSONB, movimentos, vetores e callbacks brutos da Judit, preservando histórico de acesso.
 
-## Testes e evidência de release
+Não publique vulnerabilidades, credenciais ou dados processuais sensíveis em issues. Consulte `SECURITY.md`.
 
-```bash
-pip install -e '.[dev]'
-python scripts/migration_harness.py
-pytest -q tests --ignore=tests/integration
+## CI e evidência de release
+
+O GitHub Actions executa:
+
+- validação do contrato de Compose de produção;
+- migration harness;
+- release metadata/entrypoint harness;
+- testes unitários;
+- harness comportamental do frontend;
+- smoke da imagem;
+- drill de backup/restore;
+- integração PostgreSQL;
+- smoke offline provider-free.
+
+A suíte E2E cobre CNJ ausente → solicitação → callback → acesso tenant-scoped → finalização → resumo validado, além de callbacks fora de ordem/retry, resposta cached sem LLM, sigilo provider-free e retrieval vetorial com mais de 40 movimentos.
+
+## Operação e deployment
+
+Produção usa `compose.production.yaml`, imagem imutável por digest e credenciais PostgreSQL separadas por responsabilidade.
+
+Documentação operacional:
+
+- `docs/deployment/local-offline.md` — validação local provider-free;
+- `docs/deployment/production.md` — topologia e deployment;
+- `docs/deployment/backup-restore.md` — backup e restore drill;
+- `docs/release/offline-release-candidate.md` — Definition of Done/evidências;
+- `docs/release/v0.1.0.md` — release notes;
+- `docs/engineering/empirical-engineering.md` — política de evidência técnica.
+
+## Estrutura do repositório
+
+```text
+app/           aplicação FastAPI, fila, retrieval, RAG e frontend
+sql/           migrations PostgreSQL
+scripts/       harnesses, validações e operações
+tests/         unitários, frontend e integração PostgreSQL
+docs/          engenharia, deployment e release
+requirements/  constraints reprodutíveis
 ```
-
-O GitHub Actions executa também PostgreSQL 16 + pgvector, contrato de compose de produção, smoke da imagem, drill de backup/restore, harness comportamental do frontend e o smoke offline provider-free. A suíte E2E cobre o caminho de produto CNJ ausente → solicitação → callback → acesso tenant-scoped → finalização → resumo validado publicado, além de callback fora de ordem/retry, resposta cached sem LLM, sigilo provider-free e retrieval vetorial com mais de 40 movimentos.
-
-A produção usa `compose.production.yaml`, imagem imutável por digest e credenciais PostgreSQL separadas por responsabilidade. Consulte `docs/deployment/production.md` e `docs/deployment/backup-restore.md` antes de publicar.
 
 ## Limites atuais do MVP
 
-- autenticação é por bearer token provisionado; não existe login/autocadastro no produto;
-- não há dashboard, favoritos, alertas ou gestão de carteira;
-- o frontend não faz polling ilimitado: após a janela automática, o usuário pode repetir a consulta manualmente;
-- publicação real exige infraestrutura externa e credenciais válidas para registry, Judit e providers de IA.
+- autenticação por bearer token provisionado; sem login/autocadastro;
+- sem dashboard, favoritos, alertas ou gestão de carteira;
+- polling do frontend é limitado;
+- providers reais exigem infraestrutura, credenciais válidas e aceitação operacional separada;
+- o projeto evita deliberadamente Redis/Celery, vector DB externo e frameworks RAG pesados enquanto o stack atual for suficiente.
 
-## Contrato para agentes
+## Contribuição e segurança
 
-Leia `AGENTS.md` antes de transplantar código de qualquer donor. O objetivo é reaproveitar as peças caras sem importar produto, UI, abstrações ou dependências desnecessárias.
+- engenharia e PRs: `CONTRIBUTING.md`;
+- contrato para agentes/coding assistants: `AGENTS.md`;
+- reporte responsável de vulnerabilidades: `SECURITY.md`.
+
+## Licença e atribuições
+
+O Rpy é distribuído sob a licença MIT. Consulte `LICENSE` para os termos do projeto e `NOTICE` para provenance e atribuições de componentes/implementações de terceiros.

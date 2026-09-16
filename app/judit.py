@@ -2,11 +2,38 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 _CNJ_CANONICAL_RE = re.compile(r"^\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}$")
 _CNJ_DIGITS_RE = re.compile(r"^\d{20}$")
+_PERSONAL_ID_RE = re.compile(r"(?<!\d)(?:\d{11}|\d{14})(?!\d)")
+_LEADING_STEP_NUMBER_RE = re.compile(r"^\s*\d+\s*(?:[-–—.:)]\s*|\s+)")
+_ELETRONICA_REFER_RE = re.compile(r"\bELETRÔNICAREFER\b", re.IGNORECASE)
+_GLUE_BOUNDARY_RE = re.compile(r"(?<=[a-záàâãéêíóôõúç])(?=[A-ZÁÀÂÃÉÊÍÓÔÕÚÇ])")
+_WHITESPACE_RE = re.compile(r"\s+")
+_SAO_PAULO = ZoneInfo("America/Sao_Paulo")
+_SOURCE_STEP_NUMBER_KEYS = (
+    "source_step_number",
+    "step_number",
+    "event_number",
+    "movement_number",
+    "sequence_number",
+)
+_SECRET_HEADER_KEYS = (
+    "instance",
+    "area",
+    "justice_description",
+    "county",
+    "state",
+    "city",
+)
+_PUBLIC_HEADER_KEYS = (
+    "name",
+    *_SECRET_HEADER_KEYS,
+    "amount",
+)
 
 
 @dataclass(slots=True)
@@ -130,6 +157,34 @@ def parse_event(body: dict[str, Any]) -> JuditEvent:
     return event
 
 
+def _personal_id_digits(value: Any) -> str | None:
+    if value is None or isinstance(value, bool):
+        return None
+    digits = "".join(character for character in str(value) if character.isdigit())
+    return digits if len(digits) in {11, 14} else None
+
+
+def _party_personal_id(party: dict[str, Any]) -> str | None:
+    direct = _personal_id_digits(party.get("main_document"))
+    if direct:
+        return direct
+    for document in party.get("documents") or []:
+        if not isinstance(document, dict):
+            continue
+        candidate = _personal_id_digits(document.get("document"))
+        if candidate:
+            return candidate
+    return None
+
+
+def _masked_personal_id(value: str) -> str:
+    if len(value) == 11:
+        return f"***.***.***-{value[-2:]}"
+    if len(value) == 14:
+        return f"**.***.***/****-{value[-2:]}"
+    raise ValueError("personal id must contain 11 or 14 digits")
+
+
 def _safe_parties(process: dict[str, Any]) -> list[dict[str, Any]]:
     safe: list[dict[str, Any]] = []
     for party in process.get("parties") or []:
@@ -138,13 +193,15 @@ def _safe_parties(process: dict[str, Any]) -> list[dict[str, Any]]:
         name = str(party.get("name") or "").strip()
         if not name:
             continue
-        safe.append(
-            {
-                "name": name,
-                "side": party.get("side"),
-                "person_type": party.get("person_type"),
-            }
-        )
+        normalized = {
+            "name": name,
+            "side": party.get("side"),
+            "person_type": party.get("person_type"),
+        }
+        personal_id = _party_personal_id(party)
+        if personal_id:
+            normalized["masked_person_id"] = _masked_personal_id(personal_id)
+        safe.append(normalized)
     return safe
 
 
@@ -162,43 +219,45 @@ def _parse_datetime(value: Any) -> datetime | None:
     if value is None or value == "":
         return None
     if isinstance(value, datetime):
-        return value
-    if isinstance(value, str):
+        parsed = value
+    elif isinstance(value, str):
         normalized = value.strip().replace("Z", "+00:00")
         try:
-            return datetime.fromisoformat(normalized)
+            parsed = datetime.fromisoformat(normalized)
         except ValueError:
             return None
+    else:
+        return None
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(_SAO_PAULO)
+
+
+def _normalize_step_text(value: Any) -> str:
+    text = str(value or "").replace("\u00a0", " ")
+    text = _LEADING_STEP_NUMBER_RE.sub("", text, count=1)
+    text = _ELETRONICA_REFER_RE.sub("ELETRÔNICA REFER", text)
+    text = _GLUE_BOUNDARY_RE.sub(" ", text)
+    text = _WHITESPACE_RE.sub(" ", text).strip()
+    return _PERSONAL_ID_RE.sub("[documento removido]", text)
+
+
+def _source_step_number(step: dict[str, Any]) -> int | None:
+    for key in _SOURCE_STEP_NUMBER_KEYS:
+        value = step.get(key)
+        if value is None or isinstance(value, bool):
+            continue
+        if isinstance(value, int):
+            return value if value >= 0 else None
+        if isinstance(value, str):
+            candidate = value.strip()
+            if candidate.isdigit():
+                return int(candidate)
     return None
 
 
 def extract_promotable_fields(process: dict[str, Any]) -> dict[str, Any]:
-    steps = process.get("steps") or process.get("movements") or process.get("events") or []
-    normalized_steps: list[dict[str, Any]] = []
-    for index, step in enumerate(steps, start=1):
-        if not isinstance(step, dict):
-            continue
-        step_date = (
-            step.get("step_date")
-            or step.get("occurred_at")
-            or step.get("date")
-            or step.get("datetime")
-        )
-        normalized_steps.append(
-            {
-                "step_number": index,
-                "occurred_at": _parse_datetime(step_date),
-                "title": step.get("step_type") or step.get("title") or step.get("type"),
-                "text": step.get("content") or step.get("text") or step.get("description") or "",
-                "metadata": {
-                    "step_id": step.get("step_id"),
-                    "private": step.get("private"),
-                    "tags": step.get("tags") or {},
-                    "source_step_date": step_date,
-                },
-            }
-        )
-
     classifications = process.get("classifications") or []
     class_name = None
     if classifications and isinstance(classifications[0], dict):
@@ -210,20 +269,74 @@ def extract_promotable_fields(process: dict[str, Any]) -> dict[str, Any]:
     if not court and courts and isinstance(courts[0], dict):
         court = courts[0].get("name") or courts[0].get("code")
 
+    secrecy_level = int(process.get("secrecy_level") or process.get("secrecyLevel") or 0)
+    raw_code = process.get("code") or process.get("process_code")
+    code = None
+    if raw_code:
+        try:
+            code = normalize_cnj(str(raw_code))
+        except ValueError:
+            code = str(raw_code).strip() or None
+
+    header_keys = _SECRET_HEADER_KEYS if secrecy_level > 0 else _PUBLIC_HEADER_KEYS
     header = {
         key: process.get(key)
-        for key in (
-            "name",
-            "instance",
-            "area",
-            "justice_description",
-            "county",
-            "state",
-            "city",
-            "amount",
-        )
+        for key in header_keys
         if process.get(key) is not None
     }
+
+    # Secret source payloads remain retained in process_versions according to the
+    # retention policy, but restricted parties/subjects/movements must never be
+    # promoted into the normalized retrieval surface. Returning before movement
+    # normalization also prevents restricted text from being materialized as a
+    # lexical/vector candidate in application memory.
+    if secrecy_level > 0:
+        return {
+            "header": header,
+            "parties": [],
+            "subjects": [],
+            "steps": [],
+            "court": court,
+            "class_name": class_name,
+            "secrecy_level": secrecy_level,
+        }
+
+    steps = process.get("steps") or process.get("movements") or process.get("events") or []
+    normalized_steps: list[dict[str, Any]] = []
+    for index, step in enumerate(steps, start=1):
+        if not isinstance(step, dict):
+            continue
+        step_date = (
+            step.get("step_date")
+            or step.get("occurred_at")
+            or step.get("date")
+            or step.get("datetime")
+        )
+        step_type = step.get("step_type") or step.get("title") or step.get("type")
+        raw_text = step.get("content") or step.get("text") or step.get("description") or ""
+        occurred_at = _parse_datetime(step_date)
+        normalized_steps.append(
+            {
+                "step_number": index,
+                "occurred_at": occurred_at,
+                "title": step_type,
+                "text": _normalize_step_text(raw_text),
+                "metadata": {
+                    "cnj": code,
+                    "instance": process.get("instance"),
+                    "court": court,
+                    "type": step_type,
+                    "step_id": step.get("step_id"),
+                    "step_number": index,
+                    "source_step_number": _source_step_number(step),
+                    "private": step.get("private"),
+                    "secrecy_level": secrecy_level,
+                    "tags": step.get("tags") or {},
+                    "source_step_date": step_date,
+                    "occurred_at_sao_paulo": occurred_at.isoformat() if occurred_at else None,
+                },
+            }
+        )
 
     return {
         "header": header,
@@ -232,5 +345,5 @@ def extract_promotable_fields(process: dict[str, Any]) -> dict[str, Any]:
         "steps": normalized_steps,
         "court": court,
         "class_name": class_name,
-        "secrecy_level": int(process.get("secrecy_level") or process.get("secrecyLevel") or 0),
+        "secrecy_level": secrecy_level,
     }

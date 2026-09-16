@@ -20,6 +20,7 @@ API_READ_TABLES = (
     "process_summaries",
     "tenant_processes",
     "tenant_judit_requests",
+    "public_summary_requests",
     "jobs",
     "judit_deliveries",
     "judit_request_completions",
@@ -98,7 +99,7 @@ async def provision(database_url: str) -> None:
                 f"GRANT SELECT ON {', '.join(_quote_ident(t) for t in API_READ_TABLES)} TO {api}"
             )
             await conn.execute(
-                f"GRANT INSERT, UPDATE ON processes, process_versions, tenant_judit_requests TO {api}"
+                f"GRANT INSERT, UPDATE ON processes, process_versions, tenant_judit_requests, public_summary_requests TO {api}"
             )
             await conn.execute(
                 "GRANT INSERT ON access_log, judit_deliveries, judit_request_completions, jobs, tenant_processes TO "
@@ -108,6 +109,10 @@ async def provision(database_url: str) -> None:
             worker = _quote_ident("rpy_worker")
             await conn.execute(f"GRANT SELECT, INSERT, UPDATE ON jobs TO {worker}")
             await conn.execute(f"GRANT SELECT, UPDATE ON processes, process_versions TO {worker}")
+            await conn.execute(
+                f"GRANT SELECT, UPDATE ON tenant_judit_requests, public_summary_requests TO {worker}"
+            )
+            await conn.execute(f"GRANT SELECT, INSERT ON tenant_processes TO {worker}")
             await conn.execute(
                 f"GRANT SELECT, INSERT, UPDATE, DELETE ON process_steps TO {worker}"
             )
