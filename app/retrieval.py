@@ -8,6 +8,13 @@ from uuid import UUID
 
 import asyncpg
 
+SHORT_PROCESS_ALL_STEPS_MAX = 40
+DEFAULT_RANK_LIMIT = 20
+BM25_WEIGHT = 0.5
+VECTOR_WEIGHT = 0.5
+RECENCY_BOOST_MAX = 0.3
+MANDATORY_RECENT_STEPS = 5
+
 _TOKEN_RE = re.compile(r"[\wÀ-ÿ]+", re.UNICODE)
 MILESTONE_RE = re.compile(
     r"\b("
@@ -93,9 +100,9 @@ def rank_steps(
     query: str,
     steps: Sequence[Step],
     vector_scores: dict[UUID, float] | None = None,
-    limit: int = 20,
+    limit: int = DEFAULT_RANK_LIMIT,
 ) -> list[RankedStep]:
-    if len(steps) <= 40:
+    if len(steps) <= SHORT_PROCESS_ALL_STEPS_MAX:
         return [RankedStep(step=step, forced=True, score=1.0) for step in sorted(steps, key=lambda item: item.step_number)]
 
     lexical = _normalize(bm25_scores(query, steps))
@@ -104,8 +111,8 @@ def rank_steps(
 
     ranked: list[RankedStep] = []
     for step in steps:
-        base_score = 0.5 * lexical.get(step.id, 0.0) + 0.5 * vector.get(step.id, 0.0)
-        recency = 1.0 + 0.3 * (step.step_number / max_step)
+        base_score = BM25_WEIGHT * lexical.get(step.id, 0.0) + VECTOR_WEIGHT * vector.get(step.id, 0.0)
+        recency = 1.0 + RECENCY_BOOST_MAX * (step.step_number / max_step)
         forced = bool(MILESTONE_RE.search(step.searchable_text))
         ranked.append(
             RankedStep(
@@ -119,7 +126,7 @@ def rank_steps(
 
     by_number = sorted(ranked, key=lambda item: item.step.step_number)
     mandatory_ids = {by_number[0].step.id, by_number[-1].step.id}
-    mandatory_ids.update(item.step.id for item in by_number[-5:])
+    mandatory_ids.update(item.step.id for item in by_number[-MANDATORY_RECENT_STEPS:])
     mandatory_ids.update(item.step.id for item in ranked if item.forced)
 
     selected: dict[UUID, RankedStep] = {
