@@ -20,7 +20,7 @@ from app.providers import (
     call_with_retries,
     is_retryable_anthropic_error,
 )
-from app.retrieval import load_steps, rank_steps, vector_search
+from app.retrieval import lexical_search, load_steps, rank_steps, vector_search
 from app.tasks import PermanentTaskError, task
 from app.validation import ValidationResult, validar
 
@@ -210,11 +210,18 @@ async def _load_context(
     if source_warnings:
         base["source_warnings"] = source_warnings
 
+    lexical_scores: dict[UUID, float] | None = None
     vector_scores: dict[UUID, float] | None = None
     if len(steps) > 40:
         await ensure_step_embeddings(pool, version_id=version_id)
         query_vector = await embed_query(RETRIEVAL_QUERY)
         async with pool.acquire() as conn:
+            lexical_scores = await lexical_search(
+                conn,
+                version_id=version_id,
+                query=RETRIEVAL_QUERY,
+                limit=40,
+            )
             vector_scores = await vector_search(
                 conn,
                 version_id=version_id,
@@ -225,6 +232,7 @@ async def _load_context(
     ranked = rank_steps(
         query=RETRIEVAL_QUERY,
         steps=steps,
+        lexical_scores=lexical_scores,
         vector_scores=vector_scores,
         limit=20,
     )
