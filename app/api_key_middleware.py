@@ -79,6 +79,14 @@ class ApiKeySecurityMiddleware(BaseHTTPMiddleware):
         if request.method == "GET" and len(parts) == 2 and parts[0] == "processes":
             return parts[1], "api_key_read_process"
         if (
+            request.method == "GET"
+            and len(parts) == 4
+            and parts[0] == "v1"
+            and parts[1] == "processos"
+            and parts[3] == "fontes"
+        ):
+            return parts[2], "api_key_read_process_sources"
+        if (
             request.method == "POST"
             and len(parts) == 3
             and parts[0] == "processes"
