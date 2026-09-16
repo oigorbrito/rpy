@@ -122,22 +122,27 @@ async def test_long_process_hybrid_retrieval_uses_postgres_lexical_pgvector_and_
             steps = await load_steps(conn, version_id=version_id)
             assert len(steps) == 45
 
+            # Index eligibility and version isolation are distinct properties.
+            # With this tiny fixture PostgreSQL can legitimately prefer the
+            # version_id btree for the combined predicate. Disable seqscan and
+            # inspect the lexical predicate alone to prove the existing GIN
+            # index matches the production Portuguese FTS expression.
             await conn.execute("SET enable_seqscan = off")
             plan_rows = await conn.fetch(
                 """
                 EXPLAIN (COSTS OFF)
                 SELECT id
                 FROM process_steps
-                WHERE version_id = $1
-                  AND to_tsvector('portuguese', coalesce(title, '') || ' ' || text)
-                      @@ websearch_to_tsquery('portuguese', $2)
+                WHERE to_tsvector('portuguese', coalesce(title, '') || ' ' || text)
+                      @@ websearch_to_tsquery('portuguese', $1)
                 """,
-                version_id,
                 query,
             )
             plan = "\n".join(str(row[0]) for row in plan_rows)
             assert "process_steps_fts_idx" in plan
 
+            # The real production query remains version-scoped; a matching row
+            # from another process/version must not enter either score map.
             lexical_scores = await lexical_search(
                 conn,
                 version_id=version_id,
