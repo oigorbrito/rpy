@@ -93,6 +93,7 @@ async def test_large_process_uses_offline_embeddings_and_hybrid_retrieval(
         assert validation_errors is None
         generation_contexts.append(context)
         assert context["code"] == code
+        assert context["step_count"] == 45
         assert 1 <= len(context["steps"]) <= 20
         assert any("vetorial-prioritário" in step["text"] for step in context["steps"])
         return f"""# Resumo do processo
@@ -113,6 +114,9 @@ O processo possui histórico extenso e foi recuperado por seleção híbrida off
 
 ## Situação atual
 O último movimento fornecido integra a versão processual atual.
+
+## Pontos de atenção
+Nenhuma divergência objetiva identificada.
 """
 
     monkeypatch.setattr(embeddings, "embed_texts", fake_embed_texts)
