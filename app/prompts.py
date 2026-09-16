@@ -162,3 +162,19 @@ Se a mensagem do usuário contiver <validation_errors>, trate cada item como err
 Um resumo curto e incompleto por falta de evidência é melhor do que um resumo fluente com um fato inventado. Em qualquer conflito entre completude e rastreabilidade, escolha rastreabilidade.
 </principio_final>
 """.strip()
+
+PROCESS_SUMMARY_SYSTEM_PROMPT = (
+    PROCESS_SUMMARY_SYSTEM_PROMPT
+    + """
+
+<secoes_condicionais>
+Quando houver informação factual suficiente para uma ou mais das seções abaixo, use headings Markdown com estes títulos exatos e preserve sempre esta ordem relativa:
+1. Decisões
+2. Prazos em curso
+3. Processos relacionados
+4. Anexos
+
+Essas seções são condicionais: não crie conteúdo para completar a estrutura. Se uma seção não tiver evidência suficiente no contexto, omita-a. Se apenas parte delas for aplicável, mantenha entre as seções presentes a mesma ordem relativa definida acima. Não deduza prazo, processo relacionado ou anexo apenas por expectativa jurídica; a informação precisa estar explícita no contexto fornecido.
+</secoes_condicionais>
+"""
+).strip()
