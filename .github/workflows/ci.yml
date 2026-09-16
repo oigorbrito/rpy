@@ -77,3 +77,12 @@ jobs:
 
       - name: PostgreSQL integration tests
         run: pytest -q tests/integration
+
+      - name: Offline release smoke
+        timeout-minutes: 10
+        env:
+          ANTHROPIC_API_KEY: ""
+          OPENAI_API_KEY: ""
+          JUDIT_API_KEY: ""
+          GEMINI_API_KEY: ""
+        run: ./scripts/smoke_offline.sh
