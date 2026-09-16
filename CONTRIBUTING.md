@@ -24,6 +24,7 @@ Run the fast local checks:
 
 ```bash
 python scripts/migration_harness.py
+python scripts/release_harness.py
 pytest -q tests --ignore=tests/integration
 node tests/frontend_behavior_test.mjs
 ```
