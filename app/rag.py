@@ -163,6 +163,7 @@ async def _load_context(
             "class_name": base["class_name"],
             "secrecy_level": base["secrecy_level"],
             "header": base["header"],
+            "validation_parties": base["parties"],
             "parties": [],
             "subjects": [],
             "steps": [],
@@ -416,7 +417,8 @@ async def generate_summary(
         result: ValidationResult = validar(
             text=text,
             code=context["code"],
-            parties=[],
+            parties=context.get("validation_parties", []),
+            forbid_party_names=True,
         )
         model = SECRET_MODEL
         prompt_version = SECRET_PROMPT_VERSION
