@@ -10,10 +10,11 @@ def _heading_position(heading: str) -> int:
 def test_iasummary_document_sections_have_stable_order() -> None:
     headings = [
         "# Resumo do processo",
+        '<ProcessHeader className="process-header">',
         "## Partes",
-        "## Classe",
-        "## Assuntos",
-        "## Movimentações",
+        "## Síntese",
+        "## Linha do tempo relevante",
+        "## Situação atual",
         "## Pontos de atenção",
     ]
 
@@ -24,16 +25,18 @@ def test_iasummary_document_sections_have_stable_order() -> None:
 def test_iasummary_conditional_sections_are_evidence_bound() -> None:
     prompt = PROCESS_SUMMARY_SYSTEM_PROMPT
 
-    assert '"Decisões", "Prazos em curso", "Processos relacionados" e "Anexos"' in prompt
-    assert "Inclua somente quando houver evidência" in prompt
-    assert "Se nenhuma existir" in prompt
-    assert "não está suficientemente determinado no contexto fornecido" in prompt
+    assert "1. Decisões" in prompt
+    assert "2. Prazos em curso" in prompt
+    assert "3. Processos relacionados" in prompt
+    assert "4. Anexos" in prompt
+    assert "Essas seções são condicionais" in prompt
+    assert "omita-a" in prompt
 
 
 def test_iasummary_contract_is_not_defined_by_frontend_or_external_summary() -> None:
     prompt = PROCESS_SUMMARY_SYSTEM_PROMPT
 
-    assert "Não copie nem" in prompt
-    assert "registro externo `summary`" in prompt
+    assert "Não copie nem resuma qualquer registro externo `summary`" in prompt
+    assert "processo e movimentos autorizados" in prompt
     assert "Não explique mecanismos internos" in prompt
     assert "não use conhecimento externo" in prompt
