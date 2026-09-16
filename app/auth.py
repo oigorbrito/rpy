@@ -7,6 +7,13 @@ from uuid import UUID
 
 from fastapi import HTTPException, Request
 
+from app.api_key_auth import (
+    RequestPrincipal,
+    api_key_environment,
+    authenticate_api_key,
+    bearer_credential,
+)
+
 
 def configured_bearer_tokens() -> dict[str, UUID]:
     raw = os.environ.get("RPY_BEARER_TOKENS", "{}")
@@ -42,13 +49,7 @@ def configured_bearer_tokens() -> dict[str, UUID]:
     return configured
 
 
-def tenant_from_request(request: Request) -> UUID:
-    authorization = request.headers.get("authorization", "")
-    scheme, _, supplied = authorization.partition(" ")
-    supplied = supplied.strip()
-    if scheme.casefold() != "bearer" or not supplied:
-        raise HTTPException(status_code=401, detail="invalid bearer token")
-
+def _legacy_tenant_for_token(request: Request, supplied: str) -> UUID:
     configured = getattr(request.app.state, "bearer_tokens", None)
     if configured is None:
         # Tests and embedded ASGI usage may bypass lifespan. Production parses and
@@ -59,3 +60,26 @@ def tenant_from_request(request: Request) -> UUID:
         if hmac.compare_digest(supplied, token):
             return tenant_id
     raise HTTPException(status_code=401, detail="invalid bearer token")
+
+
+def tenant_from_request(request: Request) -> UUID:
+    """Legacy bearer authentication retained for compatibility during migration."""
+    supplied = bearer_credential(request)
+    if api_key_environment(supplied) is not None:
+        raise HTTPException(status_code=401, detail="API key requires scoped authentication")
+    return _legacy_tenant_for_token(request, supplied)
+
+
+async def principal_from_request(
+    request: Request,
+    *,
+    process_code: str,
+) -> RequestPrincipal:
+    supplied = bearer_credential(request)
+    if api_key_environment(supplied) is not None:
+        return await authenticate_api_key(
+            request,
+            token=supplied,
+            process_code=process_code,
+        )
+    return RequestPrincipal(tenant_id=_legacy_tenant_for_token(request, supplied))
