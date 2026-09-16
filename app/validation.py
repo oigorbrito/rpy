@@ -36,6 +36,7 @@ _NAME_ROLE_RE = re.compile(
     rf"(?:(?i:na\s+qualidade\s+de|como)\s+)?(?:(?i:{_ROLE}))\b"
 )
 _JSX_TAG_RE = re.compile(r"<(/?)([A-Z][A-Za-z0-9]*)(?:\s[^<>]*?)?(/?)>")
+_ALLOWED_JSX_COMPONENTS = frozenset({"Party", "ProcessHeader"})
 _MOVEMENT_COUNT_RE = re.compile(
     r"\b(?P<count>\d+)\s+(?:movimentos?|movimenta(?:ç|c)(?:ão|oes|ões))\b",
     re.IGNORECASE,
@@ -140,8 +141,11 @@ def _jsx_errors(text: str) -> list[str]:
         errors.append("JSX must use className= instead of class=")
 
     stack: list[str] = []
+    disallowed: set[str] = set()
     for match in _JSX_TAG_RE.finditer(text):
         closing, tag, self_closing = match.groups()
+        if tag not in _ALLOWED_JSX_COMPONENTS:
+            disallowed.add(tag)
         if self_closing:
             continue
         if closing:
@@ -153,6 +157,8 @@ def _jsx_errors(text: str) -> list[str]:
             stack.append(tag)
     if stack:
         errors.append(f"unclosed JSX tags: {', '.join(stack)}")
+    for tag in sorted(disallowed):
+        errors.append(f"JSX component is not allowed: {tag}")
     return errors
 
 
