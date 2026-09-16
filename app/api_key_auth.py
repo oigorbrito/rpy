@@ -116,12 +116,12 @@ async def _consume_rate_limit(
     return max(limit - request_count, 0), 0
 
 
-async def authenticate_api_key(
+async def authenticate_api_key_identity(
     request: Request,
     *,
     token: str,
-    process_code: str,
 ) -> RequestPrincipal:
+    """Authenticate one API key and consume its rate-limit slot without CNJ scope lookup."""
     environment = api_key_environment(token)
     if environment is None:
         raise HTTPException(status_code=401, detail="invalid API key")
@@ -138,8 +138,7 @@ async def authenticate_api_key(
             key = await conn.fetchrow(
                 """
                 SELECT id, tenant_id, key_hash, fingerprint, environment,
-                       allow_portfolio, rate_limit_per_minute,
-                       expires_at, revoked_at
+                       rate_limit_per_minute, expires_at, revoked_at
                 FROM api_keys
                 WHERE key_hash = $1
                 FOR UPDATE
@@ -174,68 +173,110 @@ async def authenticate_api_key(
                         },
                     )
                 else:
-                    explicit_scope = bool(
-                        await conn.fetchval(
-                            """
-                            SELECT EXISTS(
-                                SELECT 1
-                                FROM api_key_cnj_scopes
-                                WHERE api_key_id = $1 AND process_code = $2
-                            )
-                            """,
-                            key["id"],
-                            process_code,
-                        )
+                    await conn.execute(
+                        "UPDATE api_keys SET last_used_at = NOW() WHERE id = $1",
+                        key["id"],
                     )
-                    portfolio_scope = False
-                    if bool(key["allow_portfolio"]):
-                        portfolio_scope = bool(
-                            await conn.fetchval(
-                                """
-                                SELECT EXISTS(
-                                    SELECT 1
-                                    FROM tenant_processes tp
-                                    JOIN processes p ON p.id = tp.process_id
-                                    WHERE tp.tenant_id = $1 AND p.code = $2
-                                )
-                                """,
-                                key["tenant_id"],
-                                process_code,
-                            )
-                        )
-
-                    if not explicit_scope and not portfolio_scope:
-                        await conn.execute(
-                            """
-                            INSERT INTO access_log (
-                                tenant_id, process_id, process_code, action, metadata,
-                                api_key_id, api_key_fingerprint
-                            )
-                            VALUES ($1, NULL, $2, 'authorization_denied', '{}'::jsonb, $3, $4)
-                            """,
-                            key["tenant_id"],
-                            process_code,
-                            key["id"],
-                            key["fingerprint"],
-                        )
-                        denial = HTTPException(status_code=404, detail="process not found")
-                    else:
-                        await conn.execute(
-                            "UPDATE api_keys SET last_used_at = NOW() WHERE id = $1",
-                            key["id"],
-                        )
-                        principal = RequestPrincipal(
-                            tenant_id=key["tenant_id"],
-                            api_key_id=key["id"],
-                            api_key_fingerprint=str(key["fingerprint"]),
-                            rate_limit_remaining=remaining,
-                        )
+                    principal = RequestPrincipal(
+                        tenant_id=key["tenant_id"],
+                        api_key_id=key["id"],
+                        api_key_fingerprint=str(key["fingerprint"]),
+                        rate_limit_remaining=remaining,
+                    )
 
     if denial is not None:
         raise denial
     if principal is None:
         raise HTTPException(status_code=401, detail="invalid API key")
     return principal
+
+
+async def authorize_api_key_process(
+    request: Request,
+    *,
+    principal: RequestPrincipal,
+    process_code: str,
+) -> RequestPrincipal:
+    """Require explicit-CNJ or tenant-portfolio scope for an authenticated API key."""
+    if not principal.uses_api_key:
+        return principal
+    if principal.api_key_id is None:
+        raise HTTPException(status_code=401, detail="invalid API key")
+
+    pool: asyncpg.Pool = request.app.state.pool
+    allowed = False
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            key = await conn.fetchrow(
+                "SELECT allow_portfolio FROM api_keys WHERE id = $1 AND tenant_id = $2",
+                principal.api_key_id,
+                principal.tenant_id,
+            )
+            if key is None:
+                raise HTTPException(status_code=401, detail="invalid API key")
+
+            explicit_scope = bool(
+                await conn.fetchval(
+                    """
+                    SELECT EXISTS(
+                        SELECT 1
+                        FROM api_key_cnj_scopes
+                        WHERE api_key_id = $1 AND process_code = $2
+                    )
+                    """,
+                    principal.api_key_id,
+                    process_code,
+                )
+            )
+            portfolio_scope = False
+            if bool(key["allow_portfolio"]):
+                portfolio_scope = bool(
+                    await conn.fetchval(
+                        """
+                        SELECT EXISTS(
+                            SELECT 1
+                            FROM tenant_processes tp
+                            JOIN processes p ON p.id = tp.process_id
+                            WHERE tp.tenant_id = $1 AND p.code = $2
+                        )
+                        """,
+                        principal.tenant_id,
+                        process_code,
+                    )
+                )
+            allowed = explicit_scope or portfolio_scope
+            if not allowed:
+                await conn.execute(
+                    """
+                    INSERT INTO access_log (
+                        tenant_id, process_id, process_code, action, metadata,
+                        api_key_id, api_key_fingerprint
+                    )
+                    VALUES ($1, NULL, $2, 'authorization_denied', '{}'::jsonb, $3, $4)
+                    """,
+                    principal.tenant_id,
+                    process_code,
+                    principal.api_key_id,
+                    principal.api_key_fingerprint,
+                )
+
+    if not allowed:
+        raise HTTPException(status_code=404, detail="process not found")
+    return principal
+
+
+async def authenticate_api_key(
+    request: Request,
+    *,
+    token: str,
+    process_code: str,
+) -> RequestPrincipal:
+    principal = await authenticate_api_key_identity(request, token=token)
+    return await authorize_api_key_process(
+        request,
+        principal=principal,
+        process_code=process_code,
+    )
 
 
 async def log_principal_access(

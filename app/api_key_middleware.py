@@ -34,7 +34,6 @@ class ApiKeySecurityMiddleware(BaseHTTPMiddleware):
         try:
             token = bearer_credential(request)
         except HTTPException:
-            # Missing/invalid legacy credentials remain the route's responsibility.
             return await call_next(request)
         if api_key_environment(token) is None:
             return await call_next(request)
@@ -83,9 +82,14 @@ class ApiKeySecurityMiddleware(BaseHTTPMiddleware):
             and len(parts) == 4
             and parts[0] == "v1"
             and parts[1] == "processos"
-            and parts[3] == "fontes"
+            and parts[3] in {"resumo", "fontes"}
         ):
-            return parts[2], "api_key_read_process_sources"
+            action = (
+                "api_key_read_process_summary"
+                if parts[3] == "resumo"
+                else "api_key_read_process_sources"
+            )
+            return parts[2], action
         if (
             request.method == "POST"
             and len(parts) == 3

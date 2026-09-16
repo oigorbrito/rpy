@@ -10,6 +10,7 @@ import asyncpg
 from fastapi import FastAPI, HTTPException, Request
 
 from app.api_key_middleware import ApiKeySecurityMiddleware
+from app.api_v1 import router as api_v1_router
 from app.auth import configured_bearer_tokens, tenant_from_request
 from app.db import create_pool
 from app.frontend import router as frontend_router
@@ -25,8 +26,8 @@ from app.observability import (
 )
 from app.process_requests import grant_request_tenants, request_process
 from app.processes import get_authorized_process, log_access, stage_version
-from app.tenancy import configured_webhook_tenant, validate_carteira_seed
 from app.queue import enqueue
+from app.tenancy import configured_webhook_tenant, validate_carteira_seed
 from app.webhook_security import (
     JuditWebhookSecretRedactionMiddleware,
     webhook_token_from_scope,
@@ -38,8 +39,6 @@ async def lifespan(app: FastAPI):
     database_url = os.environ.get("DATABASE_URL")
     if not database_url:
         raise RuntimeError("DATABASE_URL is required")
-    # Fail deployment startup on invalid security/runtime configuration instead of
-    # discovering it only after the first production request arrives.
     judit_webhook_max_body_bytes()
     operational_thresholds()
     validate_http_auth_config()
@@ -54,13 +53,10 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Rpy", lifespan=lifespan)
-# API-key authorization is registered inside the webhook guards; it ignores
-# webhook routes, while secret redaction remains the outermost middleware.
 app.add_middleware(ApiKeySecurityMiddleware)
 app.add_middleware(JuditWebhookBodyLimitMiddleware)
-# Added after the body-limit middleware so it is the outermost application
-# middleware and the secret is removed from the shared ASGI scope immediately.
 app.add_middleware(JuditWebhookSecretRedactionMiddleware)
+app.include_router(api_v1_router)
 app.include_router(frontend_router)
 
 
@@ -102,14 +98,14 @@ def _summary_status(summary, job_status: str | None, cached_response: bool) -> s
 
 
 @app.get("/health")
+@app.get("/healthz")
 async def health() -> dict[str, bool]:
-    """Process liveness probe; deliberately does not depend on PostgreSQL."""
     return {"ok": True}
 
 
 @app.get("/ready")
+@app.get("/readyz")
 async def ready(request: Request) -> dict[str, bool]:
-    """Readiness probe: traffic is accepted only while PostgreSQL is reachable."""
     pool: asyncpg.Pool = request.app.state.pool
 
     async def _probe() -> None:
@@ -125,7 +121,6 @@ async def ready(request: Request) -> dict[str, bool]:
 
 @app.get("/ops/metrics")
 async def operational_metrics(request: Request) -> dict:
-    # Hide the existence of the operational surface when the token is absent/invalid.
     if not _valid_ops_request(request):
         raise HTTPException(status_code=404, detail="not found")
     pool: asyncpg.Pool = request.app.state.pool
@@ -135,8 +130,6 @@ async def operational_metrics(request: Request) -> dict:
 
 @app.get("/ops/failed-summaries")
 async def failed_summaries(request: Request) -> dict:
-    # Validation failures are the explicit exposure surface for generated summaries
-    # that never passed the gatekeeper; access-protected like the rest of /ops.
     if not _valid_ops_request(request):
         raise HTTPException(status_code=404, detail="not found")
     pool: asyncpg.Pool = request.app.state.pool
@@ -241,8 +234,6 @@ async def get_process_summary(code: str, request: Request) -> dict:
             summary_data.get("validation"), label="summary validation"
         )
 
-    # The external legal dashboard reads the generated markdown as iaSummary;
-    # summary retains the structured envelope for backward compatibility.
     ia_summary = summary_data["markdown"] if summary_data else None
     parties = _json_value(process["parties"], fallback=[])
     subjects = _json_value(process["subjects"], fallback=[])
@@ -264,7 +255,6 @@ async def get_process_summary(code: str, request: Request) -> dict:
 
 
 async def _record_delivery(conn: asyncpg.Connection, event) -> bool:
-    """Return False when this callback_id has already been persisted."""
     if not event.callback_id:
         return True
     inserted = await conn.fetchval(
@@ -327,9 +317,6 @@ async def judit_webhook(token: str, request: Request) -> dict[str, bool]:
 
     pool: asyncpg.Pool = request.app.state.pool
     async with pool.acquire() as conn:
-        # Delivery dedupe and its corresponding durable side effect are one unit.
-        # If staging/enqueue fails, the delivery row rolls back so Judit can retry
-        # the same callback_id without the event being discarded as a duplicate.
         async with conn.transaction():
             if not await _record_delivery(conn, event):
                 return {"ok": True}
@@ -345,9 +332,7 @@ async def judit_webhook(token: str, request: Request) -> dict[str, bool]:
                     judit_request_id=event.request_id,
                     judit_response_id=event.response_id,
                     judit_callback_id=event.callback_id,
-                    tenant_id=getattr(
-                        request.app.state, "webhook_tenant_id", None
-                    ),
+                    tenant_id=getattr(request.app.state, "webhook_tenant_id", None),
                 )
                 if event.request_id:
                     await grant_request_tenants(
