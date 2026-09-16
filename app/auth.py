@@ -59,13 +59,15 @@ def _legacy_tenant_for_token(request: Request, supplied: str) -> UUID:
         if tenant_id is not None:
             return tenant_id
 
-    # Embedded ASGI tests and operational token rotation can update the environment
-    # after startup. Keep the validated startup cache as the fast path, but refresh
-    # from the same validated source on a cache miss before rejecting the credential.
-    refreshed = configured_bearer_tokens()
-    tenant_id = _match_legacy_token(refreshed, supplied)
-    if tenant_id is not None:
-        return tenant_id
+    # Embedded ASGI tests and operational token rotation can explicitly replace
+    # the environment mapping after startup. Keep the validated startup cache as
+    # the fast path, and refresh only when an explicit runtime mapping exists.
+    if os.environ.get("RPY_BEARER_TOKENS") is not None:
+        refreshed = configured_bearer_tokens()
+        tenant_id = _match_legacy_token(refreshed, supplied)
+        if tenant_id is not None:
+            return tenant_id
+
     raise HTTPException(status_code=401, detail="invalid bearer token")
 
 
