@@ -11,7 +11,11 @@ from zoneinfo import ZoneInfo
 import asyncpg
 
 from app.db import create_pool
-from app.embeddings import embed_query, ensure_step_embeddings
+from app.embeddings import (
+    embed_query,
+    ensure_step_embeddings,
+    vector_retrieval_configured,
+)
 from app.json_utils import decode_json_list, decode_json_object
 from app.prompts import PROCESS_SUMMARY_SYSTEM_PROMPT
 from app.providers import (
@@ -213,8 +217,6 @@ async def _load_context(
     lexical_scores: dict[UUID, float] | None = None
     vector_scores: dict[UUID, float] | None = None
     if len(steps) > 40:
-        await ensure_step_embeddings(pool, version_id=version_id)
-        query_vector = await embed_query(RETRIEVAL_QUERY)
         async with pool.acquire() as conn:
             lexical_scores = await lexical_search(
                 conn,
@@ -222,12 +224,17 @@ async def _load_context(
                 query=RETRIEVAL_QUERY,
                 limit=40,
             )
-            vector_scores = await vector_search(
-                conn,
-                version_id=version_id,
-                embedding=query_vector,
-                limit=40,
-            )
+
+        if vector_retrieval_configured():
+            await ensure_step_embeddings(pool, version_id=version_id)
+            query_vector = await embed_query(RETRIEVAL_QUERY)
+            async with pool.acquire() as conn:
+                vector_scores = await vector_search(
+                    conn,
+                    version_id=version_id,
+                    embedding=query_vector,
+                    limit=40,
+                )
 
     ranked = rank_steps(
         query=RETRIEVAL_QUERY,
