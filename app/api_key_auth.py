@@ -77,7 +77,6 @@ async def _consume_rate_limit(
     window_started_at = row["window_started_at"]
     elapsed = (now - window_started_at).total_seconds()
     if elapsed >= 60:
-        request_count = 1
         await conn.execute(
             """
             UPDATE api_key_rate_limits
@@ -88,7 +87,7 @@ async def _consume_rate_limit(
             """,
             api_key_id,
         )
-        return max(limit - request_count, 0), 0
+        return max(limit - 1, 0), 0
 
     request_count = int(row["request_count"])
     retry_after = max(1, int(60 - elapsed))
@@ -121,6 +120,9 @@ async def authenticate_api_key(
 
     key_hash, expected_fingerprint = api_key_hash_and_fingerprint(token)
     pool: asyncpg.Pool = request.app.state.pool
+    denial: HTTPException | None = None
+    principal: RequestPrincipal | None = None
+
     async with pool.acquire() as conn:
         async with conn.transaction():
             key = await conn.fetchrow(
@@ -135,89 +137,95 @@ async def authenticate_api_key(
                 key_hash,
             )
             if key is None:
-                raise HTTPException(status_code=401, detail="invalid API key")
-            if not hmac.compare_digest(str(key["key_hash"]), key_hash):
-                raise HTTPException(status_code=401, detail="invalid API key")
-            if not hmac.compare_digest(str(key["fingerprint"]), expected_fingerprint):
-                raise HTTPException(status_code=401, detail="invalid API key")
-            if str(key["environment"]) != environment:
-                raise HTTPException(status_code=401, detail="invalid API key")
-            if key["revoked_at"] is not None:
-                raise HTTPException(status_code=401, detail="revoked API key")
-            if key["expires_at"] is not None and key["expires_at"] <= datetime.now(timezone.utc):
-                raise HTTPException(status_code=401, detail="expired API key")
-
-            remaining, retry_after = await _consume_rate_limit(
-                conn,
-                api_key_id=key["id"],
-                limit=int(key["rate_limit_per_minute"]),
-            )
-            if retry_after:
-                raise HTTPException(
-                    status_code=429,
-                    detail="rate limit exceeded",
-                    headers={
-                        "X-RateLimit-Remaining": "0",
-                        "Retry-After": str(retry_after),
-                    },
+                denial = HTTPException(status_code=401, detail="invalid API key")
+            elif not hmac.compare_digest(str(key["key_hash"]), key_hash):
+                denial = HTTPException(status_code=401, detail="invalid API key")
+            elif not hmac.compare_digest(str(key["fingerprint"]), expected_fingerprint):
+                denial = HTTPException(status_code=401, detail="invalid API key")
+            elif str(key["environment"]) != environment:
+                denial = HTTPException(status_code=401, detail="invalid API key")
+            elif key["revoked_at"] is not None:
+                denial = HTTPException(status_code=401, detail="revoked API key")
+            elif key["expires_at"] is not None and key["expires_at"] <= datetime.now(timezone.utc):
+                denial = HTTPException(status_code=401, detail="expired API key")
+            else:
+                remaining, retry_after = await _consume_rate_limit(
+                    conn,
+                    api_key_id=key["id"],
+                    limit=int(key["rate_limit_per_minute"]),
                 )
-
-            explicit_scope = bool(
-                await conn.fetchval(
-                    """
-                    SELECT EXISTS(
-                        SELECT 1
-                        FROM api_key_cnj_scopes
-                        WHERE api_key_id = $1 AND process_code = $2
+                if retry_after:
+                    denial = HTTPException(
+                        status_code=429,
+                        detail="rate limit exceeded",
+                        headers={
+                            "X-RateLimit-Remaining": "0",
+                            "Retry-After": str(retry_after),
+                        },
                     )
-                    """,
-                    key["id"],
-                    process_code,
-                )
-            )
-            portfolio_scope = False
-            if bool(key["allow_portfolio"]):
-                portfolio_scope = bool(
-                    await conn.fetchval(
-                        """
-                        SELECT EXISTS(
-                            SELECT 1
-                            FROM tenant_processes tp
-                            JOIN processes p ON p.id = tp.process_id
-                            WHERE tp.tenant_id = $1 AND p.code = $2
+                else:
+                    explicit_scope = bool(
+                        await conn.fetchval(
+                            """
+                            SELECT EXISTS(
+                                SELECT 1
+                                FROM api_key_cnj_scopes
+                                WHERE api_key_id = $1 AND process_code = $2
+                            )
+                            """,
+                            key["id"],
+                            process_code,
                         )
-                        """,
-                        key["tenant_id"],
-                        process_code,
                     )
-                )
+                    portfolio_scope = False
+                    if bool(key["allow_portfolio"]):
+                        portfolio_scope = bool(
+                            await conn.fetchval(
+                                """
+                                SELECT EXISTS(
+                                    SELECT 1
+                                    FROM tenant_processes tp
+                                    JOIN processes p ON p.id = tp.process_id
+                                    WHERE tp.tenant_id = $1 AND p.code = $2
+                                )
+                                """,
+                                key["tenant_id"],
+                                process_code,
+                            )
+                        )
 
-            if not explicit_scope and not portfolio_scope:
-                await conn.execute(
-                    """
-                    INSERT INTO access_log (
-                        tenant_id, process_id, process_code, action, metadata,
-                        api_key_id, api_key_fingerprint
-                    )
-                    VALUES ($1, NULL, $2, 'authorization_denied', '{}'::jsonb, $3, $4)
-                    """,
-                    key["tenant_id"],
-                    process_code,
-                    key["id"],
-                    key["fingerprint"],
-                )
-                raise HTTPException(status_code=404, detail="process not found")
+                    if not explicit_scope and not portfolio_scope:
+                        await conn.execute(
+                            """
+                            INSERT INTO access_log (
+                                tenant_id, process_id, process_code, action, metadata,
+                                api_key_id, api_key_fingerprint
+                            )
+                            VALUES ($1, NULL, $2, 'authorization_denied', '{}'::jsonb, $3, $4)
+                            """,
+                            key["tenant_id"],
+                            process_code,
+                            key["id"],
+                            key["fingerprint"],
+                        )
+                        denial = HTTPException(status_code=404, detail="process not found")
+                    else:
+                        await conn.execute(
+                            "UPDATE api_keys SET last_used_at = NOW() WHERE id = $1",
+                            key["id"],
+                        )
+                        principal = RequestPrincipal(
+                            tenant_id=key["tenant_id"],
+                            api_key_id=key["id"],
+                            api_key_fingerprint=str(key["fingerprint"]),
+                            rate_limit_remaining=remaining,
+                        )
 
-            await conn.execute(
-                "UPDATE api_keys SET last_used_at = NOW() WHERE id = $1",
-                key["id"],
-            )
-            return RequestPrincipal(
-                tenant_id=key["tenant_id"],
-                api_key_id=key["id"],
-                api_key_fingerprint=str(key["fingerprint"]),
-                rate_limit_remaining=remaining,
-            )
+    if denial is not None:
+        raise denial
+    if principal is None:
+        raise HTTPException(status_code=401, detail="invalid API key")
+    return principal
 
 
 async def log_principal_access(
