@@ -72,7 +72,8 @@ def _create_request_sync(code: str) -> JuditRequestResult:
         # valid asynchronous request, so a later explicit retry is safe. 5xx and
         # transport failures remain ambiguous and must never be retried blindly.
         raise JuditRequestError(
-            f"Judit request failed with HTTP {exc.code}", retry_safe=400 <= exc.code < 500
+            f"Judit request failed with HTTP {exc.code}",
+            retry_safe=400 <= exc.code < 500 and exc.code not in {408, 429},
         ) from None
     except (urllib.error.URLError, TimeoutError, OSError):
         raise JuditRequestError("Judit request failed") from None
