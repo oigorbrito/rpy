@@ -6,6 +6,8 @@ from uuid import UUID
 
 import asyncpg
 
+from app.process_semantics import SEMANTIC_SCHEMA_VERSION, semantic_fingerprint
+
 
 async def get_authorized_process(
     conn: asyncpg.Connection,
@@ -97,8 +99,6 @@ async def stage_version(
             code,
         )
         if tenant_id is not None:
-            # The tenant that lawfully sent/Judit proxied this response owns
-            # read access to the ingested process (see grant_process_access).
             await grant_process_access(
                 conn, tenant_id=tenant_id, process_id=process_id
             )
@@ -179,6 +179,45 @@ async def preferred_judit_version(
     )
 
 
+async def _current_semantic_fingerprint(
+    conn: asyncpg.Connection,
+    *,
+    process_id: UUID,
+    version_id: UUID,
+) -> str | None:
+    process = await conn.fetchrow(
+        """
+        SELECT court, class_name, subjects, parties, secrecy_level, header
+        FROM processes
+        WHERE id = $1 AND current_version_id = $2
+        """,
+        process_id,
+        version_id,
+    )
+    if process is None:
+        return None
+    rows = await conn.fetch(
+        """
+        SELECT step_number, occurred_at, title, text, metadata
+        FROM process_steps
+        WHERE process_id = $1 AND version_id = $2
+        ORDER BY step_number
+        """,
+        process_id,
+        version_id,
+    )
+    steps = [dict(row) for row in rows]
+    return semantic_fingerprint(
+        header=dict(process["header"] or {}),
+        parties=list(process["parties"] or []),
+        subjects=list(process["subjects"] or []),
+        steps=steps,
+        court=process["court"],
+        class_name=process["class_name"],
+        secrecy_level=int(process["secrecy_level"] or 0),
+    )
+
+
 async def finalize_version(
     conn: asyncpg.Connection,
     *,
@@ -192,13 +231,17 @@ async def finalize_version(
     class_name: str | None = None,
     secrecy_level: int = 0,
 ) -> bool:
-    """Finalize a version and promote it only when it is not older than current.
+    """Finalize a version, avoiding promotion when normalized semantics are unchanged."""
+    candidate_fingerprint = semantic_fingerprint(
+        header=header,
+        parties=parties,
+        subjects=subjects,
+        steps=steps,
+        court=court,
+        class_name=class_name,
+        secrecy_level=secrecy_level,
+    )
 
-    The process row is locked so concurrent Judit requests for the same CNJ cannot
-    let an older response overwrite a newer current version. Historical versions
-    are still finalized and retain their own steps for auditability. Reprocessing
-    an already-finalized version is a no-op and reports whether it is still current.
-    """
     async with conn.transaction():
         process = await conn.fetchrow(
             """
@@ -235,6 +278,29 @@ async def finalize_version(
                 "SELECT created_at FROM process_versions WHERE id = $1",
                 current_version_id,
             )
+            current_fingerprint = await _current_semantic_fingerprint(
+                conn,
+                process_id=process_id,
+                version_id=current_version_id,
+            )
+            if current_fingerprint == candidate_fingerprint:
+                await conn.execute(
+                    """
+                    UPDATE process_versions
+                    SET finalized = TRUE,
+                        finalized_at = NOW(),
+                        semantic_fingerprint = $3,
+                        semantic_schema_version = $4,
+                        equivalent_to_version_id = $5
+                    WHERE id = $1 AND process_id = $2
+                    """,
+                    version_id,
+                    process_id,
+                    candidate_fingerprint,
+                    SEMANTIC_SCHEMA_VERSION,
+                    current_version_id,
+                )
+                return False
 
         await conn.execute("DELETE FROM process_steps WHERE version_id = $1", version_id)
         if steps:
@@ -261,11 +327,17 @@ async def finalize_version(
         await conn.execute(
             """
             UPDATE process_versions
-            SET finalized = TRUE, finalized_at = NOW()
+            SET finalized = TRUE,
+                finalized_at = NOW(),
+                semantic_fingerprint = $3,
+                semantic_schema_version = $4,
+                equivalent_to_version_id = NULL
             WHERE id = $1 AND process_id = $2
             """,
             version_id,
             process_id,
+            candidate_fingerprint,
+            SEMANTIC_SCHEMA_VERSION,
         )
 
         promote = current_created_at is None or candidate["created_at"] >= current_created_at
