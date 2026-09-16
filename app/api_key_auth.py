@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -35,6 +36,13 @@ def api_key_environment(token: str) -> str | None:
     if token.startswith("sk_test_"):
         return "test"
     return None
+
+
+def api_key_deployment_environment() -> str:
+    environment = os.environ.get("RPY_API_KEY_ENVIRONMENT", "live").strip().casefold()
+    if environment not in {"live", "test"}:
+        raise RuntimeError("RPY_API_KEY_ENVIRONMENT must be live or test")
+    return environment
 
 
 def bearer_credential(request: Request) -> str:
@@ -116,6 +124,8 @@ async def authenticate_api_key(
 ) -> RequestPrincipal:
     environment = api_key_environment(token)
     if environment is None:
+        raise HTTPException(status_code=401, detail="invalid API key")
+    if environment != api_key_deployment_environment():
         raise HTTPException(status_code=401, detail="invalid API key")
 
     key_hash, expected_fingerprint = api_key_hash_and_fingerprint(token)

@@ -15,6 +15,10 @@ The complete key is presented by the client as `Authorization: Bearer <key>`. Rp
 - a short SHA-256 fingerprint for audit correlation;
 - tenant, environment, lifecycle and scope metadata.
 
+The deployment must set `RPY_API_KEY_ENVIRONMENT` to `live` or `test`. A key
+whose prefix environment does not match the deployment is rejected. The
+default is `live`, so test keys cannot be accepted accidentally in production.
+
 The plaintext key must be shown only at provisioning time by the operational provisioning mechanism. It must not be placed in repository files, fixtures, logs, screenshots, tickets or access-log metadata.
 
 ## Scope
@@ -29,6 +33,9 @@ An explicit CNJ scope can authorize acquisition of a process before that process
 Authorization is evaluated before process reads and before a process acquisition job is created. A valid key outside its scope receives the same process-not-found response shape used to avoid cross-tenant existence disclosure.
 
 Future process-derived surfaces such as sources, attachments and related-process retrieval must reuse the same tenant/API-key principal and must not bypass this scope check.
+
+The existing `/v1/processos/{cnj}/fontes` surface is included in this
+authorization boundary.
 
 ## Rate limiting
 

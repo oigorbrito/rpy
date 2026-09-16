@@ -62,8 +62,9 @@ async def _insert_key(
 
 
 @pytest.mark.asyncio
-async def test_api_keys_enforce_scope_rate_limit_lifecycle_and_safe_audit() -> None:
+async def test_api_keys_enforce_scope_rate_limit_lifecycle_and_safe_audit(monkeypatch) -> None:
     assert TEST_DATABASE_URL is not None
+    monkeypatch.setenv("RPY_API_KEY_ENVIRONMENT", "test")
     await migrate(TEST_DATABASE_URL)
     pool = await create_pool(TEST_DATABASE_URL, min_size=2, max_size=6)
     app.state.pool = pool
