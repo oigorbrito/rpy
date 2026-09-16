@@ -43,6 +43,7 @@ class PublicSummaryRequest:
     idempotency_key: str
     request_fingerprint: str
     status: str
+    tenant_judit_request_id: UUID | None
     process_id: UUID | None
     version_id: UUID | None
     summary_id: UUID | None
@@ -67,6 +68,7 @@ def _as_request(row: asyncpg.Record) -> PublicSummaryRequest:
         idempotency_key=str(row["idempotency_key"]),
         request_fingerprint=str(row["request_fingerprint"]),
         status=str(row["status"]),
+        tenant_judit_request_id=row["tenant_judit_request_id"],
         process_id=row["process_id"],
         version_id=row["version_id"],
         summary_id=row["summary_id"],
@@ -117,7 +119,7 @@ async def create_or_get_summary_request(
         )
         if row is None:
             raise RuntimeError("idempotent public summary request disappeared")
-        if not str(row["request_fingerprint"]) == fingerprint:
+        if str(row["request_fingerprint"]) != fingerprint:
             raise IdempotencyConflictError(
                 "idempotency key was already used with a different request"
             )
@@ -140,6 +142,43 @@ async def get_summary_request_for_tenant(
         tenant_id,
     )
     return _as_request(row) if row is not None else None
+
+
+async def link_summary_request_to_acquisition(
+    conn: asyncpg.Connection,
+    *,
+    request_id: UUID,
+    tenant_id: UUID,
+    process_code: str,
+    tenant_judit_request_id: UUID,
+) -> PublicSummaryRequest:
+    """Attach a public job to a same-tenant/same-CNJ Judit acquisition."""
+    row = await conn.fetchrow(
+        """
+        UPDATE public_summary_requests psr
+        SET tenant_judit_request_id = tjr.id,
+            updated_at = NOW()
+        FROM tenant_judit_requests tjr
+        WHERE psr.id = $1
+          AND psr.tenant_id = $2
+          AND psr.process_code = $3
+          AND tjr.id = $4
+          AND tjr.tenant_id = psr.tenant_id
+          AND tjr.process_code = psr.process_code
+          AND (
+              psr.tenant_judit_request_id IS NULL
+              OR psr.tenant_judit_request_id = tjr.id
+          )
+        RETURNING psr.*
+        """,
+        request_id,
+        tenant_id,
+        process_code,
+        tenant_judit_request_id,
+    )
+    if row is None:
+        raise LookupError("public summary request cannot be linked to acquisition")
+    return _as_request(row)
 
 
 def _transition_allowed(current: str, target: str) -> bool:
@@ -210,3 +249,170 @@ async def transition_summary_request(
         if updated is None:
             raise RuntimeError("public summary request update returned no row")
         return _as_request(updated)
+
+
+async def _transition_many(
+    conn: asyncpg.Connection,
+    request_ids: list[UUID],
+    *,
+    status: str,
+    process_id: UUID | None = None,
+    version_id: UUID | None = None,
+    summary_id: UUID | None = None,
+    source_updated_at=None,
+    flags: dict[str, Any] | None = None,
+    error_code: str | None = None,
+) -> int:
+    transitioned = 0
+    for request_id in request_ids:
+        await transition_summary_request(
+            conn,
+            request_id=request_id,
+            status=status,
+            process_id=process_id,
+            version_id=version_id,
+            summary_id=summary_id,
+            source_updated_at=source_updated_at,
+            flags=flags,
+            error_code=error_code,
+        )
+        transitioned += 1
+    return transitioned
+
+
+async def transition_requests_for_acquisition(
+    conn: asyncpg.Connection,
+    *,
+    tenant_judit_request_id: UUID,
+    status: str,
+    process_id: UUID | None = None,
+    version_id: UUID | None = None,
+    summary_id: UUID | None = None,
+    source_updated_at=None,
+    flags: dict[str, Any] | None = None,
+    error_code: str | None = None,
+) -> int:
+    rows = await conn.fetch(
+        "SELECT id FROM public_summary_requests WHERE tenant_judit_request_id = $1",
+        tenant_judit_request_id,
+    )
+    return await _transition_many(
+        conn,
+        [row["id"] for row in rows],
+        status=status,
+        process_id=process_id,
+        version_id=version_id,
+        summary_id=summary_id,
+        source_updated_at=source_updated_at,
+        flags=flags,
+        error_code=error_code,
+    )
+
+
+async def transition_requests_for_judit_request(
+    conn: asyncpg.Connection,
+    *,
+    judit_request_id: str,
+    status: str,
+    process_id: UUID | None = None,
+    version_id: UUID | None = None,
+    summary_id: UUID | None = None,
+    source_updated_at=None,
+    flags: dict[str, Any] | None = None,
+    error_code: str | None = None,
+) -> int:
+    rows = await conn.fetch(
+        """
+        SELECT psr.id
+        FROM public_summary_requests psr
+        JOIN tenant_judit_requests tjr
+          ON tjr.id = psr.tenant_judit_request_id
+        WHERE tjr.judit_request_id = $1
+        """,
+        judit_request_id,
+    )
+    return await _transition_many(
+        conn,
+        [row["id"] for row in rows],
+        status=status,
+        process_id=process_id,
+        version_id=version_id,
+        summary_id=summary_id,
+        source_updated_at=source_updated_at,
+        flags=flags,
+        error_code=error_code,
+    )
+
+
+async def transition_requests_for_version(
+    conn: asyncpg.Connection,
+    *,
+    version_id: UUID,
+    status: str,
+    process_id: UUID | None = None,
+    summary_id: UUID | None = None,
+    source_updated_at=None,
+    flags: dict[str, Any] | None = None,
+    error_code: str | None = None,
+) -> int:
+    rows = await conn.fetch(
+        "SELECT id FROM public_summary_requests WHERE version_id = $1",
+        version_id,
+    )
+    return await _transition_many(
+        conn,
+        [row["id"] for row in rows],
+        status=status,
+        process_id=process_id,
+        version_id=version_id,
+        summary_id=summary_id,
+        source_updated_at=source_updated_at,
+        flags=flags,
+        error_code=error_code,
+    )
+
+
+async def transition_job_public_requests(
+    conn: asyncpg.Connection,
+    *,
+    task_name: str,
+    payload: dict[str, Any],
+    status: str,
+    error_code: str | None = None,
+) -> int:
+    """Resolve queue topology to public jobs without exposing queue IDs publicly."""
+    try:
+        if task_name == "request_judit_process":
+            tenant_request_id = UUID(str(payload["tenant_request_id"]))
+            return await transition_requests_for_acquisition(
+                conn,
+                tenant_judit_request_id=tenant_request_id,
+                status=status,
+                error_code=error_code,
+            )
+        if task_name == "finalize_judit_request":
+            return await transition_requests_for_judit_request(
+                conn,
+                judit_request_id=str(payload["request_id"]),
+                status=status,
+                error_code=error_code,
+            )
+        if task_name == "generate_process_summary":
+            judit_request_id = payload.get("judit_request_id")
+            if judit_request_id:
+                return await transition_requests_for_judit_request(
+                    conn,
+                    judit_request_id=str(judit_request_id),
+                    status=status,
+                    error_code=error_code,
+                )
+            version_id = UUID(str(payload["version_id"]))
+            return await transition_requests_for_version(
+                conn,
+                version_id=version_id,
+                status=status,
+                error_code=error_code,
+            )
+    except (KeyError, TypeError, ValueError):
+        return 0
+    return 0
