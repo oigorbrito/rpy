@@ -245,7 +245,24 @@ def main() -> int:
             "passed": not failures,
             "failures": failures,
         }
-    print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+
+    safe_report: dict[str, Any] = dict(report)
+    case_metrics = safe_report.get("case_metrics")
+    if isinstance(case_metrics, dict):
+        redacted_case_metrics: dict[str, Any] = {}
+        for case_id, case_data in case_metrics.items():
+            if isinstance(case_data, dict):
+                sanitized = dict(case_data)
+                secret_leaks = sanitized.get("secret_leaks")
+                if isinstance(secret_leaks, list):
+                    sanitized["secret_leaks_count"] = len(secret_leaks)
+                    sanitized["secret_leaks"] = ["[REDACTED]"] if secret_leaks else []
+                redacted_case_metrics[case_id] = sanitized
+            else:
+                redacted_case_metrics[case_id] = case_data
+        safe_report["case_metrics"] = redacted_case_metrics
+
+    print(json.dumps(safe_report, ensure_ascii=False, indent=2, sort_keys=True))
     return 1 if failures else 0
 
 
