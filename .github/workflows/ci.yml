@@ -90,6 +90,14 @@ jobs:
           GEMINI_API_KEY: ""
         run: python scripts/evaluate_synthetic_rag.py --check-baseline --output /tmp/synthetic-rag-eval.json
 
+      - name: Offline pipeline eval gate
+        env:
+          ANTHROPIC_API_KEY: ""
+          OPENAI_API_KEY: ""
+          JUDIT_API_KEY: ""
+          GEMINI_API_KEY: ""
+        run: python scripts/evaluate_offline_pipeline.py --check-baseline
+
       - name: Frontend behavior tests
         run: node tests/frontend_behavior_test.mjs
 
