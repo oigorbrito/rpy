@@ -27,6 +27,7 @@ async def test_secret_process_never_loads_steps_or_exposes_parties(monkeypatch: 
     version_id = uuid4()
     code = "0000000-00.0000.0.00.0401"
     allowed_header = {"instance": 1, "area": "Cível", "state": "RS"}
+    source_party = {"name": "Pessoa Segredada", "external_id": "secret-party-01"}
 
     async def forbidden_load_steps(*args, **kwargs):
         raise AssertionError("secret proceedings must not load movement text")
@@ -54,7 +55,7 @@ async def test_secret_process_never_loads_steps_or_exposes_parties(monkeypatch: 
                 "TJRS",
                 "Procedimento sob sigilo",
                 json.dumps([{"name": "Assunto sensível"}]),
-                json.dumps([{"name": "Pessoa Segredada", "external_id": "secret-party-01"}]),
+                json.dumps([source_party]),
                 json.dumps(allowed_header),
             )
             await conn.execute(
@@ -82,19 +83,24 @@ async def test_secret_process_never_loads_steps_or_exposes_parties(monkeypatch: 
 
         context = await rag._load_context(pool, process_id, version_id)
 
-        assert context == {
-            "code": code,
-            "class_name": "Procedimento sob sigilo",
-            "secrecy_level": 1,
-            "header": allowed_header,
-            "parties": [],
-            "subjects": [],
-            "steps": [],
-        }
-        serialized = json.dumps(context, ensure_ascii=False)
-        assert "Pessoa Segredada" not in serialized
-        assert "secret-party-01" not in serialized
-        assert "Conteúdo processual altamente sensível" not in serialized
-        assert "Assunto sensível" not in serialized
+        assert context["code"] == code
+        assert context["class_name"] == "Procedimento sob sigilo"
+        assert context["secrecy_level"] == 1
+        assert context["header"] == allowed_header
+        assert context["validation_parties"] == [source_party]
+        assert context["parties"] == []
+        assert context["subjects"] == []
+        assert context["steps"] == []
+
+        provider_process, provider_steps = rag._provider_payload(context)
+        provider_serialized = json.dumps(
+            {"processo": provider_process, "movimentos": provider_steps},
+            ensure_ascii=False,
+        )
+        assert "validation_parties" not in provider_process
+        assert "Pessoa Segredada" not in provider_serialized
+        assert "secret-party-01" not in provider_serialized
+        assert "Conteúdo processual altamente sensível" not in provider_serialized
+        assert "Assunto sensível" not in provider_serialized
     finally:
         await pool.close()
