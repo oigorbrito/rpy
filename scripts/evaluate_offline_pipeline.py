@@ -8,9 +8,9 @@ from uuid import NAMESPACE_URL, uuid5
 
 from app.rag import _secret_summary, _serialize_steps
 from app.retrieval import DEFAULT_RANK_LIMIT, SHORT_PROCESS_ALL_STEPS_MAX, Step, rank_steps
-from scripts.evaluate_synthetic_rag import DEFAULT_DATASET, load_dataset
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_DATASET = REPO_ROOT / "tests/eval/synthetic_cases.json"
 DEFAULT_BASELINE = REPO_ROOT / "tests/eval/offline_pipeline_baseline.json"
 
 _MILESTONE_TEXT = {
@@ -23,6 +23,13 @@ _MILESTONE_TEXT = {
     "transito_em_julgado": "TRÂNSITO EM JULGADO certificado",
     "arquivamento": "ARQUIVAMENTO registrado",
 }
+
+
+def load_dataset(path: Path = DEFAULT_DATASET) -> list[dict[str, Any]]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, list):
+        raise ValueError("synthetic pipeline dataset must be a JSON array")
+    return payload
 
 
 def _milestone_text(label: str) -> str:
