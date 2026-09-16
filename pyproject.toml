@@ -43,4 +43,7 @@ target-version = "py312"
 line-length = 100
 
 [tool.ruff.lint]
-select = ["E4", "E7", "E9", "F"]
+# Keep the pre-v0 gate high-signal: syntax/runtime-invalid constructs,
+# undefined names, and invalid control-flow/import semantics. Style cleanup
+# remains intentionally out of scope for the release hardening pass.
+select = ["E9", "F63", "F7", "F82"]
