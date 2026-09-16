@@ -132,3 +132,59 @@ async def test_lawsuit_before_completion_does_not_create_repair_job(api_client) 
             f"judit-finalize-repair:{request_id}:{response_id}",
         )
     assert repair_count == 0
+
+
+@pytest.mark.asyncio
+async def test_exact_duplicate_callbacks_create_one_delivery_version_and_finalize_job(api_client) -> None:
+    client, pool = api_client
+    request_id = f"req-{uuid4()}"
+    response_id = f"resp-{uuid4()}"
+    code = f"0000000-00.2026.8.21.{str(uuid4().int)[-4:]}"
+    lawsuit = {
+        "callback_id": f"cb-lawsuit-{uuid4()}",
+        "event_type": "response_created",
+        "reference_type": "request",
+        "reference_id": request_id,
+        "payload": {
+            "request_id": request_id,
+            "response_id": response_id,
+            "response_type": "lawsuit",
+            "response_data": {"code": code, "steps": []},
+            "tags": {"cached_response": False},
+        },
+    }
+    completion = {
+        "callback_id": f"cb-completion-{uuid4()}",
+        "event_type": "request_completed",
+        "reference_type": "request",
+        "reference_id": request_id,
+        "payload": {"status": "completed"},
+    }
+
+    for event in (lawsuit, lawsuit, completion, completion):
+        response = await client.post(
+            "/webhooks/judit/integration-webhook", json=event
+        )
+        assert response.status_code == 200
+
+    async with pool.acquire() as conn:
+        assert await conn.fetchval(
+            "SELECT count(*) FROM judit_deliveries WHERE request_id = $1",
+            request_id,
+        ) == 2
+        assert await conn.fetchval(
+            "SELECT count(*) FROM judit_request_completions WHERE request_id = $1",
+            request_id,
+        ) == 1
+        assert await conn.fetchval(
+            "SELECT count(*) FROM process_versions WHERE judit_response_id = $1",
+            response_id,
+        ) == 1
+        assert await conn.fetchval(
+            "SELECT count(*) FROM jobs WHERE idempotency_key = $1",
+            f"judit-finalize:{request_id}",
+        ) == 1
+        assert await conn.fetchval(
+            "SELECT count(*) FROM process_summaries ps JOIN process_versions pv ON pv.id = ps.version_id WHERE pv.judit_response_id = $1",
+            response_id,
+        ) == 0
