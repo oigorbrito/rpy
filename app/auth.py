@@ -30,10 +30,6 @@ def configured_bearer_tokens() -> dict[str, UUID]:
     for token, tenant_id in parsed.items():
         if not isinstance(token, str) or not token:
             raise RuntimeError("RPY_BEARER_TOKENS contains an empty bearer token")
-        # HTTP Authorization credentials cannot reliably preserve whitespace as part
-        # of the token. tenant_from_request intentionally strips transport spacing,
-        # so accepting whitespace here would create a startup-successful credential
-        # that can never match (or whose meaning depends on intermediaries).
         if token != token.strip() or any(char.isspace() for char in token):
             raise RuntimeError(
                 "RPY_BEARER_TOKENS bearer tokens must not contain whitespace"
@@ -52,8 +48,6 @@ def configured_bearer_tokens() -> dict[str, UUID]:
 def _legacy_tenant_for_token(request: Request, supplied: str) -> UUID:
     configured = getattr(request.app.state, "bearer_tokens", None)
     if configured is None:
-        # Tests and embedded ASGI usage may bypass lifespan. Production parses and
-        # validates once at startup and stores the immutable mapping on app.state.
         configured = configured_bearer_tokens()
 
     for token, tenant_id in configured.items():
@@ -63,7 +57,11 @@ def _legacy_tenant_for_token(request: Request, supplied: str) -> UUID:
 
 
 def tenant_from_request(request: Request) -> UUID:
-    """Legacy bearer authentication retained for compatibility during migration."""
+    """Return the authenticated tenant for legacy or pre-authorized API-key requests."""
+    principal = getattr(request.state, "principal", None)
+    if isinstance(principal, RequestPrincipal):
+        return principal.tenant_id
+
     supplied = bearer_credential(request)
     if api_key_environment(supplied) is not None:
         raise HTTPException(status_code=401, detail="API key requires scoped authentication")
