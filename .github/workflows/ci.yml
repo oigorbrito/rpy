@@ -98,6 +98,14 @@ jobs:
           GEMINI_API_KEY: ""
         run: python scripts/evaluate_offline_pipeline.py --check-baseline
 
+      - name: Offline generation eval gate
+        env:
+          ANTHROPIC_API_KEY: ""
+          OPENAI_API_KEY: ""
+          JUDIT_API_KEY: ""
+          GEMINI_API_KEY: ""
+        run: python scripts/evaluate_offline_generation.py --check-baseline
+
       - name: Frontend behavior tests
         run: node tests/frontend_behavior_test.mjs
 
