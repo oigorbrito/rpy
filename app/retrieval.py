@@ -26,6 +26,7 @@ class Step:
     text: str
     title: str | None = None
     occurred_at: Any = None
+    source_step_number: int | None = None
 
     @property
     def searchable_text(self) -> str:
@@ -135,7 +136,16 @@ def rank_steps(
 async def load_steps(conn: asyncpg.Connection, *, version_id: UUID) -> list[Step]:
     rows = await conn.fetch(
         """
-        SELECT id, step_number, title, text, occurred_at
+        SELECT id,
+               step_number,
+               title,
+               text,
+               occurred_at,
+               CASE
+                   WHEN (metadata->>'source_step_number') ~ '^[0-9]+$'
+                   THEN (metadata->>'source_step_number')::integer
+                   ELSE NULL
+               END AS source_step_number
         FROM process_steps
         WHERE version_id = $1
         ORDER BY step_number ASC
@@ -149,6 +159,11 @@ async def load_steps(conn: asyncpg.Connection, *, version_id: UUID) -> list[Step
             title=row["title"],
             text=row["text"],
             occurred_at=row["occurred_at"],
+            source_step_number=(
+                int(row["source_step_number"])
+                if row["source_step_number"] is not None
+                else None
+            ),
         )
         for row in rows
     ]
