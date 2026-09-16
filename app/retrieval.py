@@ -170,3 +170,43 @@ async def vector_search(
         limit,
     )
     return {row["id"]: max(0.0, float(row["similarity"])) for row in rows}
+
+
+async def lexical_search(
+    conn: asyncpg.Connection,
+    *,
+    version_id: UUID,
+    query: str,
+    limit: int = 30,
+) -> dict[UUID, float]:
+    """Search one finalized version with PostgreSQL Portuguese FTS.
+
+    The expression matches the repository GIN index and the version predicate
+    is mandatory so lexical candidates cannot cross process/version boundaries.
+    """
+    if not query.strip():
+        return {}
+    rows = await conn.fetch(
+        """
+        WITH query AS (
+            SELECT websearch_to_tsquery('portuguese', $2) AS value
+        )
+        SELECT ps.id,
+               ts_rank_cd(
+                   to_tsvector('portuguese', coalesce(ps.title, '') || ' ' || ps.text),
+                   query.value
+               ) AS score
+        FROM process_steps ps
+        CROSS JOIN query
+        WHERE ps.version_id = $1
+          AND to_tsvector(
+              'portuguese', coalesce(ps.title, '') || ' ' || ps.text
+          ) @@ query.value
+        ORDER BY score DESC, ps.step_number ASC
+        LIMIT $3
+        """,
+        version_id,
+        query,
+        limit,
+    )
+    return {row["id"]: max(0.0, float(row["score"])) for row in rows}

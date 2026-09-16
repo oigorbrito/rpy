@@ -24,6 +24,9 @@ PostgreSQL-native retrieval for long judicial proceedings, combining lexical BM2
 
 - `app/retrieval.py`
   - literal BM25 with `k1=1.5`, `b=0.75` and document-length normalization;
+  - PostgreSQL Portuguese lexical search via `lexical_search()`, using the
+    same `to_tsvector` expression as the GIN index and a mandatory `version_id`
+    filter;
   - vector search with pgvector cosine distance;
   - normalized `0.5 * bm25 + 0.5 * vector`;
   - recency multiplier `1 + 0.3 * step_number / max_step_number`;
@@ -57,3 +60,14 @@ PostgreSQL-native retrieval for long judicial proceedings, combining lexical BM2
 - Recency changes ranking of otherwise equal hits.
 - Semantic/vector score contributes 50% of the base hybrid score.
 - No Pinecone, LangChain or LlamaIndex dependencies are introduced.
+
+## Lexical comparison decision
+
+The PostgreSQL query is now exercised against the real database alongside the
+Python BM25 score in `test_postgres_portuguese_lexical_search_matches_bm25_without_cross_version_leak`.
+The initial slice confirms Portuguese accent handling, exact candidate
+agreement for the fixture and version isolation. BM25 remains temporarily as
+the ranking source because this test is evidence of equivalence for the
+fixture, not evidence that all representative ranking behavior is equivalent.
+Removing or combining the two requires a broader fixture comparison before a
+later change.
