@@ -5,7 +5,7 @@ import asyncio
 import logging
 import os
 import signal
-from contextlib import suppress
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID, uuid4
@@ -27,6 +27,16 @@ from app.queue import claim, complete, fail, heartbeat, reclaim_stale
 from app.tasks import PermanentTaskError, resolve_task
 
 logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def _transaction(conn):
+    transaction = getattr(conn, "transaction", None)
+    if transaction is None:
+        yield
+        return
+    async with transaction():
+        yield
 
 
 @dataclass(slots=True)
@@ -121,7 +131,7 @@ class Worker:
                 handler(payload), timeout=self.settings.task_timeout_seconds
             )
             async with self.pool.acquire() as conn:
-                async with conn.transaction():
+                async with _transaction(conn):
                     if task_name == "generate_process_summary":
                         await reconcile_generation_result(
                             conn,
@@ -142,7 +152,7 @@ class Worker:
                 safe_detail,
             )
             async with self.pool.acquire() as conn:
-                async with conn.transaction():
+                async with _transaction(conn):
                     next_status = await fail(
                         conn,
                         job_id,
@@ -189,7 +199,7 @@ class Worker:
     async def _reclaimer_loop(self) -> None:
         while not self.stop_event.is_set():
             async with self.pool.acquire() as conn:
-                async with conn.transaction():
+                async with _transaction(conn):
                     reclaimed = await reclaim_stale(conn, self.settings.stale_after_seconds)
                     for row in reclaimed:
                         if str(row["status"]) != "dead":
