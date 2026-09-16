@@ -41,7 +41,7 @@ def test_provider_error_discards_body_and_key(monkeypatch: pytest.MonkeyPatch) -
     assert exc.value.retry_safe is True
 
 
-@pytest.mark.parametrize("status", [429, 500, 502])
+@pytest.mark.parametrize("status", [408, 429, 500, 502])
 def test_ambiguous_judit_http_failures_are_not_retry_safe(
     monkeypatch: pytest.MonkeyPatch, status: int
 ) -> None:
