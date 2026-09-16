@@ -92,6 +92,7 @@ Checks rápidos:
 
 ```bash
 python scripts/migration_harness.py
+python scripts/release_harness.py
 pytest -q tests --ignore=tests/integration
 node tests/frontend_behavior_test.mjs
 ```
@@ -194,6 +195,7 @@ O GitHub Actions executa:
 
 - validação do contrato de Compose de produção;
 - migration harness;
+- release metadata/entrypoint harness;
 - testes unitários;
 - harness comportamental do frontend;
 - smoke da imagem;
@@ -219,12 +221,12 @@ Documentação operacional:
 ## Estrutura do repositório
 
 ```text
-app/          aplicação FastAPI, fila, retrieval, RAG e frontend
-sql/          migrations PostgreSQL
-scripts/      harnesses, validações e operações
- tests/       unitários, frontend e integração PostgreSQL
- docs/        engenharia, deployment e release
-requirements/ constraints reprodutíveis
+app/           aplicação FastAPI, fila, retrieval, RAG e frontend
+sql/           migrations PostgreSQL
+scripts/       harnesses, validações e operações
+tests/         unitários, frontend e integração PostgreSQL
+docs/          engenharia, deployment e release
+requirements/  constraints reprodutíveis
 ```
 
 ## Limites atuais do MVP
