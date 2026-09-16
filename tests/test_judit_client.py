@@ -38,6 +38,34 @@ def test_provider_error_discards_body_and_key(monkeypatch: pytest.MonkeyPatch) -
         judit_client._create_request_sync("0000000-00.0000.0.00.0001")
     assert "401" in str(exc.value)
     assert "secret-provider-key" not in str(exc.value)
+    assert exc.value.retry_safe is True
+
+
+@pytest.mark.parametrize("status", [429, 500, 502])
+def test_ambiguous_judit_http_failures_are_not_retry_safe(
+    monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    monkeypatch.setenv("JUDIT_API_KEY", "key")
+
+    def fail(*_args, **_kwargs):
+        raise urllib.error.HTTPError(judit_client.JUDIT_REQUESTS_URL, status, "failed", {}, None)
+
+    monkeypatch.setattr(judit_client.urllib.request, "urlopen", fail)
+    with pytest.raises(judit_client.JuditRequestError) as exc:
+        judit_client._create_request_sync("0000000-00.0000.0.00.0001")
+    assert exc.value.retry_safe is False
+
+
+def test_transport_failure_is_not_retry_safe(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("JUDIT_API_KEY", "key")
+    monkeypatch.setattr(
+        judit_client.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(TimeoutError()),
+    )
+    with pytest.raises(judit_client.JuditRequestError) as exc:
+        judit_client._create_request_sync("0000000-00.0000.0.00.0001")
+    assert exc.value.retry_safe is False
 
 
 def test_missing_request_id_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
