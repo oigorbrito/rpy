@@ -26,16 +26,39 @@ O browser não recebe credenciais da Judit nem identificadores internos de reque
 
 ## Subir localmente
 
-Pré-requisito: Docker com Compose.
+### Validação offline (caminho recomendado)
 
-Para exercer o fluxo completo, configure:
+Pré-requisitos: Git, Docker e Docker Compose. O host não precisa de Python,
+pytest ou credenciais de providers.
+
+No Windows:
+
+```powershell
+.\scripts\smoke_offline.ps1
+```
+
+No Unix:
 
 ```bash
-export ANTHROPIC_API_KEY='...'
-export OPENAI_API_KEY='...'
-export JUDIT_API_KEY='...'
-export JUDIT_WEBHOOK_TOKEN='...'
-export RPY_BEARER_TOKENS='{"seu-token":"00000000-0000-0000-0000-000000000000"}'
+./scripts/smoke_offline.sh
+```
+
+O resultado esperado é `RPY OFFLINE SMOKE: PASS`, seguido de `summary=valid`,
+`jobs=complete` e `providers=0`. O smoke usa um projeto Compose, rede e volume
+descartáveis próprios. Para parar uma stack local criada manualmente, use
+`docker compose down`; não use limpeza global do Docker.
+
+### Modo com providers reais (opcional)
+
+Para exercer o fluxo completo com Judit e geração externa, configure as chaves
+em um ambiente controlado:
+
+```bash
+export ANTHROPIC_API_KEY='change-me'
+export OPENAI_API_KEY='change-me'
+export JUDIT_API_KEY='change-me'
+export JUDIT_WEBHOOK_TOKEN='change-me'
+export RPY_BEARER_TOKENS='{"example-only":"00000000-0000-0000-0000-000000000000"}'
 ```
 
 Então:
@@ -102,7 +125,7 @@ python scripts/migration_harness.py
 pytest -q tests --ignore=tests/integration
 ```
 
-O GitHub Actions executa também PostgreSQL 16 + pgvector, contrato de compose de produção, smoke da imagem e drill de backup/restore. A suíte E2E cobre o caminho de produto CNJ ausente → solicitação → callback → acesso tenant-scoped → finalização → resumo validado publicado, além de callback fora de ordem/retry e resposta cached sem LLM.
+O GitHub Actions executa também PostgreSQL 16 + pgvector, contrato de compose de produção, smoke da imagem, drill de backup/restore, harness comportamental do frontend e o smoke offline provider-free. A suíte E2E cobre o caminho de produto CNJ ausente → solicitação → callback → acesso tenant-scoped → finalização → resumo validado publicado, além de callback fora de ordem/retry, resposta cached sem LLM, sigilo provider-free e retrieval vetorial com mais de 40 movimentos.
 
 A produção usa `compose.production.yaml`, imagem imutável por digest e credenciais PostgreSQL separadas por responsabilidade. Consulte `docs/deployment/production.md` e `docs/deployment/backup-restore.md` antes de publicar.
 
