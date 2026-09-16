@@ -13,6 +13,13 @@ _LEADING_STEP_NUMBER_RE = re.compile(r"^\s*\d+\s*(?:[-–—.:)]\s*|\s+)")
 _GLUE_BOUNDARY_RE = re.compile(r"(?<=[a-záàâãéêíóôõúç])(?=[A-ZÁÀÂÃÉÊÍÓÔÕÚÇ])")
 _WHITESPACE_RE = re.compile(r"\s+")
 _SAO_PAULO = ZoneInfo("America/Sao_Paulo")
+_SOURCE_STEP_NUMBER_KEYS = (
+    "source_step_number",
+    "step_number",
+    "event_number",
+    "movement_number",
+    "sequence_number",
+)
 
 
 @dataclass(slots=True)
@@ -191,6 +198,20 @@ def _normalize_step_text(value: Any) -> str:
     return _PERSONAL_ID_RE.sub("[documento removido]", text)
 
 
+def _source_step_number(step: dict[str, Any]) -> int | None:
+    for key in _SOURCE_STEP_NUMBER_KEYS:
+        value = step.get(key)
+        if value is None or isinstance(value, bool):
+            continue
+        if isinstance(value, int):
+            return value if value >= 0 else None
+        if isinstance(value, str):
+            candidate = value.strip()
+            if candidate.isdigit():
+                return int(candidate)
+    return None
+
+
 def extract_promotable_fields(process: dict[str, Any]) -> dict[str, Any]:
     classifications = process.get("classifications") or []
     class_name = None
@@ -254,6 +275,7 @@ def extract_promotable_fields(process: dict[str, Any]) -> dict[str, Any]:
                     "type": step_type,
                     "step_id": step.get("step_id"),
                     "step_number": index,
+                    "source_step_number": _source_step_number(step),
                     "private": step.get("private"),
                     "secrecy_level": secrecy_level,
                     "tags": step.get("tags") or {},
