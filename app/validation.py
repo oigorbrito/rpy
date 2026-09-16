@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 _DIGITS_11_14_RE = re.compile(r"(?<!\d)\d{11}(?:\d{3})?(?!\d)")
@@ -32,6 +33,19 @@ _NAME_ROLE_RE = re.compile(
     rf"(?:(?i:na\s+qualidade\s+de|como)\s+)?(?:(?i:{_ROLE}))\b"
 )
 _JSX_TAG_RE = re.compile(r"<(/?)([A-Z][A-Za-z0-9]*)(?:\s[^<>]*?)?(/?)>")
+_MOVEMENT_COUNT_RE = re.compile(
+    r"\b(?P<count>\d+)\s+(?:movimentos?|movimenta(?:ç|c)(?:ão|oes|ões))\b",
+    re.IGNORECASE,
+)
+_DATE_RE = re.compile(
+    r"\b(?:\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])|"
+    r"(?:0?[1-9]|[12]\d|3[01])/(?:0?[1-9]|1[0-2])/\d{4})\b"
+)
+_ATTENTION_HEADING_RE = re.compile(
+    r"^#{1,6}\s+Pontos\s+de\s+aten(?:ç|c)(?:ão|ao)\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+_NEXT_HEADING_RE = re.compile(r"^#{1,6}\s+\S", re.MULTILINE)
 
 
 @dataclass(slots=True)
@@ -95,7 +109,42 @@ def _jsx_errors(text: str) -> list[str]:
     return errors
 
 
-def validar(*, text: str, code: str, parties: list[dict[str, Any]]) -> ValidationResult:
+def _canonical_date(value: str) -> str | None:
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(value, fmt).date().isoformat()
+        except ValueError:
+            continue
+    return None
+
+
+def _dates(text: str) -> set[str]:
+    dates: set[str] = set()
+    for match in _DATE_RE.finditer(text):
+        if canonical := _canonical_date(match.group(0)):
+            dates.add(canonical)
+    return dates
+
+
+def _attention_body(text: str) -> str | None:
+    heading = _ATTENTION_HEADING_RE.search(text)
+    if heading is None:
+        return None
+    start = heading.end()
+    next_heading = _NEXT_HEADING_RE.search(text, start)
+    end = next_heading.start() if next_heading else len(text)
+    return text[start:end].strip()
+
+
+def validar(
+    *,
+    text: str,
+    code: str,
+    parties: list[dict[str, Any]],
+    steps: list[dict[str, Any]] | None = None,
+    source_text: str | None = None,
+    require_attention_section: bool = False,
+) -> ValidationResult:
     errors: list[str] = []
 
     if _DIGITS_11_14_RE.search(text):
@@ -120,6 +169,27 @@ def validar(*, text: str, code: str, parties: list[dict[str, Any]]) -> Validatio
 
     if _FORECAST_RE.search(text):
         errors.append("prognostic language is prohibited")
+
+    if steps is not None:
+        expected_count = len(steps)
+        for match in _MOVEMENT_COUNT_RE.finditer(text):
+            stated_count = int(match.group("count"))
+            if stated_count != expected_count:
+                errors.append(
+                    f"movement count mismatch: stated {stated_count}, expected {expected_count}"
+                )
+
+    if source_text is not None:
+        allowed_dates = _dates(source_text)
+        for generated_date in sorted(_dates(text) - allowed_dates):
+            errors.append(f"date not present in source context: {generated_date}")
+
+    if require_attention_section:
+        attention_body = _attention_body(text)
+        if attention_body is None:
+            errors.append("Pontos de atenção section is required")
+        elif not attention_body:
+            errors.append("Pontos de atenção section must not be empty")
 
     errors.extend(_jsx_errors(text))
     return ValidationResult(passed=not errors, errors=errors)
