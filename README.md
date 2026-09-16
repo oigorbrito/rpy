@@ -242,3 +242,7 @@ requirements/  constraints reprodutíveis
 - engenharia e PRs: `CONTRIBUTING.md`;
 - contrato para agentes/coding assistants: `AGENTS.md`;
 - reporte responsável de vulnerabilidades: `SECURITY.md`.
+
+## Licença e atribuições
+
+O Rpy é distribuído sob a licença MIT. Consulte `LICENSE` para os termos do projeto e `NOTICE` para provenance e atribuições de componentes/implementações de terceiros.
