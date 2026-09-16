@@ -28,3 +28,9 @@ def test_process_document_has_internal_navigation_and_source_ai_distinction()->N
  html=(FRONTEND/"index.html").read_text(); css=(FRONTEND/"app.css").read_text(); assert 'aria-label="Seções do processo"' in html; assert 'href="#summary-title"' in html; assert 'href="#case-data-title"' in html; assert 'href="#movements-title"' in html; assert "SÍNTESE GERADA POR IA" in html; assert "DADOS DA FONTE PROCESSUAL" in html; assert ".document-nav" in css; assert "position:sticky" in css
 def test_frontend_formats_legal_data_without_mutating_api_contract()->None:
  source=(FRONTEND/"app.js").read_text(); assert "function formatCnj" in source; assert "function formatAmount" in source; assert "currency:'BRL'" in source; assert "Valor da causa" in source; assert "Polo ativo" in source; assert "Polo passivo" in source; assert "Pessoa física" in source; assert "Pessoa jurídica" in source; assert "formatDate(step.occurred_at,{time:false})" in source
+
+def test_frontend_clears_previous_result_before_search_and_on_new_search()->None:
+ source=(FRONTEND/"app.js").read_text(); assert "result.hidden=true" in source; assert "newSearchButton.addEventListener" in source; assert "result.hidden=true;setStatus();authPanel.hidden" not in source
+
+def test_frontend_uses_public_api_shape_for_secret_and_unauthorized_states()->None:
+ source=(FRONTEND/"app.js").read_text(); assert "response.status===404" in source; assert "data.parties" in source; assert "data.subjects" in source; assert "data.recent_steps" in source; assert "innerHTML" not in source; assert "request_id" not in source
