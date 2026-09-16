@@ -249,32 +249,34 @@ def main() -> int:
     # Build the CLI report from an explicit allowlist.  The evaluator keeps
     # source-derived values in memory for assertions, but its stdout is an
     # operational log boundary and must contain only aggregate evidence.
+    metrics = report.get("metrics")
+    counts = report.get("counts")
     safe_report: dict[str, Any] = {
-        "cases": report.get("cases", 0),
-        "metrics": report.get("metrics", {}),
-        "counts": report.get("counts", {}),
-        "case_metrics": {},
+        "cases": int(report.get("cases", 0)),
+        "metrics": {
+            name: float(metrics[name])
+            for name in (
+                "mandatory_milestone_recall",
+                "policy_candidate_precision",
+                "source_presence_rate",
+                "secret_summary_leakage_rate",
+            )
+            if isinstance(metrics, dict) and name in metrics
+        },
+        "counts": {
+            name: int(counts[name])
+            for name in (
+                "milestone_expected",
+                "milestone_recovered",
+                "selected_candidates",
+                "policy_relevant_selected",
+                "sourced_selected",
+                "secret_checks",
+                "secret_leaks",
+            )
+            if isinstance(counts, dict) and name in counts
+        },
     }
-    case_metrics = report.get("case_metrics")
-    if isinstance(case_metrics, dict):
-        allowed_case_fields = {
-            "mode",
-            "selected",
-            "policy_relevant_selected",
-            "milestone_expected",
-            "milestone_recovered",
-            "source_presence",
-            "secret_checks",
-        }
-        safe_report["case_metrics"] = {
-            str(case_id): {
-                key: case_data[key]
-                for key in allowed_case_fields
-                if key in case_data
-            }
-            for case_id, case_data in case_metrics.items()
-            if isinstance(case_data, dict)
-        }
     if "baseline_check" in report:
         baseline_check = report["baseline_check"]
         if isinstance(baseline_check, dict):
