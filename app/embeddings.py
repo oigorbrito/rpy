@@ -24,6 +24,16 @@ _DIMENSION_CONFIGURABLE_MODELS = {"text-embedding-3-small", "text-embedding-3-la
 _FIXED_1536_MODELS = {"text-embedding-ada-002"}
 
 
+def vector_retrieval_configured() -> bool:
+    """Return whether the current embedding provider is explicitly configured.
+
+    Absence of an embedding credential means long-process retrieval runs in
+    PostgreSQL lexical-only mode. Once configured, provider failures remain
+    explicit rather than silently changing retrieval semantics.
+    """
+    return bool(str(os.environ.get("OPENAI_API_KEY") or "").strip())
+
+
 def _client():
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:

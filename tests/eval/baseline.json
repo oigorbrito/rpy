@@ -1,5 +1,5 @@
 {
-  "baseline_version": 1,
+  "baseline_version": 2,
   "dataset": {
     "path": "tests/eval/synthetic_cases.json",
     "version": "synthetic-30-v1",
@@ -11,8 +11,11 @@
     "retrieval": {
       "short_process_all_steps_max": 40,
       "default_rank_limit": 20,
-      "bm25_weight": 0.5,
+      "lexical_source": "postgresql_fts_portuguese",
+      "lexical_weight": 0.5,
       "vector_weight": 0.5,
+      "bm25_role": "in_memory_fallback_and_comparison",
+      "vector_optional_when_unconfigured": true,
       "recency_boost_max": 0.3,
       "mandatory_recent_steps": 5
     }

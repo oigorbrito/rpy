@@ -11,7 +11,11 @@ from zoneinfo import ZoneInfo
 import asyncpg
 
 from app.db import create_pool
-from app.embeddings import embed_query, ensure_step_embeddings
+from app.embeddings import (
+    embed_query,
+    ensure_step_embeddings,
+    vector_retrieval_configured,
+)
 from app.json_utils import decode_json_list, decode_json_object
 from app.prompts import PROCESS_SUMMARY_SYSTEM_PROMPT
 from app.providers import (
@@ -20,7 +24,7 @@ from app.providers import (
     call_with_retries,
     is_retryable_anthropic_error,
 )
-from app.retrieval import load_steps, rank_steps, vector_search
+from app.retrieval import lexical_search, load_steps, rank_steps, vector_search
 from app.tasks import PermanentTaskError, task
 from app.validation import ValidationResult, validar
 
@@ -210,21 +214,32 @@ async def _load_context(
     if source_warnings:
         base["source_warnings"] = source_warnings
 
+    lexical_scores: dict[UUID, float] | None = None
     vector_scores: dict[UUID, float] | None = None
     if len(steps) > 40:
-        await ensure_step_embeddings(pool, version_id=version_id)
-        query_vector = await embed_query(RETRIEVAL_QUERY)
         async with pool.acquire() as conn:
-            vector_scores = await vector_search(
+            lexical_scores = await lexical_search(
                 conn,
                 version_id=version_id,
-                embedding=query_vector,
+                query=RETRIEVAL_QUERY,
                 limit=40,
             )
+
+        if vector_retrieval_configured():
+            await ensure_step_embeddings(pool, version_id=version_id)
+            query_vector = await embed_query(RETRIEVAL_QUERY)
+            async with pool.acquire() as conn:
+                vector_scores = await vector_search(
+                    conn,
+                    version_id=version_id,
+                    embedding=query_vector,
+                    limit=40,
+                )
 
     ranked = rank_steps(
         query=RETRIEVAL_QUERY,
         steps=steps,
+        lexical_scores=lexical_scores,
         vector_scores=vector_scores,
         limit=20,
     )

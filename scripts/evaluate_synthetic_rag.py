@@ -172,8 +172,8 @@ def _git_blob_sha(path: Path) -> str:
 def runtime_metadata() -> dict[str, Any]:
     from app.rag import MODEL, PROMPT_VERSION
     from app.retrieval import (
-        BM25_WEIGHT,
         DEFAULT_RANK_LIMIT,
+        LEXICAL_WEIGHT,
         MANDATORY_RECENT_STEPS,
         RECENCY_BOOST_MAX,
         SHORT_PROCESS_ALL_STEPS_MAX,
@@ -186,8 +186,11 @@ def runtime_metadata() -> dict[str, Any]:
         "retrieval": {
             "short_process_all_steps_max": SHORT_PROCESS_ALL_STEPS_MAX,
             "default_rank_limit": DEFAULT_RANK_LIMIT,
-            "bm25_weight": BM25_WEIGHT,
+            "lexical_source": "postgresql_fts_portuguese",
+            "lexical_weight": LEXICAL_WEIGHT,
             "vector_weight": VECTOR_WEIGHT,
+            "bm25_role": "in_memory_fallback_and_comparison",
+            "vector_optional_when_unconfigured": True,
             "recency_boost_max": RECENCY_BOOST_MAX,
             "mandatory_recent_steps": MANDATORY_RECENT_STEPS,
         },

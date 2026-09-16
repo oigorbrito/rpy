@@ -40,6 +40,9 @@ async def test_large_process_uses_offline_embeddings_and_hybrid_retrieval(
     monkeypatch.setenv("JUDIT_WEBHOOK_TOKEN", "vector-e2e-webhook")
     monkeypatch.setenv("DATABASE_URL", TEST_DATABASE_URL)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "offline-anthropic-key")
+    # This test proves the configured-vector path. All embedding/provider calls
+    # are replaced below with deterministic local fakes, so no network is used.
+    monkeypatch.setenv("OPENAI_API_KEY", "offline-openai-key")
 
     async with pool.acquire() as conn:
         await conn.execute(
