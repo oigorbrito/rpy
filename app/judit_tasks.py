@@ -44,6 +44,18 @@ async def finalize_judit_request_task(payload: dict[str, Any]) -> dict[str, Any]
                     **fields,
                 )
 
+                equivalent_to_version_id = None
+                if not promoted:
+                    equivalent_to_version_id = await conn.fetchval(
+                        """
+                        SELECT equivalent_to_version_id
+                        FROM process_versions
+                        WHERE id = $1 AND process_id = $2
+                        """,
+                        staged["version_id"],
+                        staged["process_id"],
+                    )
+
                 summary_enqueued = False
                 if promoted and not bool(staged["source_cached_response"]):
                     job = await enqueue(
@@ -58,12 +70,23 @@ async def finalize_judit_request_task(payload: dict[str, Any]) -> dict[str, Any]
                     )
                     summary_enqueued = job is not None
 
+        if promoted:
+            status = "finalized"
+        elif equivalent_to_version_id is not None:
+            status = "finalized_unchanged"
+        else:
+            status = "finalized_stale"
         return {
             "request_id": request_id,
-            "status": "finalized" if promoted else "finalized_stale",
+            "status": status,
             "promoted": promoted,
             "cached_response": bool(staged["source_cached_response"]),
             "summary_enqueued": summary_enqueued,
+            "equivalent_to_version_id": (
+                str(equivalent_to_version_id)
+                if equivalent_to_version_id is not None
+                else None
+            ),
         }
     finally:
         await pool.close()
