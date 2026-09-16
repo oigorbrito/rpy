@@ -245,7 +245,48 @@ def main() -> int:
             "passed": not failures,
             "failures": failures,
         }
-    print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+
+    # Build the CLI report from an explicit allowlist.  The evaluator keeps
+    # source-derived values in memory for assertions, but its stdout is an
+    # operational log boundary and must contain only aggregate evidence.
+    metrics = report.get("metrics")
+    counts = report.get("counts")
+    safe_report: dict[str, Any] = {
+        "cases": int(report.get("cases", 0)),
+        "metrics": {
+            name: float(metrics[name])
+            for name in (
+                "mandatory_milestone_recall",
+                "policy_candidate_precision",
+                "source_presence_rate",
+                "secret_summary_leakage_rate",
+            )
+            if isinstance(metrics, dict) and name in metrics
+        },
+        "counts": {
+            name: int(counts[name])
+            for name in (
+                "milestone_expected",
+                "milestone_recovered",
+                "selected_candidates",
+                "policy_relevant_selected",
+                "sourced_selected",
+                "secret_checks",
+                "secret_leaks",
+            )
+            if isinstance(counts, dict) and name in counts
+        },
+    }
+    if "baseline_check" in report:
+        baseline_check = report["baseline_check"]
+        if isinstance(baseline_check, dict):
+            safe_report["baseline_check"] = {
+                "baseline_version": baseline_check.get("baseline_version"),
+                "passed": bool(baseline_check.get("passed")),
+                "failure_count": len(baseline_check.get("failures", [])),
+            }
+
+    print(json.dumps(safe_report, ensure_ascii=False, indent=2, sort_keys=True))
     return 1 if failures else 0
 
 
