@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timezone
 from time import perf_counter
 from typing import Any
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 import asyncpg
 
@@ -37,6 +39,7 @@ DEFAULT_PROVIDER_PROMPT_MAX_CHARS = 120_000
 DEFAULT_PROVIDER_STEP_TEXT_MAX_CHARS = 12_000
 DEFAULT_PROVIDER_STEPS_TEXT_MAX_CHARS = 80_000
 TRUNCATION_MARKER = "… [truncated]"
+_SAO_PAULO = ZoneInfo("America/Sao_Paulo")
 _SECRET_HEADER_FIELDS = (
     ("instance", "Instância"),
     ("area", "Área"),
@@ -95,6 +98,16 @@ def _message_text(message: Any) -> str:
     ).strip()
 
 
+def _provider_datetime(value: Any) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, datetime):
+        return str(value)
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(_SAO_PAULO).isoformat()
+
+
 def _serialize_steps(ranked: list[Any]) -> list[dict[str, Any]]:
     _, step_max, steps_total_max = provider_context_limits()
     texts = [_truncate_text(str(item.step.text or ""), step_max) for item in ranked]
@@ -114,7 +127,7 @@ def _serialize_steps(ranked: list[Any]) -> list[dict[str, Any]]:
     return [
         {
             "step_number": item.step.step_number,
-            "occurred_at": str(item.step.occurred_at) if item.step.occurred_at else None,
+            "occurred_at": _provider_datetime(item.step.occurred_at),
             "title": item.step.title,
             "text": text,
         }
