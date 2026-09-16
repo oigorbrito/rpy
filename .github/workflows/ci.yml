@@ -4,9 +4,17 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     services:
       postgres:
         image: pgvector/pgvector:pg16@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
@@ -63,6 +71,9 @@ jobs:
 
       - name: Migration harness
         run: python scripts/migration_harness.py
+
+      - name: Release harness
+        run: python scripts/release_harness.py
 
       - name: Unit tests
         run: pytest -q tests --ignore=tests/integration
