@@ -41,6 +41,13 @@ def _api_key() -> str:
         raise RuntimeError("JUDIT_API_KEY is required")
     return value
 
+def _callback_url() -> str:
+    value = os.environ.get("JUDIT_CALLBACK_URL", "").strip()
+    if not value:
+        raise RuntimeError("JUDIT_CALLBACK_URL is required")
+    if not value.startswith("https://"):
+        raise RuntimeError("JUDIT_CALLBACK_URL must use https")
+    return value
 
 def _create_request_sync(code: str) -> JuditRequestResult:
     payload = json.dumps(
@@ -60,6 +67,7 @@ def _create_request_sync(code: str) -> JuditRequestResult:
             "api-key": _api_key(),
         },
     )
+
     try:
         with urllib.request.urlopen(request, timeout=_timeout_seconds()) as response:
             if response.status != 201:
@@ -81,6 +89,7 @@ def _create_request_sync(code: str) -> JuditRequestResult:
         body: Any = json.loads(raw)
     except (json.JSONDecodeError, UnicodeDecodeError):
         raise JuditRequestError("Judit returned an invalid response") from None
+
     request_id = body.get("request_id") if isinstance(body, dict) else None
     if not isinstance(request_id, str) or not request_id.strip():
         raise JuditRequestError("Judit response missing request id")
