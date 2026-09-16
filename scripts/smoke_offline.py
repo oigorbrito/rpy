@@ -28,7 +28,7 @@ async def main() -> None:
         def forbidden(*_args, **_kwargs): raise AssertionError("offline smoke invoked a paid provider")
         async def fake_generate(_client, _context, validation_errors=None):
             assert validation_errors is None
-            return f"# Resumo do processo\n\nProcesso {code}. Situação processual registrada."
+            return f"# Resumo do processo\n\nProcesso {code}. Situação processual registrada.\n\n## Pontos de atenção\nNenhuma divergência objetiva identificada."
         rag.anthropic_client = lambda *_args, **_kwargs: object()
         rag._generate = fake_generate
         process_requests.create_lawsuit_request = forbidden
