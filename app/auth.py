@@ -45,14 +45,27 @@ def configured_bearer_tokens() -> dict[str, UUID]:
     return configured
 
 
-def _legacy_tenant_for_token(request: Request, supplied: str) -> UUID:
-    configured = getattr(request.app.state, "bearer_tokens", None)
-    if configured is None:
-        configured = configured_bearer_tokens()
-
+def _match_legacy_token(configured: dict[str, UUID], supplied: str) -> UUID | None:
     for token, tenant_id in configured.items():
         if hmac.compare_digest(supplied, token):
             return tenant_id
+    return None
+
+
+def _legacy_tenant_for_token(request: Request, supplied: str) -> UUID:
+    configured = getattr(request.app.state, "bearer_tokens", None)
+    if configured is not None:
+        tenant_id = _match_legacy_token(configured, supplied)
+        if tenant_id is not None:
+            return tenant_id
+
+    # Embedded ASGI tests and operational token rotation can update the environment
+    # after startup. Keep the validated startup cache as the fast path, but refresh
+    # from the same validated source on a cache miss before rejecting the credential.
+    refreshed = configured_bearer_tokens()
+    tenant_id = _match_legacy_token(refreshed, supplied)
+    if tenant_id is not None:
+        return tenant_id
     raise HTTPException(status_code=401, detail="invalid bearer token")
 
 
