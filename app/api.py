@@ -193,7 +193,9 @@ async def get_process_summary(code: str, request: Request) -> dict:
             """
             SELECT markdown, validation, model, prompt_version, generation_ms, created_at
             FROM process_summaries
-            WHERE process_id = $1 AND version_id = $2
+            WHERE process_id = $1
+              AND version_id = $2
+              AND COALESCE((validation->>'passed')::boolean, false) = true
             """,
             process["id"],
             process["current_version_id"],
