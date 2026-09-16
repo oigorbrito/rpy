@@ -6,6 +6,7 @@ from uuid import UUID
 
 import asyncpg
 
+from app.json_utils import decode_json_list, decode_json_object
 from app.process_semantics import SEMANTIC_SCHEMA_VERSION, semantic_fingerprint
 
 
@@ -208,9 +209,9 @@ async def _current_semantic_fingerprint(
     )
     steps = [dict(row) for row in rows]
     return semantic_fingerprint(
-        header=dict(process["header"] or {}),
-        parties=list(process["parties"] or []),
-        subjects=list(process["subjects"] or []),
+        header=decode_json_object(process["header"], label="process header"),
+        parties=decode_json_list(process["parties"], label="process parties"),
+        subjects=decode_json_list(process["subjects"], label="process subjects"),
         steps=steps,
         court=process["court"],
         class_name=process["class_name"],
