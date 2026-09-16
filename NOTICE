@@ -16,4 +16,4 @@ The inclusion of a project in this notice does not imply that its entire reposit
 
 Where a source project carries its own license, that license remains applicable to material originating from that project. Where use is based on direct permission rather than a published repository license, this notice records the provenance basis confirmed by the Rpy project owner without disclosing private communications.
 
-Rpy's own project-wide license is declared separately in the repository root LICENSE file once selected by the project owner.
+Rpy is licensed under the MIT License. See the repository root LICENSE file for the project-wide terms.
