@@ -1,5 +1,8 @@
 from types import SimpleNamespace
 
+import pytest
+
+from app.api_key_auth import api_key_deployment_environment
 from app.api_key_middleware import ApiKeySecurityMiddleware
 
 
@@ -18,3 +21,15 @@ def test_api_key_middleware_covers_process_and_source_routes() -> None:
 
 def test_api_key_middleware_does_not_match_unprotected_paths() -> None:
     assert ApiKeySecurityMiddleware._process_route(_request("GET", "/health")) is None
+
+
+def test_api_key_environment_defaults_to_live_and_rejects_invalid_value(monkeypatch) -> None:
+    monkeypatch.delenv("RPY_API_KEY_ENVIRONMENT", raising=False)
+    assert api_key_deployment_environment() == "live"
+
+    monkeypatch.setenv("RPY_API_KEY_ENVIRONMENT", "test")
+    assert api_key_deployment_environment() == "test"
+
+    monkeypatch.setenv("RPY_API_KEY_ENVIRONMENT", "staging")
+    with pytest.raises(RuntimeError, match="live or test"):
+        api_key_deployment_environment()
