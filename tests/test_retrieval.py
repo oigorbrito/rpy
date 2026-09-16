@@ -1,10 +1,12 @@
 from uuid import uuid4
 
+import pytest
+
 from app.retrieval import Step, bm25_scores, rank_steps
 
 
-def _step(number: int, text: str) -> Step:
-    return Step(id=uuid4(), step_number=number, text=text)
+def _step(number: int, text: str, *, title: str | None = None) -> Step:
+    return Step(id=uuid4(), step_number=number, text=text, title=title)
 
 
 def test_bm25_prefers_exact_terms() -> None:
@@ -29,6 +31,38 @@ def test_long_process_forces_first_last_recent_and_milestone() -> None:
     assert 50 in numbers
     assert {46, 47, 48, 49, 50}.issubset(numbers)
     assert 10 in numbers
+
+
+@pytest.mark.parametrize(
+    "milestone",
+    [
+        "sentença",
+        "acórdão",
+        "liminar",
+        "tutela",
+        "citação",
+        "audiência",
+        "trânsito em julgado",
+        "arquivamento",
+        "extinção",
+        "perícia",
+        "penhora",
+        "baixa definitiva",
+        "recurso",
+        "apelação",
+        "embargos",
+    ],
+)
+def test_long_process_forces_documented_milestones(milestone: str) -> None:
+    steps = [_step(i, f"movimento neutro {i}") for i in range(1, 51)]
+    target = _step(20, "conteúdo ordinário", title=milestone)
+    steps[19] = target
+
+    ranked = rank_steps(query="termo impossível", steps=steps, limit=7)
+    by_id = {item.step.id: item for item in ranked}
+
+    assert target.id in by_id
+    assert by_id[target.id].forced is True
 
 
 def test_recency_boost_favors_later_equal_hits() -> None:
