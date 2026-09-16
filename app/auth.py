@@ -11,6 +11,7 @@ from app.api_key_auth import (
     RequestPrincipal,
     api_key_environment,
     authenticate_api_key,
+    authenticate_api_key_identity,
     bearer_credential,
 )
 
@@ -59,9 +60,6 @@ def _legacy_tenant_for_token(request: Request, supplied: str) -> UUID:
         if tenant_id is not None:
             return tenant_id
 
-    # Embedded ASGI tests and operational token rotation can explicitly replace
-    # the environment mapping after startup. Keep the validated startup cache as
-    # the fast path, and refresh only when an explicit runtime mapping exists.
     if os.environ.get("RPY_BEARER_TOKENS") is not None:
         refreshed = configured_bearer_tokens()
         tenant_id = _match_legacy_token(refreshed, supplied)
@@ -82,6 +80,14 @@ def tenant_from_request(request: Request) -> UUID:
     if api_key_environment(supplied) is not None:
         raise HTTPException(status_code=401, detail="API key requires scoped authentication")
     return _legacy_tenant_for_token(request, supplied)
+
+
+async def principal_from_request_unscoped(request: Request) -> RequestPrincipal:
+    """Authenticate tenant identity without assuming the request path contains a CNJ."""
+    supplied = bearer_credential(request)
+    if api_key_environment(supplied) is not None:
+        return await authenticate_api_key_identity(request, token=supplied)
+    return RequestPrincipal(tenant_id=_legacy_tenant_for_token(request, supplied))
 
 
 async def principal_from_request(
