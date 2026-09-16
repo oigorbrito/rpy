@@ -58,7 +58,8 @@ def _legacy_tenant_for_token(request: Request, supplied: str) -> UUID:
 
 def tenant_from_request(request: Request) -> UUID:
     """Return the authenticated tenant for legacy or pre-authorized API-key requests."""
-    principal = getattr(request.state, "principal", None)
+    state = getattr(request, "state", None)
+    principal = getattr(state, "principal", None)
     if isinstance(principal, RequestPrincipal):
         return principal.tenant_id
 
