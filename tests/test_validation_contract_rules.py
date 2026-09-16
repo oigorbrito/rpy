@@ -89,6 +89,47 @@ def test_rejects_empty_attention_section_when_required() -> None:
     assert "Pontos de atenção section must not be empty" in result.errors
 
 
+def test_accepts_required_attention_fact_with_case_and_accent_normalization() -> None:
+    fact = "Nenhum movimento processual foi fornecido no payload."
+    result = validar(
+        text="## Pontos de atenção\nNENHUM MOVIMENTO PROCESSUAL foi fornecido no payload.",
+        code=CODE,
+        parties=PARTIES,
+        require_attention_section=True,
+        required_attention_phrases=[fact],
+    )
+    assert result.passed is True
+
+
+def test_rejects_missing_required_attention_fact() -> None:
+    fact = "Nenhum movimento processual foi fornecido no payload."
+    result = validar(
+        text="## Pontos de atenção\nNenhuma divergência factual identificada.",
+        code=CODE,
+        parties=PARTIES,
+        require_attention_section=True,
+        required_attention_phrases=[fact],
+    )
+    assert result.passed is False
+    assert f"required attention fact missing: {fact}" in result.errors
+
+
+def test_rejects_required_attention_fact_outside_attention_section() -> None:
+    fact = "Nenhum movimento processual foi fornecido no payload."
+    result = validar(
+        text=(
+            "## Síntese\nNenhum movimento processual foi fornecido no payload.\n\n"
+            "## Pontos de atenção\nNenhuma divergência factual identificada."
+        ),
+        code=CODE,
+        parties=PARTIES,
+        require_attention_section=True,
+        required_attention_phrases=[fact],
+    )
+    assert result.passed is False
+    assert f"required attention fact missing: {fact}" in result.errors
+
+
 def test_rejects_formatted_cpf_even_when_not_present_in_source() -> None:
     result = validar(
         text="Documento informado: 123.456.789-09.",

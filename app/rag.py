@@ -32,6 +32,7 @@ RETRIEVAL_QUERY = (
     "sentença acórdão citação decisão audiência pedido objeto situação atual "
     "trânsito em julgado"
 )
+EMPTY_STEPS_WARNING = "Nenhum movimento processual foi fornecido no payload."
 DEFAULT_PROVIDER_PROMPT_MAX_CHARS = 120_000
 DEFAULT_PROVIDER_STEP_TEXT_MAX_CHARS = 12_000
 DEFAULT_PROVIDER_STEPS_TEXT_MAX_CHARS = 80_000
@@ -173,6 +174,8 @@ async def _load_context(
         steps = await load_steps(conn, version_id=version_id)
 
     base["step_count"] = len(steps)
+    if not steps:
+        base["source_warnings"] = [EMPTY_STEPS_WARNING]
     vector_scores: dict[UUID, float] | None = None
     if len(steps) > 40:
         await ensure_step_embeddings(pool, version_id=version_id)
@@ -260,6 +263,7 @@ def _validate_provider_summary(text: str, context: dict[str, Any]) -> Validation
         expected_step_count=int(context.get("step_count") or 0),
         source_text=_provider_source_text(context),
         require_attention_section=True,
+        required_attention_phrases=list(context.get("source_warnings", [])),
     )
 
 

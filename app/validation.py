@@ -192,6 +192,7 @@ def validar(
     expected_step_count: int | None = None,
     source_text: str | None = None,
     require_attention_section: bool = False,
+    required_attention_phrases: list[str] | None = None,
     forbid_party_names: bool = False,
 ) -> ValidationResult:
     errors: list[str] = []
@@ -241,12 +242,23 @@ def validar(
         for generated_date in sorted(_dates(text) - allowed_dates):
             errors.append(f"date not present in source context: {generated_date}")
 
+    attention_body = _attention_body(text)
     if require_attention_section:
-        attention_body = _attention_body(text)
         if attention_body is None:
             errors.append("Pontos de atenção section is required")
         elif not attention_body:
             errors.append("Pontos de atenção section must not be empty")
+
+    if required_attention_phrases:
+        if attention_body is None:
+            if "Pontos de atenção section is required" not in errors:
+                errors.append("Pontos de atenção section is required")
+        else:
+            normalized_attention = _normalize_party_name(attention_body)
+            for phrase in required_attention_phrases:
+                normalized_phrase = _normalize_party_name(phrase)
+                if normalized_phrase and normalized_phrase not in normalized_attention:
+                    errors.append(f"required attention fact missing: {phrase}")
 
     errors.extend(_jsx_errors(text))
     return ValidationResult(passed=not errors, errors=errors)
