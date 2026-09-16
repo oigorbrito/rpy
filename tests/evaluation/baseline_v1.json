@@ -1,0 +1,16 @@
+{
+  "dataset": "v1",
+  "configuration": {"retrieval": "app.retrieval.rank_steps", "provider": "none"},
+  "metrics": {
+    "required_movement_recall": 1.0,
+    "candidate_precision": 0.4782608695652174,
+    "source_presence": 1.0,
+    "leakage_free": 1.0
+  },
+  "thresholds": {
+    "required_movement_recall": 1.0,
+    "candidate_precision": 0.45,
+    "source_presence": 1.0,
+    "leakage_free": 1.0
+  }
+}

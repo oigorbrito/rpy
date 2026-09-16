@@ -1,0 +1,104 @@
+{
+  "version": "v1",
+  "cases": [
+    {
+      "id": "short-exact-and-accented",
+      "query": "sentença citação situação",
+      "process": {
+        "code": "0000000-00.2026.8.21.0001",
+        "secrecy_level": 0,
+        "steps": [
+          {"step_number": 1, "title": "CITAÇÃO", "text": "Citação realizada."},
+          {"step_number": 2, "title": "SENTENÇA", "text": "Sentença registrada."},
+          {"step_number": 3, "title": "EXPEDIENTE", "text": "Prazo informado."}
+        ]
+      },
+      "expected": {
+        "required_step_numbers": [1, 2, 3],
+        "relevant_step_numbers": [1, 2, 3],
+        "sources_expected": true,
+        "must_not_leak": []
+      }
+    },
+    {
+      "id": "long-vector-and-mandatory-movements",
+      "query": "decisão sentença situação atual",
+      "process": {
+        "code": "0000000-00.2026.8.21.0002",
+        "secrecy_level": 0,
+        "steps": [
+          {"step_number": 1, "title": "MOVIMENTO", "text": "Registro ordinário 1."},
+          {"step_number": 2, "title": "MOVIMENTO", "text": "Registro ordinário 2."},
+          {"step_number": 3, "title": "MOVIMENTO", "text": "Registro ordinário 3."},
+          {"step_number": 4, "title": "MOVIMENTO", "text": "Registro ordinário 4."},
+          {"step_number": 5, "title": "MOVIMENTO", "text": "Registro ordinário 5."},
+          {"step_number": 6, "title": "MOVIMENTO", "text": "Registro ordinário 6."},
+          {"step_number": 7, "title": "MOVIMENTO", "text": "Registro ordinário 7."},
+          {"step_number": 8, "title": "MOVIMENTO", "text": "Registro ordinário 8."},
+          {"step_number": 9, "title": "MOVIMENTO", "text": "Registro ordinário 9."},
+          {"step_number": 10, "title": "MOVIMENTO", "text": "Registro ordinário 10."},
+          {"step_number": 11, "title": "MOVIMENTO", "text": "Registro ordinário 11."},
+          {"step_number": 12, "title": "DECISÃO", "text": "Decisão interlocutória registrada."},
+          {"step_number": 13, "title": "MOVIMENTO", "text": "Registro ordinário 13."},
+          {"step_number": 14, "title": "MOVIMENTO", "text": "Registro ordinário 14."},
+          {"step_number": 15, "title": "MOVIMENTO", "text": "Registro ordinário 15."},
+          {"step_number": 16, "title": "MOVIMENTO", "text": "Registro ordinário 16."},
+          {"step_number": 17, "title": "MOVIMENTO", "text": "Registro ordinário 17."},
+          {"step_number": 18, "title": "MOVIMENTO", "text": "Registro ordinário 18."},
+          {"step_number": 19, "title": "MOVIMENTO", "text": "Registro ordinário 19."},
+          {"step_number": 20, "title": "SENTENÇA", "text": "Sentença registrada."},
+          {"step_number": 21, "title": "MOVIMENTO", "text": "Registro ordinário 21."},
+          {"step_number": 22, "title": "MOVIMENTO", "text": "Registro ordinário 22."},
+          {"step_number": 23, "title": "MOVIMENTO", "text": "Registro ordinário 23."},
+          {"step_number": 24, "title": "MOVIMENTO", "text": "Registro ordinário 24."},
+          {"step_number": 25, "title": "MOVIMENTO", "text": "Registro ordinário 25."},
+          {"step_number": 26, "title": "MOVIMENTO", "text": "Registro ordinário 26."},
+          {"step_number": 27, "title": "MOVIMENTO", "text": "Registro ordinário 27."},
+          {"step_number": 28, "title": "MOVIMENTO", "text": "Registro ordinário 28."},
+          {"step_number": 29, "title": "MOVIMENTO", "text": "Registro ordinário 29."},
+          {"step_number": 30, "title": "MOVIMENTO", "text": "Registro ordinário 30."},
+          {"step_number": 31, "title": "MOVIMENTO", "text": "Registro ordinário 31."},
+          {"step_number": 32, "title": "MOVIMENTO", "text": "Registro ordinário 32."},
+          {"step_number": 33, "title": "MOVIMENTO", "text": "Registro ordinário 33."},
+          {"step_number": 34, "title": "MOVIMENTO", "text": "Registro ordinário 34."},
+          {"step_number": 35, "title": "MOVIMENTO", "text": "Registro ordinário 35."},
+          {"step_number": 36, "title": "MOVIMENTO", "text": "Registro ordinário 36."},
+          {"step_number": 37, "title": "MOVIMENTO", "text": "Registro ordinário 37."},
+          {"step_number": 38, "title": "MOVIMENTO", "text": "Registro ordinário 38."},
+          {"step_number": 39, "title": "MOVIMENTO", "text": "Registro ordinário 39."},
+          {"step_number": 40, "title": "MOVIMENTO", "text": "Registro ordinário 40."},
+          {"step_number": 41, "title": "MOVIMENTO", "text": "Registro ordinário 41."},
+          {"step_number": 42, "title": "MOVIMENTO", "text": "Registro ordinário 42."},
+          {"step_number": 43, "title": "MOVIMENTO", "text": "Registro ordinário 43."},
+          {"step_number": 44, "title": "MOVIMENTO", "text": "Registro ordinário 44."},
+          {"step_number": 45, "title": "MOVIMENTO", "text": "Último movimento: situação atual registrada."}
+        ]
+      },
+      "vector_scores": {"12": 1.0, "20": 0.9},
+      "expected": {
+        "required_step_numbers": [1, 12, 20, 41, 42, 43, 44, 45],
+        "relevant_step_numbers": [1, 12, 20, 41, 42, 43, 44, 45],
+        "sources_expected": true,
+        "must_not_leak": []
+      }
+    },
+    {
+      "id": "secret-process-no-retrieval-context",
+      "query": "decisão situação",
+      "process": {
+        "code": "0000000-00.2026.8.21.0003",
+        "secrecy_level": 1,
+        "steps": [
+          {"step_number": 1, "title": "SEGREDO-PARTE", "text": "SEGREDO-MOVIMENTO-UNICO"},
+          {"step_number": 2, "title": "SEGREDO-ASSUNTO", "text": "SEGREDO-VALOR-R$-999"}
+        ]
+      },
+      "expected": {
+        "required_step_numbers": [],
+        "relevant_step_numbers": [],
+        "sources_expected": false,
+        "must_not_leak": ["SEGREDO-PARTE", "SEGREDO-MOVIMENTO-UNICO", "SEGREDO-ASSUNTO", "SEGREDO-VALOR-R$-999"]
+      }
+    }
+  ]
+}

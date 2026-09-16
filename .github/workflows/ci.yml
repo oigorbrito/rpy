@@ -67,6 +67,9 @@ jobs:
       - name: Unit tests
         run: pytest -q tests --ignore=tests/integration
 
+      - name: Offline RAG evaluation gate
+        run: python scripts/evaluate_rag.py --dataset tests/evaluation/dataset_v1.json --baseline tests/evaluation/baseline_v1.json
+
       - name: Frontend behavior tests
         run: node tests/frontend_behavior_test.mjs
 
