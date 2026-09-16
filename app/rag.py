@@ -28,12 +28,18 @@ from app.retrieval import lexical_search, load_steps, rank_steps, vector_search
 from app.tasks import PermanentTaskError, task
 from app.validation import ValidationResult, validar
 
-MODEL = "claude-sonnet-5"
+SONNET_MODEL = "claude-sonnet-5"
+OPUS_MODEL = "claude-opus-5"
+MODEL = SONNET_MODEL  # Backward-compatible default model constant.
+OPUS_STEP_THRESHOLD = 100
+MAX_TOKENS = 4000
 PROMPT_VERSION = "process-summary-v2"
 SECRET_MODEL = "local-deterministic"
 SECRET_PROMPT_VERSION = "secret-summary-v1"
 REQUESTED_TEMPERATURE = 0.2
-SONNET_5_SUPPORTS_CUSTOM_TEMPERATURE = False
+# Anthropic deprecates custom sampling parameters for current Claude models.
+# Keep the product's requested value documented but omit it from API payloads.
+CURRENT_MODELS_SUPPORT_CUSTOM_TEMPERATURE = False
 RETRIEVAL_QUERY = (
     "sentença acórdão citação decisão audiência pedido objeto situação atual "
     "trânsito em julgado"
@@ -51,6 +57,12 @@ _SECRET_HEADER_FIELDS = (
     ("county", "Comarca"),
     ("state", "Estado"),
     ("city", "Cidade"),
+)
+_USAGE_FIELDS = (
+    "input_tokens",
+    "output_tokens",
+    "cache_creation_input_tokens",
+    "cache_read_input_tokens",
 )
 
 
@@ -290,7 +302,11 @@ def _provider_payload(context: dict[str, Any]) -> tuple[dict[str, Any], list[Any
         )
 
     return (
-        {key: value for key, value in context.items() if key != "steps"},
+        {
+            key: value
+            for key, value in context.items()
+            if key != "steps" and not key.startswith("_")
+        },
         list(context.get("steps", [])),
     )
 
@@ -314,6 +330,66 @@ def _validate_provider_summary(text: str, context: dict[str, Any]) -> Validation
         require_attention_section=True,
         required_attention_phrases=list(context.get("source_warnings", [])),
     )
+
+
+def _generation_model(context: dict[str, Any]) -> str:
+    return (
+        OPUS_MODEL
+        if int(context.get("step_count") or 0) > OPUS_STEP_THRESHOLD
+        else SONNET_MODEL
+    )
+
+
+def _usage_value(usage: Any, field: str) -> int | None:
+    value = getattr(usage, field, None)
+    if value is None and isinstance(usage, dict):
+        value = usage.get(field)
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _record_generation_telemetry(
+    context: dict[str, Any], *, message: Any, model: str
+) -> None:
+    usage_obj = getattr(message, "usage", None)
+    attempt_usage: dict[str, int] = {}
+    for field in _USAGE_FIELDS:
+        value = _usage_value(usage_obj, field)
+        if value is not None:
+            attempt_usage[field] = value
+
+    telemetry = context.setdefault(
+        "_generation_telemetry",
+        {
+            "model": model,
+            "attempts": 0,
+            "usage": {},
+            "cache_hit": False,
+            "cost_usd": None,
+        },
+    )
+    telemetry["model"] = model
+    telemetry["attempts"] = int(telemetry.get("attempts") or 0) + 1
+    aggregate = telemetry.setdefault("usage", {})
+    for field, value in attempt_usage.items():
+        aggregate[field] = int(aggregate.get(field) or 0) + value
+    if attempt_usage.get("cache_read_input_tokens", 0) > 0:
+        telemetry["cache_hit"] = True
+
+    # Claude's Messages API exposes token/cache usage but does not guarantee a
+    # monetary cost field. Persist provider-reported cost only when present.
+    cost = getattr(usage_obj, "cost_usd", None)
+    if cost is None and isinstance(usage_obj, dict):
+        cost = usage_obj.get("cost_usd")
+    if cost is not None:
+        try:
+            telemetry["cost_usd"] = float(cost)
+        except (TypeError, ValueError):
+            pass
 
 
 async def _generate(
@@ -345,9 +421,10 @@ async def _generate(
             f"provider prompt exceeds PROVIDER_PROMPT_MAX_CHARS ({len(user_prompt)} > {prompt_max})"
         )
 
+    model = _generation_model(context)
     request: dict[str, Any] = {
-        "model": MODEL,
-        "max_tokens": 5000,
+        "model": model,
+        "max_tokens": MAX_TOKENS,
         "system": [
             {
                 "type": "text",
@@ -357,7 +434,7 @@ async def _generate(
         ],
         "messages": [{"role": "user", "content": user_prompt}],
     }
-    if SONNET_5_SUPPORTS_CUSTOM_TEMPERATURE:
+    if CURRENT_MODELS_SUPPORT_CUSTOM_TEMPERATURE:
         request["temperature"] = REQUESTED_TEMPERATURE
 
     async def create_message():
@@ -368,6 +445,7 @@ async def _generate(
         is_retryable=is_retryable_anthropic_error,
         settings=anthropic_settings(),
     )
+    _record_generation_telemetry(context, message=message, model=model)
     return _message_text(message)
 
 
@@ -381,18 +459,25 @@ async def _persist_summary(
     generation_ms: int,
     model: str = MODEL,
     prompt_version: str = PROMPT_VERSION,
+    usage: dict[str, Any] | None = None,
+    cache_hit: bool | None = None,
+    cost_usd: float | None = None,
 ) -> bool:
     row = await conn.fetchrow(
         """
         INSERT INTO process_summaries (
-            process_id, version_id, markdown, validation, model, prompt_version, generation_ms
-        ) VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)
+            process_id, version_id, markdown, validation, model, prompt_version,
+            generation_ms, usage, cache_hit, cost_usd
+        ) VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8::jsonb, $9, $10)
         ON CONFLICT (process_id, version_id)
         DO UPDATE SET markdown = EXCLUDED.markdown,
                       validation = EXCLUDED.validation,
                       model = EXCLUDED.model,
                       prompt_version = EXCLUDED.prompt_version,
                       generation_ms = EXCLUDED.generation_ms,
+                      usage = EXCLUDED.usage,
+                      cache_hit = EXCLUDED.cache_hit,
+                      cost_usd = EXCLUDED.cost_usd,
                       created_at = NOW()
         WHERE COALESCE((process_summaries.validation->>'passed')::boolean, false) = false
            OR (
@@ -411,6 +496,9 @@ async def _persist_summary(
         model,
         prompt_version,
         generation_ms,
+        json.dumps(usage or {}),
+        cache_hit,
+        cost_usd,
     )
     return row is not None
 
@@ -423,7 +511,8 @@ async def _load_publishable_summary(
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
-            SELECT ps.validation, ps.model, ps.prompt_version, ps.generation_ms
+            SELECT ps.validation, ps.model, ps.prompt_version, ps.generation_ms,
+                   ps.usage, ps.cache_hit, ps.cost_usd
             FROM process_summaries ps
             JOIN processes p
               ON p.id = ps.process_id
@@ -442,6 +531,9 @@ async def _load_publishable_summary(
         "model": row["model"],
         "prompt_version": row["prompt_version"],
         "generation_ms": int(row["generation_ms"] or 0),
+        "usage": decode_json_object(row["usage"], label="summary usage"),
+        "cache_hit": row["cache_hit"],
+        "cost_usd": float(row["cost_usd"]) if row["cost_usd"] is not None else None,
     }
 
 
@@ -456,6 +548,9 @@ async def generate_summary(
             "validation": existing["validation"],
             "model": existing["model"],
             "generation_ms": existing["generation_ms"],
+            "usage": existing["usage"],
+            "cache_hit": existing["cache_hit"],
+            "cost_usd": existing["cost_usd"],
             "persisted": False,
             "reused": True,
         }
@@ -465,6 +560,9 @@ async def generate_summary(
 
     model = MODEL
     prompt_version = PROMPT_VERSION
+    usage: dict[str, Any] = {}
+    cache_hit: bool | None = None
+    cost_usd: float | None = None
     if _is_secret_context(context):
         text = _secret_summary(context)
         result: ValidationResult = validar(
@@ -480,12 +578,26 @@ async def generate_summary(
         if not api_key:
             raise RuntimeError("ANTHROPIC_API_KEY is required")
         client = anthropic_client(api_key)
+        model = _generation_model(context)
 
         text = await _generate(client, context)
         result = _validate_provider_summary(text, context)
         if not result.passed:
             text = await _generate(client, context, result.errors)
             result = _validate_provider_summary(text, context)
+
+        telemetry = context.get("_generation_telemetry", {})
+        if isinstance(telemetry, dict):
+            raw_usage = telemetry.get("usage")
+            if isinstance(raw_usage, dict):
+                usage = dict(raw_usage)
+            cache_hit = bool(telemetry.get("cache_hit"))
+            raw_cost = telemetry.get("cost_usd")
+            if raw_cost is not None:
+                try:
+                    cost_usd = float(raw_cost)
+                except (TypeError, ValueError):
+                    cost_usd = None
 
     generation_ms = max(0, round((perf_counter() - started) * 1000))
     validation = {"passed": result.passed, "errors": result.errors}
@@ -499,11 +611,17 @@ async def generate_summary(
             model=model,
             prompt_version=prompt_version,
             generation_ms=generation_ms,
+            usage=usage,
+            cache_hit=cache_hit,
+            cost_usd=cost_usd,
         )
     return {
         "validation": validation,
         "model": model,
         "generation_ms": generation_ms,
+        "usage": usage,
+        "cache_hit": cache_hit,
+        "cost_usd": cost_usd,
         "persisted": persisted,
         "reused": False,
     }
