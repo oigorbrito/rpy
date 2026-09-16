@@ -146,6 +146,28 @@ def test_rejects_invalid_jsx_class_and_balance() -> None:
     assert any("unclosed JSX" in error for error in result.errors)
 
 
+def test_rejects_jsx_component_outside_allowlist() -> None:
+    result = validar(
+        text='<ProcessHeader className="x"><ScriptPanel /></ProcessHeader>',
+        code=CODE,
+        parties=PARTIES,
+    )
+    assert result.passed is False
+    assert "JSX component is not allowed: ScriptPanel" in result.errors
+
+
+def test_accepts_only_documented_jsx_components() -> None:
+    result = validar(
+        text=(
+            '<ProcessHeader className="process-header">Processo</ProcessHeader>\n'
+            '<Party name="Maria da Silva" />'
+        ),
+        code=CODE,
+        parties=PARTIES,
+    )
+    assert result.passed is True
+
+
 def test_accepts_valid_minimal_summary() -> None:
     result = validar(
         text=(
