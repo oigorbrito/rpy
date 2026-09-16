@@ -20,20 +20,20 @@ e leitura autenticada. Usa dados sintéticos e não exige chaves pagas.
 
 ## Definition of Done
 
-- [ ] clone novo validado em ambiente externo limpo com Git + Docker + Docker Compose;
+- [x] clone novo validado em ambiente externo limpo com Git + Docker + Docker Compose;
 - [x] pré-requisitos documentados;
 - [x] migration harness, unitários, integração PostgreSQL, image smoke e backup/restore verdes;
 - [x] smoke offline termina com `RPY OFFLINE SMOKE: PASS` e `providers=0`;
-- [x] invariantes de dados, concorrência/recovery e sigilo evidenciadas;
+- [x] invariantes de dados, concorrência/recovery e sigilo evidenciados;
 - [x] caminho vetorial com mais de 40 movimentos evidenciado offline;
 - [x] contratos de providers testados com fakes e sem rede;
 - [x] frontend comportamental offline verde;
 - [x] exemplos de configuração conferidos contra o runtime;
 - [x] PRs necessários integrados e CI do head exato verde.
 
-O único item técnico ainda pendente para encerrar o checklist offline é a validação
-de um clone novo em um ambiente externo limpo. A CI do `main` cobre o restante da
-matriz, inclusive o smoke offline e `providers=0`.
+O fresh clone foi validado em Windows fora do ambiente de desenvolvimento anterior:
+a imagem foi reconstruída, migrations 001-014 foram aplicadas e o smoke terminou com
+`RPY OFFLINE SMOKE: PASS`, `summary=valid`, `jobs=complete` e `providers=0`.
 
 A versão permanece `0.1.0` até existir uma política explícita de versionamento;
 nenhuma tag é criada por este documento.
@@ -49,7 +49,7 @@ nenhuma tag é criada por este documento.
 | Provider contracts | fakes e monkeypatches | sim | repository gate |
 | Pipeline operacional | `scripts/smoke_offline.*` | sim | repository gate |
 | Frontend | harness Node comportamental | sim | repository gate |
-| Fresh clone externo | smoke em checkout limpo fora do ambiente atual | sim | pending |
+| Fresh clone externo | smoke em checkout limpo no Windows | sim | passed |
 | Judit real | provider acceptance controlado | não | deferred |
 | Anthropic/OpenAI reais | provider acceptance controlado | não | deferred |
 
