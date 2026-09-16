@@ -105,6 +105,8 @@ A resposta deve ser Markdown e pode conter componentes JSX. Em JSX:
 
 <formato_de_saida>
 Use a estrutura abaixo e omita apenas seções sem informação factual suficiente.
+Não copie nem resuma qualquer registro externo `summary` que possa ter acompanhado
+o payload; gere o iaSummary somente a partir de processo e movimentos autorizados.
 
 # Resumo do processo
 
