@@ -66,6 +66,47 @@ async def test_only_one_worker_claims_a_job() -> None:
 
 
 @pytest.mark.asyncio
+async def test_multiple_workers_claim_distinct_jobs_without_loss_or_duplicates() -> None:
+    assert TEST_DATABASE_URL is not None
+    pool = await create_pool(TEST_DATABASE_URL, min_size=4, max_size=6)
+    try:
+        async with pool.acquire() as conn:
+            for value in range(4):
+                await enqueue(
+                    conn,
+                    task_name="integration-multi-worker",
+                    payload={"value": value},
+                    idempotency_key=f"integration:multi-worker:{value}",
+                )
+
+        workers = [uuid4(), uuid4()]
+
+        async def claim_two(worker_id):
+            async with pool.acquire() as conn:
+                return [await claim(conn, worker_id), await claim(conn, worker_id)]
+
+        batches = await asyncio.gather(*(claim_two(worker_id) for worker_id in workers))
+        claimed = [row for batch in batches for row in batch if row is not None]
+
+        assert len(claimed) == 4
+        assert len({row["id"] for row in claimed}) == 4
+        assert {row["worker_id"] for row in claimed} == set(workers)
+        async with pool.acquire() as conn:
+            counts = await conn.fetchrow(
+                """
+                SELECT count(*) FILTER (WHERE status = 'processing') AS processing,
+                       count(*) AS total
+                FROM jobs
+                WHERE task_name = 'integration-multi-worker'
+                """
+            )
+        assert counts["processing"] == 4
+        assert counts["total"] == 4
+    finally:
+        await pool.close()
+
+
+@pytest.mark.asyncio
 async def test_idempotent_enqueue_does_not_duplicate_job() -> None:
     assert TEST_DATABASE_URL is not None
     pool = await create_pool(TEST_DATABASE_URL, min_size=1, max_size=2)
