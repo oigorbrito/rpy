@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 from pathlib import Path
 
-from scripts.evaluate_rag import evaluate
-
-
 ROOT = Path(__file__).parents[2]
+_SPEC = importlib.util.spec_from_file_location("evaluate_rag", ROOT / "scripts/evaluate_rag.py")
+assert _SPEC is not None and _SPEC.loader is not None
+_MODULE = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(_MODULE)
+evaluate = _MODULE.evaluate
 
 
 def test_synthetic_evaluation_meets_versioned_baseline() -> None:
