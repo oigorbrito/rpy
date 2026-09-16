@@ -1,5 +1,8 @@
+import copy
 import json
 from pathlib import Path
+
+import pytest
 
 from app.judit import extract_promotable_fields, parse_event
 
@@ -123,9 +126,95 @@ def test_extract_current_judit_steps_and_sanitizes_parties() -> None:
     assert fields["steps"][0]["metadata"]["source_step_number"] is None
     assert "SENTENÇA" in fields["steps"][1]["text"]
     assert fields["parties"] == [
-        {"name": "Parte A", "side": "Active", "person_type": "Autor"}
+        {
+            "name": "Parte A",
+            "side": "Active",
+            "person_type": "Autor",
+            "masked_person_id": "***.***.***-01",
+        }
     ]
     assert "12345678901" not in str(fields["parties"])
+
+
+def test_masks_cpf_and_cnpj_without_mutating_raw_process() -> None:
+    process = {
+        "code": "0000000-00.0000.0.00.0000",
+        "parties": [
+            {
+                "name": "Pessoa Física",
+                "side": "Active",
+                "person_type": "Autor",
+                "main_document": "123.456.789-01",
+            },
+            {
+                "name": "Pessoa Jurídica",
+                "side": "Passive",
+                "person_type": "Réu",
+                "documents": [
+                    {"document": "12.345.678/0001-95", "document_type": "cnpj"}
+                ],
+            },
+        ],
+        "steps": [],
+    }
+    original = copy.deepcopy(process)
+
+    fields = extract_promotable_fields(process)
+
+    assert process == original
+    assert fields["parties"][0]["masked_person_id"] == "***.***.***-01"
+    assert fields["parties"][1]["masked_person_id"] == "**.***.***/****-95"
+    rendered = json.dumps(fields, ensure_ascii=False, default=str)
+    assert "12345678901" not in rendered
+    assert "123.456.789-01" not in rendered
+    assert "12345678000195" not in rendered
+    assert "12.345.678/0001-95" not in rendered
+
+
+def test_corrects_eletronica_refer_only_in_derived_step_text() -> None:
+    process = {
+        "code": "0000000-00.0000.0.00.0000",
+        "steps": [
+            {
+                "step_number": 8,
+                "content": "8 - INTIMAÇÃO ELETRÔNICAREFER registrada",
+            }
+        ],
+    }
+    original = copy.deepcopy(process)
+
+    fields = extract_promotable_fields(process)
+
+    assert process == original
+    assert process["steps"][0]["content"] == "8 - INTIMAÇÃO ELETRÔNICAREFER registrada"
+    assert fields["steps"][0]["text"] == "INTIMAÇÃO ELETRÔNICA REFER registrada"
+    assert fields["steps"][0]["metadata"]["source_step_number"] == 8
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("2026-06-10T12:00:00Z", "2026-06-10T09:00:00-03:00"),
+        ("2026-06-10T12:00:00+00:00", "2026-06-10T09:00:00-03:00"),
+        ("2026-06-10T09:00:00-03:00", "2026-06-10T09:00:00-03:00"),
+        ("2026-06-10T12:00:00", "2026-06-10T09:00:00-03:00"),
+        ("not-a-date", None),
+    ],
+)
+def test_normalizes_step_dates_for_sao_paulo(source: str, expected: str | None) -> None:
+    fields = extract_promotable_fields(
+        {
+            "code": "0000000-00.0000.0.00.0000",
+            "steps": [{"step_date": source, "content": "Movimento"}],
+        }
+    )
+
+    assert fields["steps"][0]["metadata"]["source_step_date"] == source
+    assert fields["steps"][0]["metadata"]["occurred_at_sao_paulo"] == expected
+    if expected is None:
+        assert fields["steps"][0]["occurred_at"] is None
+    else:
+        assert fields["steps"][0]["occurred_at"].isoformat() == expected
 
 
 def test_preserves_explicit_source_step_numbers_without_changing_internal_order() -> None:
@@ -178,5 +267,6 @@ def test_extracts_promotable_fields_from_tracking_fixture_without_documents() ->
         "name": "PARTE AUTORA TESTE",
         "side": "Active",
         "person_type": "Autor",
+        "masked_person_id": "***.***.***-00",
     }
     assert "00000000000" not in str(fields["parties"])
