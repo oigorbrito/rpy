@@ -76,6 +76,9 @@ O processo contém registros de distribuição, citação e sentença.
 
 ## Situação atual
 O último movimento fornecido é uma sentença.
+
+## Pontos de atenção
+Nenhuma divergência objetiva identificada.
 """
 
     monkeypatch.setattr(rag, "_generate", fake_generate)
@@ -161,8 +164,6 @@ O último movimento fornecido é uma sentença.
         tenant_id = uuid4()
         bearer_token = "e2e-tenant-token"
         monkeypatch.setenv("RPY_BEARER_TOKENS", json.dumps({bearer_token: str(tenant_id)}))
-        # Production auth is parsed once during lifespan; integration tests that
-        # bypass lifespan must update the same cached state explicitly.
         app.state.bearer_tokens = {bearer_token: tenant_id}
 
         async with pool.acquire() as conn:

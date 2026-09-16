@@ -8,10 +8,6 @@ from typing import Any
 
 _DIGITS_11_14_RE = re.compile(r"(?<!\d)\d{11}(?:\d{3})?(?!\d)")
 _CNJ_RE = re.compile(r"\b\d{7}-?\d{2}\.?\d{4}\.?\d\.?\d{2}\.?\d{4}\b")
-# Long unbroken numeric runs (protocol numbers, legacy autos numbers, unformatted
-# foreign identifiers) that do not match CNJ format still must match the payload
-# code. Shorter runs are not inspected to avoid false positives from dates, years,
-# amounts and small legible counts.
 _LONG_DIGITS_RE = re.compile(r"(?<!\d)\d{11,}(?!\d)")
 _CLASS_RE = re.compile(r"\bclass\s*=", re.IGNORECASE)
 _FORECAST_RE = re.compile(
@@ -142,6 +138,7 @@ def validar(
     code: str,
     parties: list[dict[str, Any]],
     steps: list[dict[str, Any]] | None = None,
+    expected_step_count: int | None = None,
     source_text: str | None = None,
     require_attention_section: bool = False,
 ) -> ValidationResult:
@@ -155,8 +152,6 @@ def validar(
         if _normalize_digits(found) != expected_cnj:
             errors.append(f"CNJ mismatch: {found}")
 
-    # Any long numeric reference that is not the exact payload code indicates a
-    # hallucinated/foreign process identifier, even without CNJ separators.
     for found in _LONG_DIGITS_RE.findall(text):
         if _normalize_digits(found) != expected_cnj:
             errors.append(f"CNJ mismatch: {found}")
@@ -170,13 +165,15 @@ def validar(
     if _FORECAST_RE.search(text):
         errors.append("prognostic language is prohibited")
 
-    if steps is not None:
-        expected_count = len(steps)
+    count_to_validate = expected_step_count
+    if count_to_validate is None and steps is not None:
+        count_to_validate = len(steps)
+    if count_to_validate is not None:
         for match in _MOVEMENT_COUNT_RE.finditer(text):
             stated_count = int(match.group("count"))
-            if stated_count != expected_count:
+            if stated_count != count_to_validate:
                 errors.append(
-                    f"movement count mismatch: stated {stated_count}, expected {expected_count}"
+                    f"movement count mismatch: stated {stated_count}, expected {count_to_validate}"
                 )
 
     if source_text is not None:

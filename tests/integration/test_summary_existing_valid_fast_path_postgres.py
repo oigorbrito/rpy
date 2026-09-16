@@ -101,6 +101,12 @@ async def test_existing_invalid_summary_still_regenerates(monkeypatch) -> None:
 
         context_calls = 0
         generation_calls = 0
+        valid_summary = """# Resumo do processo
+
+Resumo válido sem dados sensíveis.
+
+## Pontos de atenção
+Nenhuma divergência objetiva identificada."""
 
         async def fake_context(*args, **kwargs):
             nonlocal context_calls
@@ -113,13 +119,14 @@ async def test_existing_invalid_summary_still_regenerates(monkeypatch) -> None:
                 "parties": [],
                 "secrecy_level": 0,
                 "header": {},
+                "step_count": 0,
                 "steps": [],
             }
 
         async def fake_generate(client, context, validation_errors=None):
             nonlocal generation_calls
             generation_calls += 1
-            return "Resumo válido sem dados sensíveis."
+            return valid_summary
 
         monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
         monkeypatch.setattr("app.rag._load_context", fake_context)
@@ -145,7 +152,7 @@ async def test_existing_invalid_summary_still_regenerates(monkeypatch) -> None:
         assert result["persisted"] is True
         assert result["reused"] is False
         assert stored is not None
-        assert stored["markdown"] == "Resumo válido sem dados sensíveis."
+        assert stored["markdown"] == valid_summary
         assert stored["validation"]["passed"] is True
     finally:
         await pool.close()
