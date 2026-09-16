@@ -63,6 +63,8 @@ async def test_paginated_request_uses_only_lawsuit_for_rag_context(
         assert lawsuit_personal_id not in source
         assert "[documento removido]" in source
         assert "Sentença Proferida" in source
+        assert "2026-06-10T09:00:00-03:00" in source
+        assert "2026-06-11T09:00:00-03:00" in source
         return f"""# Resumo do processo
 
 <ProcessHeader className=\"process-header\">
