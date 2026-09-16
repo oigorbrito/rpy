@@ -75,6 +75,9 @@ jobs:
       - name: Release harness
         run: python scripts/release_harness.py
 
+      - name: Static Python quality
+        run: ruff check app scripts tests
+
       - name: Unit tests
         run: pytest -q tests --ignore=tests/integration
 
