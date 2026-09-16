@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+import importlib.util
 import re
 import socket
+from pathlib import Path
 
 import pytest
 
-from scripts.evaluate_synthetic_rag import evaluate, load_dataset
+_EVALUATOR_PATH = Path(__file__).resolve().parents[1] / "scripts" / "evaluate_synthetic_rag.py"
+_SPEC = importlib.util.spec_from_file_location("evaluate_synthetic_rag", _EVALUATOR_PATH)
+assert _SPEC is not None and _SPEC.loader is not None
+_EVALUATOR = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(_EVALUATOR)
+evaluate = _EVALUATOR.evaluate
+load_dataset = _EVALUATOR.load_dataset
 
 REQUIRED_DOMAINS = {"civil", "trabalhista", "criminal", "execucao_fiscal"}
 REQUIRED_TAGS = {
