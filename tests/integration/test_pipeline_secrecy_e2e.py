@@ -1,0 +1,234 @@
+from __future__ import annotations
+
+import os
+from uuid import uuid4
+
+import httpx
+import pytest
+
+import app.rag as rag
+from app.api import app
+from app.db import create_pool
+from app.json_utils import decode_json_object
+from app.migrations import migrate
+from app.worker import Worker, WorkerSettings
+
+TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
+pytestmark = pytest.mark.skipif(
+    not TEST_DATABASE_URL,
+    reason="TEST_DATABASE_URL is required for PostgreSQL integration tests",
+)
+
+
+@pytest.mark.asyncio
+async def test_secret_process_completes_locally_without_any_ai_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert TEST_DATABASE_URL is not None
+    await migrate(TEST_DATABASE_URL)
+
+    pool = await create_pool(TEST_DATABASE_URL, min_size=2, max_size=6)
+    app.state.pool = pool
+    monkeypatch.setenv("JUDIT_WEBHOOK_TOKEN", "secret-e2e-webhook")
+    monkeypatch.setenv("DATABASE_URL", TEST_DATABASE_URL)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            TRUNCATE jobs, judit_deliveries, process_summaries, process_steps,
+                     tenant_processes, access_log, process_versions, processes,
+                     tenants
+            RESTART IDENTITY CASCADE
+            """
+        )
+
+    request_id = f"req-secret-e2e-{uuid4()}"
+    response_id = f"resp-secret-e2e-{uuid4()}"
+    code = "0000000-00.2026.8.21.0997"
+    secret_party = "PARTE ULTRASSECRETA"
+    secret_subject = "ASSUNTO ULTRASSECRETO"
+    secret_movement = "CONTEUDO PROCESSUAL ULTRASSECRETO"
+    forbidden_header_name = "NOME INTERNO SIGILOSO"
+    forbidden_amount = "987654.32"
+
+    def forbidden_provider(*args, **kwargs):
+        raise AssertionError("secret proceedings must not create an external provider client")
+
+    async def forbidden_async_boundary(*args, **kwargs):
+        raise AssertionError("secret proceedings must not cross an AI/retrieval provider boundary")
+
+    monkeypatch.setattr(rag, "load_steps", forbidden_async_boundary)
+    monkeypatch.setattr(rag, "ensure_step_embeddings", forbidden_async_boundary)
+    monkeypatch.setattr(rag, "embed_query", forbidden_async_boundary)
+    monkeypatch.setattr(rag, "vector_search", forbidden_async_boundary)
+    monkeypatch.setattr(rag, "anthropic_client", forbidden_provider)
+    monkeypatch.setattr(rag, "_generate", forbidden_async_boundary)
+
+    transport = httpx.ASGITransport(app=app)
+    try:
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            lawsuit = await client.post(
+                "/webhooks/judit/secret-e2e-webhook",
+                json={
+                    "callback_id": f"cb-secret-response-{uuid4()}",
+                    "event_type": "response_created",
+                    "reference_type": "request",
+                    "reference_id": request_id,
+                    "payload": {
+                        "request_id": request_id,
+                        "response_id": response_id,
+                        "response_type": "lawsuit",
+                        "response_data": {
+                            "code": code,
+                            "classifications": [{"name": "Procedimento sob sigilo"}],
+                            "courts": [{"name": "TJRS"}],
+                            "secrecy_level": 2,
+                            "name": forbidden_header_name,
+                            "instance": 1,
+                            "area": "Cível",
+                            "state": "RS",
+                            "amount": forbidden_amount,
+                            "parties": [
+                                {
+                                    "name": secret_party,
+                                    "side": "Active",
+                                    "person_type": "Natural",
+                                }
+                            ],
+                            "subjects": [{"code": "S-1", "name": secret_subject}],
+                            "steps": [
+                                {
+                                    "step_id": "secret-step-1",
+                                    "step_date": "2026-01-10T12:00:00Z",
+                                    "step_type": "SEGREDO",
+                                    "content": secret_movement,
+                                },
+                                {
+                                    "step_id": "secret-step-2",
+                                    "step_date": "2026-02-10T12:00:00Z",
+                                    "step_type": "DECISÃO",
+                                    "content": "SEGUNDO CONTEUDO SENSIVEL",
+                                },
+                            ],
+                        },
+                        "tags": {"cached_response": False},
+                    },
+                },
+            )
+            assert lawsuit.status_code == 200
+
+            completed = await client.post(
+                "/webhooks/judit/secret-e2e-webhook",
+                json={
+                    "callback_id": f"cb-secret-completed-{uuid4()}",
+                    "event_type": "request_completed",
+                    "reference_type": "request",
+                    "reference_id": request_id,
+                    "payload": {"status": "completed"},
+                },
+            )
+            assert completed.status_code == 200
+
+        worker = Worker(
+            pool,
+            WorkerSettings(
+                database_url=TEST_DATABASE_URL,
+                concurrency=1,
+                heartbeat_interval_seconds=60,
+                stale_after_seconds=120,
+                task_timeout_seconds=20,
+                reclaim_interval_seconds=60,
+            ),
+        )
+
+        assert await worker.process_one() is True
+        assert await worker.process_one() is True
+        assert await worker.process_one() is False
+
+        async with pool.acquire() as conn:
+            process = await conn.fetchrow(
+                """
+                SELECT id, current_version_id, secrecy_level, parties, subjects, header
+                FROM processes
+                WHERE code = $1
+                """,
+                code,
+            )
+            assert process is not None
+            assert process["current_version_id"] is not None
+            assert int(process["secrecy_level"]) == 2
+
+            step_count = await conn.fetchval(
+                "SELECT count(*) FROM process_steps WHERE process_id = $1",
+                process["id"],
+            )
+            embedded_count = await conn.fetchval(
+                "SELECT count(*) FROM process_steps WHERE process_id = $1 AND embedding IS NOT NULL",
+                process["id"],
+            )
+            assert step_count == 2
+            assert embedded_count == 0
+
+            # Sensitive source data remains available only inside PostgreSQL for the
+            # application's normal retention/audit lifecycle; none of it was loaded
+            # into the generation context because every outbound boundary above is armed.
+            assert secret_party in str(process["parties"])
+            assert secret_subject in str(process["subjects"])
+            assert forbidden_header_name in str(process["header"])
+            assert forbidden_amount in str(process["header"])
+            assert await conn.fetchval(
+                "SELECT count(*) FROM process_steps WHERE process_id = $1 AND text = $2",
+                process["id"],
+                secret_movement,
+            ) == 1
+
+            summary = await conn.fetchrow(
+                """
+                SELECT markdown, validation, model, prompt_version
+                FROM process_summaries
+                WHERE process_id = $1 AND version_id = $2
+                """,
+                process["id"],
+                process["current_version_id"],
+            )
+            assert summary is not None
+            validation = decode_json_object(summary["validation"], label="summary validation")
+            assert validation["passed"] is True
+            assert summary["model"] == rag.SECRET_MODEL == "local-deterministic"
+            assert summary["prompt_version"] == rag.SECRET_PROMPT_VERSION == "secret-summary-v1"
+
+            markdown = summary["markdown"]
+            assert "sigilo" in markdown.casefold()
+            assert "Procedimento sob sigilo" in markdown
+            assert "Instância: 1" in markdown
+            assert "Área: Cível" in markdown
+            assert "Estado: RS" in markdown
+            for forbidden in (
+                code,
+                secret_party,
+                secret_subject,
+                secret_movement,
+                "SEGUNDO CONTEUDO SENSIVEL",
+                forbidden_header_name,
+                forbidden_amount,
+            ):
+                assert forbidden not in markdown
+
+            states = await conn.fetch(
+                """
+                SELECT task_name, status
+                FROM jobs
+                WHERE idempotency_key IN ($1, $2)
+                ORDER BY task_name
+                """,
+                f"judit-finalize:{request_id}",
+                f"summary:{process['current_version_id']}",
+            )
+            assert {row["task_name"]: str(row["status"]) for row in states} == {
+                "finalize_judit_request": "completed",
+                "generate_process_summary": "completed",
+            }
+    finally:
+        await pool.close()
