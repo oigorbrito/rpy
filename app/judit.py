@@ -10,6 +10,7 @@ _CNJ_CANONICAL_RE = re.compile(r"^\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}$")
 _CNJ_DIGITS_RE = re.compile(r"^\d{20}$")
 _PERSONAL_ID_RE = re.compile(r"(?<!\d)(?:\d{11}|\d{14})(?!\d)")
 _LEADING_STEP_NUMBER_RE = re.compile(r"^\s*\d+\s*(?:[-–—.:)]\s*|\s+)")
+_ELETRONICA_REFER_RE = re.compile(r"\bELETRÔNICAREFER\b", re.IGNORECASE)
 _GLUE_BOUNDARY_RE = re.compile(r"(?<=[a-záàâãéêíóôõúç])(?=[A-ZÁÀÂÃÉÊÍÓÔÕÚÇ])")
 _WHITESPACE_RE = re.compile(r"\s+")
 _SAO_PAULO = ZoneInfo("America/Sao_Paulo")
@@ -143,6 +144,34 @@ def parse_event(body: dict[str, Any]) -> JuditEvent:
     return event
 
 
+def _personal_id_digits(value: Any) -> str | None:
+    if value is None or isinstance(value, bool):
+        return None
+    digits = "".join(character for character in str(value) if character.isdigit())
+    return digits if len(digits) in {11, 14} else None
+
+
+def _party_personal_id(party: dict[str, Any]) -> str | None:
+    direct = _personal_id_digits(party.get("main_document"))
+    if direct:
+        return direct
+    for document in party.get("documents") or []:
+        if not isinstance(document, dict):
+            continue
+        candidate = _personal_id_digits(document.get("document"))
+        if candidate:
+            return candidate
+    return None
+
+
+def _masked_personal_id(value: str) -> str:
+    if len(value) == 11:
+        return f"***.***.***-{value[-2:]}"
+    if len(value) == 14:
+        return f"**.***.***/****-{value[-2:]}"
+    raise ValueError("personal id must contain 11 or 14 digits")
+
+
 def _safe_parties(process: dict[str, Any]) -> list[dict[str, Any]]:
     safe: list[dict[str, Any]] = []
     for party in process.get("parties") or []:
@@ -151,13 +180,15 @@ def _safe_parties(process: dict[str, Any]) -> list[dict[str, Any]]:
         name = str(party.get("name") or "").strip()
         if not name:
             continue
-        safe.append(
-            {
-                "name": name,
-                "side": party.get("side"),
-                "person_type": party.get("person_type"),
-            }
-        )
+        normalized = {
+            "name": name,
+            "side": party.get("side"),
+            "person_type": party.get("person_type"),
+        }
+        personal_id = _party_personal_id(party)
+        if personal_id:
+            normalized["masked_person_id"] = _masked_personal_id(personal_id)
+        safe.append(normalized)
     return safe
 
 
@@ -193,6 +224,7 @@ def _parse_datetime(value: Any) -> datetime | None:
 def _normalize_step_text(value: Any) -> str:
     text = str(value or "").replace("\u00a0", " ")
     text = _LEADING_STEP_NUMBER_RE.sub("", text, count=1)
+    text = _ELETRONICA_REFER_RE.sub("ELETRÔNICA REFER", text)
     text = _GLUE_BOUNDARY_RE.sub(" ", text)
     text = _WHITESPACE_RE.sub(" ", text).strip()
     return _PERSONAL_ID_RE.sub("[documento removido]", text)
