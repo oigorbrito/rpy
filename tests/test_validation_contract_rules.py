@@ -87,3 +87,70 @@ def test_rejects_empty_attention_section_when_required() -> None:
     )
     assert result.passed is False
     assert "Pontos de atenção section must not be empty" in result.errors
+
+
+def test_rejects_formatted_cpf_even_when_not_present_in_source() -> None:
+    result = validar(
+        text="Documento informado: 123.456.789-09.",
+        code=CODE,
+        parties=PARTIES,
+    )
+    assert result.passed is False
+    assert "possible unmasked CPF/CNPJ" in result.errors
+
+
+def test_rejects_formatted_cnpj_even_when_not_present_in_source() -> None:
+    result = validar(
+        text="Documento informado: 12.345.678/0001-90.",
+        code=CODE,
+        parties=PARTIES,
+    )
+    assert result.passed is False
+    assert "possible unmasked CPF/CNPJ" in result.errors
+
+
+def test_rejects_party_identifier_rendered_with_different_formatting() -> None:
+    parties = [
+        {
+            "name": "Maria da Silva",
+            "documents": [{"document_number": "1234567890"}],
+        }
+    ]
+    result = validar(
+        text="Identificador da parte: 123-456-789-0.",
+        code=CODE,
+        parties=parties,
+    )
+    assert result.passed is False
+    assert "personal identifier from party data is prohibited" in result.errors
+
+
+def test_accepts_unrelated_number_when_party_identifier_differs() -> None:
+    parties = [{"name": "Maria da Silva", "person_id": "1234567890"}]
+    result = validar(
+        text="Referência interna sintética: 987-654-321-0.",
+        code=CODE,
+        parties=parties,
+    )
+    assert "personal identifier from party data is prohibited" not in result.errors
+
+
+def test_secret_mode_rejects_source_party_name_without_role_label() -> None:
+    result = validar(
+        text="O conteúdo menciona Maria da Silva em texto corrido.",
+        code=CODE,
+        parties=PARTIES,
+        forbid_party_names=True,
+    )
+    assert result.passed is False
+    assert "party names are prohibited for secret summary" in result.errors
+
+
+def test_secret_mode_accepts_text_without_source_party_name() -> None:
+    result = validar(
+        text="Os detalhes processuais foram restringidos por sigilo.",
+        code=CODE,
+        parties=PARTIES,
+        forbid_party_names=True,
+    )
+    assert result.passed is True
