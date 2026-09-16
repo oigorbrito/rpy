@@ -5,7 +5,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-DEFAULT_DATASET = Path("tests/eval/synthetic_cases.json")
+REPO_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_DATASET = REPO_ROOT / "tests/eval/synthetic_cases.json"
 
 
 def _as_set(case: dict[str, Any], key: str) -> set[str]:
