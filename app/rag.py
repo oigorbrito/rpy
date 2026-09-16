@@ -27,8 +27,6 @@ PROMPT_VERSION = "process-summary-v2"
 SECRET_MODEL = "local-deterministic"
 SECRET_PROMPT_VERSION = "secret-summary-v1"
 REQUESTED_TEMPERATURE = 0.2
-# Historical design intent is temperature=0.2. Claude Sonnet 5 currently rejects
-# non-default sampling parameters, so the production request must omit temperature.
 SONNET_5_SUPPORTS_CUSTOM_TEMPERATURE = False
 RETRIEVAL_QUERY = (
     "sentença acórdão citação decisão audiência pedido objeto situação atual "
@@ -159,8 +157,6 @@ async def _load_context(
 ) -> dict[str, Any]:
     base = await _load_process(pool, process_id, version_id)
 
-    # LGPD blocker: secret proceedings expose only the allowed header and class;
-    # no parties, subjects, movement text or embeddings leave the database.
     if base["secrecy_level"] > 0:
         return {
             "code": base["code"],
@@ -175,9 +171,9 @@ async def _load_context(
     async with pool.acquire() as conn:
         steps = await load_steps(conn, version_id=version_id)
 
+    base["step_count"] = len(steps)
     vector_scores: dict[UUID, float] | None = None
     if len(steps) > 40:
-        # Embeddings are conditional: short proceedings never pay the vector cost.
         await ensure_step_embeddings(pool, version_id=version_id)
         query_vector = await embed_query(RETRIEVAL_QUERY)
         async with pool.acquire() as conn:
@@ -203,7 +199,6 @@ def _is_secret_context(context: dict[str, Any]) -> bool:
 
 
 def _secret_summary(context: dict[str, Any]) -> str:
-    """Build the minimum useful summary without invoking an external model."""
     lines = [
         "# Resumo do processo",
         "",
@@ -232,7 +227,6 @@ def _secret_summary(context: dict[str, Any]) -> str:
 
 
 def _provider_payload(context: dict[str, Any]) -> tuple[dict[str, Any], list[Any]]:
-    """Return the exact data boundary allowed to leave the application."""
     if _is_secret_context(context):
         return (
             {
@@ -245,6 +239,26 @@ def _provider_payload(context: dict[str, Any]) -> tuple[dict[str, Any], list[Any
     return (
         {key: value for key, value in context.items() if key != "steps"},
         list(context.get("steps", [])),
+    )
+
+
+def _provider_source_text(context: dict[str, Any]) -> str:
+    provider_process, provider_steps = _provider_payload(context)
+    return json.dumps(
+        {"processo": provider_process, "movimentos": provider_steps},
+        ensure_ascii=False,
+        default=str,
+    )
+
+
+def _validate_provider_summary(text: str, context: dict[str, Any]) -> ValidationResult:
+    return validar(
+        text=text,
+        code=context["code"],
+        parties=context.get("parties", []),
+        expected_step_count=int(context.get("step_count") or 0),
+        source_text=_provider_source_text(context),
+        require_attention_section=True,
     )
 
 
@@ -314,13 +328,6 @@ async def _persist_summary(
     model: str = MODEL,
     prompt_version: str = PROMPT_VERSION,
 ) -> bool:
-    """Persist without allowing duplicate/stale executions to degrade a valid summary.
-
-    Invalid summaries may be replaced by later attempts. Once a valid summary exists,
-    only a valid result from a different prompt/model revision may replace it. An
-    invalid duplicate can therefore never overwrite content already accepted by the
-    validator.
-    """
     row = await conn.fetchrow(
         """
         INSERT INTO process_summaries (
@@ -359,7 +366,6 @@ async def _load_publishable_summary(
     process_id: UUID,
     version_id: UUID,
 ) -> dict[str, Any] | None:
-    """Return an already accepted summary only while the version is still current."""
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
@@ -421,18 +427,10 @@ async def generate_summary(
         client = anthropic_client(api_key)
 
         text = await _generate(client, context)
-        result = validar(
-            text=text,
-            code=context["code"],
-            parties=context.get("parties", []),
-        )
+        result = _validate_provider_summary(text, context)
         if not result.passed:
             text = await _generate(client, context, result.errors)
-            result = validar(
-                text=text,
-                code=context["code"],
-                parties=context.get("parties", []),
-            )
+            result = _validate_provider_summary(text, context)
 
     generation_ms = max(0, round((perf_counter() - started) * 1000))
     validation = {"passed": result.passed, "errors": result.errors}
