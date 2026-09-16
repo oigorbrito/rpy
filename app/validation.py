@@ -6,9 +6,16 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-_DIGITS_11_14_RE = re.compile(r"(?<!\d)\d{11}(?:\d{3})?(?!\d)")
+_CPF_CNPJ_RE = re.compile(
+    r"(?<!\d)(?:\d{3}\.?\d{3}\.?\d{3}-?\d{2}|\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2})(?!\d)"
+)
 _CNJ_RE = re.compile(r"\b\d{7}-?\d{2}\.?\d{4}\.?\d\.?\d{2}\.?\d{4}\b")
 _LONG_DIGITS_RE = re.compile(r"(?<!\d)\d{11,}(?!\d)")
+_PERSONAL_ID_KEY_RE = re.compile(
+    r"(?:^|_)(?:cpf|cnpj|document|document_number|tax_id|person_id|national_id|identifier|id)(?:$|_)",
+    re.IGNORECASE,
+)
+_IDENTIFIER_TOKEN_RE = re.compile(r"(?<!\d)(?:\d[\s./-]?){7,}\d(?!\d)")
 _CLASS_RE = re.compile(r"\bclass\s*=", re.IGNORECASE)
 _FORECAST_RE = re.compile(
     r"provavelmente\s+ser[áa]\s+condenad|chances?\s+de|tende\s+a\s+ganhar|recomendo\s+que",
@@ -56,7 +63,9 @@ def _normalize_digits(value: str) -> str:
 
 def _normalize_party_name(value: str) -> str:
     decomposed = unicodedata.normalize("NFKD", value)
-    without_marks = "".join(character for character in decomposed if not unicodedata.combining(character))
+    without_marks = "".join(
+        character for character in decomposed if not unicodedata.combining(character)
+    )
     words = re.findall(r"[\w]+", without_marks.casefold(), flags=re.UNICODE)
     return " ".join(words)
 
@@ -80,6 +89,48 @@ def _mentioned_party_names(text: str) -> set[str]:
         normalized
         for name in raw_names
         if (normalized := _normalize_party_name(name))
+    }
+
+
+def _party_names_present_verbatim(text: str, parties: list[dict[str, Any]]) -> set[str]:
+    normalized_text = f" {_normalize_party_name(text)} "
+    return {
+        name
+        for name in _party_names(parties)
+        if f" {name} " in normalized_text
+    }
+
+
+def _personal_identifiers(value: Any, *, key: str = "") -> set[str]:
+    identifiers: set[str] = set()
+    if isinstance(value, dict):
+        for child_key, child_value in value.items():
+            identifiers.update(_personal_identifiers(child_value, key=str(child_key)))
+        return identifiers
+    if isinstance(value, list):
+        for child in value:
+            identifiers.update(_personal_identifiers(child, key=key))
+        return identifiers
+    if not _PERSONAL_ID_KEY_RE.search(key):
+        return identifiers
+    digits = _normalize_digits(str(value))
+    if len(digits) >= 8:
+        identifiers.add(digits)
+    return identifiers
+
+
+def _party_identifiers(parties: list[dict[str, Any]]) -> set[str]:
+    identifiers: set[str] = set()
+    for party in parties:
+        identifiers.update(_personal_identifiers(party))
+    return identifiers
+
+
+def _rendered_identifiers(text: str) -> set[str]:
+    return {
+        digits
+        for match in _IDENTIFIER_TOKEN_RE.finditer(text)
+        if len(digits := _normalize_digits(match.group(0))) >= 8
     }
 
 
@@ -141,11 +192,16 @@ def validar(
     expected_step_count: int | None = None,
     source_text: str | None = None,
     require_attention_section: bool = False,
+    forbid_party_names: bool = False,
 ) -> ValidationResult:
     errors: list[str] = []
 
-    if _DIGITS_11_14_RE.search(text):
+    if _CPF_CNPJ_RE.search(text):
         errors.append("possible unmasked CPF/CNPJ")
+
+    leaked_identifiers = _party_identifiers(parties) & _rendered_identifiers(text)
+    if leaked_identifiers:
+        errors.append("personal identifier from party data is prohibited")
 
     expected_cnj = _normalize_digits(code)
     for found in _CNJ_RE.findall(text):
@@ -156,11 +212,15 @@ def validar(
         if _normalize_digits(found) != expected_cnj:
             errors.append(f"CNJ mismatch: {found}")
 
-    allowed_parties = _party_names(parties)
-    mentioned_names = _mentioned_party_names(text)
-    unknown = sorted(name for name in mentioned_names if name not in allowed_parties)
-    if unknown:
-        errors.append("hallucinated parties: " + ", ".join(unknown))
+    if forbid_party_names:
+        if _party_names_present_verbatim(text, parties):
+            errors.append("party names are prohibited for secret summary")
+    else:
+        allowed_parties = _party_names(parties)
+        mentioned_names = _mentioned_party_names(text)
+        unknown = sorted(name for name in mentioned_names if name not in allowed_parties)
+        if unknown:
+            errors.append("hallucinated parties: " + ", ".join(unknown))
 
     if _FORECAST_RE.search(text):
         errors.append("prognostic language is prohibited")
