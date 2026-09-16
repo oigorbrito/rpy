@@ -83,7 +83,7 @@ async def test_invalid_summary_is_persisted_for_ops_but_never_published(
     app.state.pool = pool
     bearer = "validation-publication-bearer"
     ops = "validation-publication-ops"
-    monkeypatch.setenv("RPY_BEARER_TOKENS", json.dumps({bearer: str(tenant_id)}))
+    app.state.bearer_tokens = {bearer: tenant_id}
     monkeypatch.setenv("RPY_OPS_TOKEN", ops)
 
     transport = httpx.ASGITransport(app=app)
