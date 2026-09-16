@@ -10,7 +10,7 @@ Each case stores the expected labels and a synthetic candidate snapshot. The can
 
 ## Metrics
 
-`scripts/evaluate_synthetic_rag.py` computes four aggregate metrics:
+`scripts/evaluate_synthetic_rag.py` computes four aggregate metrics and the same metrics per case:
 
 - `unsupported_assertion_rate`: unsupported labelled claims divided by all candidate claims;
 - `milestone_recall`: expected process milestones recovered by the candidate divided by all expected milestones;
@@ -24,20 +24,42 @@ For the initial 30-case baseline the versioned snapshot scores:
 - inconsistency detection recall: `17/18` (`~0.9444`);
 - attention false-positive rate: `1/19` (`~0.0526`).
 
-These values are descriptive baseline measurements, not acceptance thresholds and not claims about production legal accuracy.
+These values are descriptive baseline measurements, not claims about production legal accuracy.
+
+## Versioned non-regression gate
+
+`tests/eval/baseline.json` records the reviewed baseline. It contains:
+
+- a dataset version plus the exact Git blob SHA of the dataset;
+- the configured model and prompt version;
+- retrieval parameters that materially affect candidate selection;
+- aggregate non-regression thresholds;
+- per-case defaults and explicit exceptions matching the measured baseline.
+
+The initial threshold policy is deliberately conservative: **no metric may become worse than the reviewed baseline**. No extra universal safety margin is invented. A better result passes without requiring a baseline update; changing the dataset, model, prompt version or recorded retrieval configuration requires an explicit baseline update in the same reviewed change.
+
+Per-case failures identify the `case_id` and metric that regressed. Aggregate failures identify the metric and documented threshold. This makes the CI failure attributable rather than a single opaque score.
+
+Run the gate locally with:
+
+```bash
+python scripts/evaluate_synthetic_rag.py --check-baseline
+```
+
+The CI runs the same command with provider credentials blank. A non-zero exit is produced only when the versioned baseline contract is violated.
 
 ## Reproduction
 
-Run:
+Run the descriptive report without the gate:
 
 ```bash
 python scripts/evaluate_synthetic_rag.py
 ```
 
-The evaluator uses only Python standard-library code and local repository data. Unit coverage also blocks socket connection attempts while the scorer runs. Judit, Anthropic, OpenAI and Gemini are not required or contacted by this baseline.
+The evaluator uses only local repository data. Unit coverage blocks socket connection attempts while both the scorer and baseline comparison run. Judit, Anthropic, OpenAI and Gemini are not required or contacted by this evaluation.
 
 ## Limitations and next work
 
-The initial corpus scores versioned synthetic candidate annotations. It does not yet execute the full offline generation pipeline against each case, so it cannot by itself measure end-to-end generation quality. It also does not establish that the synthetic distribution represents live Brazilian court data.
+The current corpus still scores versioned synthetic candidate annotations. The non-regression gate therefore protects this reviewed synthetic baseline but does not yet execute the full offline generation pipeline against each case and cannot by itself measure end-to-end generation quality.
 
-The next step for #115 is to connect the same labelled corpus to the provider-free application pipeline and derive candidate annotations from actual offline pipeline outputs while preserving deterministic execution. Only then should metric deltas be interpreted as regressions or improvements in the implementation rather than changes to the manually versioned baseline.
+The next #115 block is to derive candidate outputs from the provider-free application pipeline while preserving deterministic execution, then extend the baseline to retrieval precision/relevance, source presence and restricted-content leakage using those actual pipeline outputs. Only then should metric deltas be interpreted as broader implementation-quality evidence rather than changes to the manually versioned candidate snapshot.
