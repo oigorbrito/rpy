@@ -2,11 +2,17 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 _CNJ_CANONICAL_RE = re.compile(r"^\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}$")
 _CNJ_DIGITS_RE = re.compile(r"^\d{20}$")
+_PERSONAL_ID_RE = re.compile(r"(?<!\d)(?:\d{11}|\d{14})(?!\d)")
+_LEADING_STEP_NUMBER_RE = re.compile(r"^\s*\d+\s*(?:[-–—.:)]\s*|\s+)")
+_GLUE_BOUNDARY_RE = re.compile(r"(?<=[a-záàâãéêíóôõúç])(?=[A-ZÁÀÂÃÉÊÍÓÔÕÚÇ])")
+_WHITESPACE_RE = re.compile(r"\s+")
+_SAO_PAULO = ZoneInfo("America/Sao_Paulo")
 
 
 @dataclass(slots=True)
@@ -162,43 +168,30 @@ def _parse_datetime(value: Any) -> datetime | None:
     if value is None or value == "":
         return None
     if isinstance(value, datetime):
-        return value
-    if isinstance(value, str):
+        parsed = value
+    elif isinstance(value, str):
         normalized = value.strip().replace("Z", "+00:00")
         try:
-            return datetime.fromisoformat(normalized)
+            parsed = datetime.fromisoformat(normalized)
         except ValueError:
             return None
-    return None
+    else:
+        return None
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(_SAO_PAULO)
+
+
+def _normalize_step_text(value: Any) -> str:
+    text = str(value or "").replace("\u00a0", " ")
+    text = _LEADING_STEP_NUMBER_RE.sub("", text, count=1)
+    text = _GLUE_BOUNDARY_RE.sub(" ", text)
+    text = _WHITESPACE_RE.sub(" ", text).strip()
+    return _PERSONAL_ID_RE.sub("[documento removido]", text)
 
 
 def extract_promotable_fields(process: dict[str, Any]) -> dict[str, Any]:
-    steps = process.get("steps") or process.get("movements") or process.get("events") or []
-    normalized_steps: list[dict[str, Any]] = []
-    for index, step in enumerate(steps, start=1):
-        if not isinstance(step, dict):
-            continue
-        step_date = (
-            step.get("step_date")
-            or step.get("occurred_at")
-            or step.get("date")
-            or step.get("datetime")
-        )
-        normalized_steps.append(
-            {
-                "step_number": index,
-                "occurred_at": _parse_datetime(step_date),
-                "title": step.get("step_type") or step.get("title") or step.get("type"),
-                "text": step.get("content") or step.get("text") or step.get("description") or "",
-                "metadata": {
-                    "step_id": step.get("step_id"),
-                    "private": step.get("private"),
-                    "tags": step.get("tags") or {},
-                    "source_step_date": step_date,
-                },
-            }
-        )
-
     classifications = process.get("classifications") or []
     class_name = None
     if classifications and isinstance(classifications[0], dict):
@@ -209,6 +202,15 @@ def extract_promotable_fields(process: dict[str, Any]) -> dict[str, Any]:
     court = process.get("tribunal_acronym") or process.get("court")
     if not court and courts and isinstance(courts[0], dict):
         court = courts[0].get("name") or courts[0].get("code")
+
+    secrecy_level = int(process.get("secrecy_level") or process.get("secrecyLevel") or 0)
+    raw_code = process.get("code") or process.get("process_code")
+    code = None
+    if raw_code:
+        try:
+            code = normalize_cnj(str(raw_code))
+        except ValueError:
+            code = str(raw_code).strip() or None
 
     header = {
         key: process.get(key)
@@ -225,6 +227,42 @@ def extract_promotable_fields(process: dict[str, Any]) -> dict[str, Any]:
         if process.get(key) is not None
     }
 
+    steps = process.get("steps") or process.get("movements") or process.get("events") or []
+    normalized_steps: list[dict[str, Any]] = []
+    for index, step in enumerate(steps, start=1):
+        if not isinstance(step, dict):
+            continue
+        step_date = (
+            step.get("step_date")
+            or step.get("occurred_at")
+            or step.get("date")
+            or step.get("datetime")
+        )
+        step_type = step.get("step_type") or step.get("title") or step.get("type")
+        raw_text = step.get("content") or step.get("text") or step.get("description") or ""
+        occurred_at = _parse_datetime(step_date)
+        normalized_steps.append(
+            {
+                "step_number": index,
+                "occurred_at": occurred_at,
+                "title": step_type,
+                "text": _normalize_step_text(raw_text),
+                "metadata": {
+                    "cnj": code,
+                    "instance": process.get("instance"),
+                    "court": court,
+                    "type": step_type,
+                    "step_id": step.get("step_id"),
+                    "step_number": index,
+                    "private": step.get("private"),
+                    "secrecy_level": secrecy_level,
+                    "tags": step.get("tags") or {},
+                    "source_step_date": step_date,
+                    "occurred_at_sao_paulo": occurred_at.isoformat() if occurred_at else None,
+                },
+            }
+        )
+
     return {
         "header": header,
         "parties": _safe_parties(process),
@@ -232,5 +270,5 @@ def extract_promotable_fields(process: dict[str, Any]) -> dict[str, Any]:
         "steps": normalized_steps,
         "court": court,
         "class_name": class_name,
-        "secrecy_level": int(process.get("secrecy_level") or process.get("secrecyLevel") or 0),
+        "secrecy_level": secrecy_level,
     }
