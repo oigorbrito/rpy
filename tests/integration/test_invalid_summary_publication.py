@@ -108,9 +108,6 @@ async def test_invalid_summary_is_persisted_for_ops_but_never_published(
         assert failed.status_code == 200
         failed_body = failed.json()
         assert failed_body["failed_summaries"]
-        assert any(
-            item.get("process_code") == code
-            for item in failed_body["failed_summaries"]
-        )
+        assert any(item.get("code") == code for item in failed_body["failed_summaries"])
     finally:
         await pool.close()
