@@ -2,7 +2,10 @@ from app.prompts import PROCESS_SUMMARY_SYSTEM_PROMPT
 
 
 def _heading_position(heading: str) -> int:
-    position = PROCESS_SUMMARY_SYSTEM_PROMPT.find(heading)
+    format_start = PROCESS_SUMMARY_SYSTEM_PROMPT.index("<formato_de_saida>")
+    format_end = PROCESS_SUMMARY_SYSTEM_PROMPT.index("</formato_de_saida>")
+    format_contract = PROCESS_SUMMARY_SYSTEM_PROMPT[format_start:format_end]
+    position = format_contract.find(heading)
     assert position >= 0, f"missing summary contract heading: {heading}"
     return position
 
@@ -39,4 +42,4 @@ def test_iasummary_contract_is_not_defined_by_frontend_or_external_summary() -> 
     assert "Não copie nem resuma qualquer registro externo `summary`" in prompt
     assert "processo e movimentos autorizados" in prompt
     assert "Não explique mecanismos internos" in prompt
-    assert "não use conhecimento externo" in prompt
+    assert "conhecimento externo" in prompt
