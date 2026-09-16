@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Any
 from uuid import UUID
 
 import asyncpg
@@ -216,6 +218,33 @@ async def authenticate_api_key(
                 api_key_fingerprint=str(key["fingerprint"]),
                 rate_limit_remaining=remaining,
             )
+
+
+async def log_principal_access(
+    conn: asyncpg.Connection,
+    *,
+    principal: RequestPrincipal,
+    process_id: UUID | None,
+    process_code: str,
+    action: str,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    await conn.execute(
+        """
+        INSERT INTO access_log (
+            tenant_id, process_id, process_code, action, metadata,
+            api_key_id, api_key_fingerprint
+        )
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)
+        """,
+        principal.tenant_id,
+        process_id,
+        process_code,
+        action,
+        json.dumps(metadata or {}),
+        principal.api_key_id,
+        principal.api_key_fingerprint,
+    )
 
 
 def apply_rate_limit_headers(response: Response, principal: RequestPrincipal) -> None:
