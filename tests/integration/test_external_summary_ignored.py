@@ -69,7 +69,7 @@ async def test_external_judit_summary_is_recorded_but_never_promoted_or_publishe
         async with pool.acquire() as conn:
             delivery = await conn.fetchrow(
                 """
-                SELECT callback_id, response_type
+                SELECT callback_id, event_type, raw_payload
                 FROM judit_deliveries
                 WHERE callback_id = $1
                 """,
@@ -90,7 +90,9 @@ async def test_external_judit_summary_is_recorded_but_never_promoted_or_publishe
 
         assert delivery is not None
         assert delivery["callback_id"] == callback_id
-        assert delivery["response_type"] == "summary"
+        assert delivery["event_type"] == "response_created"
+        assert delivery["raw_payload"]["payload"]["response_type"] == "summary"
+        assert external_summary in str(delivery["raw_payload"])
         assert process_count == 0
         assert version_count == 0
         assert summary_count == 0
