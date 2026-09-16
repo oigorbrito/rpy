@@ -5,7 +5,7 @@ import asyncio
 import logging
 import os
 import signal
-from contextlib import suppress
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID, uuid4
@@ -18,10 +18,25 @@ import app.rag  # noqa: F401 - imports task registrations
 from app.db import create_pool
 from app.json_utils import decode_json_object
 from app.log_safety import sanitize_error_message
+from app.public_lifecycle_worker import (
+    mark_job_dead,
+    mark_job_started,
+    reconcile_generation_result,
+)
 from app.queue import claim, complete, fail, heartbeat, reclaim_stale
 from app.tasks import PermanentTaskError, resolve_task
 
 logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def _transaction(conn):
+    transaction = getattr(conn, "transaction", None)
+    if transaction is None:
+        yield
+        return
+    async with transaction():
+        yield
 
 
 @dataclass(slots=True)
@@ -104,15 +119,26 @@ class Worker:
 
     async def _run_job(self, row: asyncpg.Record) -> None:
         job_id = row["id"]
+        task_name = str(row["task_name"])
+        payload: dict[str, Any] = {}
         heartbeat_task: asyncio.Task[None] | None = None
         try:
             handler, payload = _resolve_job_contract(row)
+            async with self.pool.acquire() as conn:
+                await mark_job_started(conn, task_name=task_name, payload=payload)
             heartbeat_task = asyncio.create_task(self._heartbeat_loop(job_id))
             result = await asyncio.wait_for(
                 handler(payload), timeout=self.settings.task_timeout_seconds
             )
             async with self.pool.acquire() as conn:
-                await complete(conn, job_id, self.worker_id, result or {})
+                async with _transaction(conn):
+                    if task_name == "generate_process_summary":
+                        await reconcile_generation_result(
+                            conn,
+                            payload=payload,
+                            result=result,
+                        )
+                    await complete(conn, job_id, self.worker_id, result or {})
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -126,14 +152,22 @@ class Worker:
                 safe_detail,
             )
             async with self.pool.acquire() as conn:
-                await fail(
-                    conn,
-                    job_id,
-                    self.worker_id,
-                    attempts=int(row["attempts"]),
-                    error=f"{type(exc).__name__}: {safe_detail}",
-                    permanent=permanent,
-                )
+                async with _transaction(conn):
+                    next_status = await fail(
+                        conn,
+                        job_id,
+                        self.worker_id,
+                        attempts=int(row["attempts"]),
+                        error=f"{type(exc).__name__}: {safe_detail}",
+                        permanent=permanent,
+                    )
+                    if next_status == "dead":
+                        await mark_job_dead(
+                            conn,
+                            task_name=task_name,
+                            payload=payload,
+                            error_code="job_failed",
+                        )
         finally:
             if heartbeat_task is not None:
                 heartbeat_task.cancel()
@@ -165,7 +199,21 @@ class Worker:
     async def _reclaimer_loop(self) -> None:
         while not self.stop_event.is_set():
             async with self.pool.acquire() as conn:
-                reclaimed = await reclaim_stale(conn, self.settings.stale_after_seconds)
+                async with _transaction(conn):
+                    reclaimed = await reclaim_stale(conn, self.settings.stale_after_seconds)
+                    for row in reclaimed:
+                        if str(row["status"]) != "dead":
+                            continue
+                        try:
+                            payload = _decode_payload(row["payload"])
+                        except (TypeError, ValueError):
+                            payload = {}
+                        await mark_job_dead(
+                            conn,
+                            task_name=str(row["task_name"]),
+                            payload=payload,
+                            error_code="job_reclaim_exhausted",
+                        )
             if reclaimed:
                 logger.warning("reclaimed %s stale jobs", len(reclaimed))
             try:

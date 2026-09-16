@@ -71,6 +71,12 @@ async def test_runtime_database_roles_are_least_privilege(monkeypatch: pytest.Mo
         assert await admin.fetchval(
             "SELECT has_table_privilege('rpy_api', 'access_log', 'INSERT')"
         )
+        assert await admin.fetchval(
+            "SELECT has_table_privilege('rpy_api', 'public_summary_requests', 'SELECT,INSERT,UPDATE')"
+        )
+        assert not await admin.fetchval(
+            "SELECT has_table_privilege('rpy_api', 'public_summary_requests', 'DELETE')"
+        )
         assert not await admin.fetchval(
             "SELECT has_table_privilege('rpy_api', 'processes', 'DELETE')"
         )
@@ -83,6 +89,18 @@ async def test_runtime_database_roles_are_least_privilege(monkeypatch: pytest.Mo
         )
         assert await admin.fetchval(
             "SELECT has_table_privilege('rpy_worker', 'process_steps', 'DELETE')"
+        )
+        assert await admin.fetchval(
+            "SELECT has_table_privilege('rpy_worker', 'public_summary_requests', 'SELECT,UPDATE')"
+        )
+        assert await admin.fetchval(
+            "SELECT has_table_privilege('rpy_worker', 'tenant_judit_requests', 'SELECT,UPDATE')"
+        )
+        assert await admin.fetchval(
+            "SELECT has_table_privilege('rpy_worker', 'tenant_processes', 'SELECT,INSERT')"
+        )
+        assert not await admin.fetchval(
+            "SELECT has_table_privilege('rpy_worker', 'public_summary_requests', 'DELETE')"
         )
         assert not await admin.fetchval(
             "SELECT has_table_privilege('rpy_worker', 'processes', 'DELETE')"
@@ -113,6 +131,7 @@ async def test_runtime_database_roles_are_least_privilege(monkeypatch: pytest.Mo
     api = await asyncpg.connect(urls["API_DATABASE_URL"])
     try:
         assert await api.fetchval("SELECT count(*) FROM processes") is not None
+        assert await api.fetchval("SELECT count(*) FROM public_summary_requests") is not None
         with pytest.raises(asyncpg.InsufficientPrivilegeError):
             await api.execute("CREATE TABLE db_role_escape_probe (id integer)")
     finally:
