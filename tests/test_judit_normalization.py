@@ -32,8 +32,14 @@ def test_normalizes_step_text_redacts_ids_and_preserves_chunk_metadata() -> None
     )
 
     assert fields["parties"] == [
-        {"name": "PARTE TESTE", "side": "Active", "person_type": "Natural"}
+        {
+            "name": "PARTE TESTE",
+            "side": "Active",
+            "person_type": "Natural",
+            "masked_person_id": "***.***.***-01",
+        }
     ]
+    assert "12345678901" not in str(fields["parties"])
     step = fields["steps"][0]
     assert step["step_number"] == 1
     assert step["text"] == "Sentença Proferida para CPF [documento removido] após audiência"
