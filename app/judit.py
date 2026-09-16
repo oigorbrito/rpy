@@ -21,6 +21,19 @@ _SOURCE_STEP_NUMBER_KEYS = (
     "movement_number",
     "sequence_number",
 )
+_SECRET_HEADER_KEYS = (
+    "instance",
+    "area",
+    "justice_description",
+    "county",
+    "state",
+    "city",
+)
+_PUBLIC_HEADER_KEYS = (
+    "name",
+    *_SECRET_HEADER_KEYS,
+    "amount",
+)
 
 
 @dataclass(slots=True)
@@ -265,20 +278,28 @@ def extract_promotable_fields(process: dict[str, Any]) -> dict[str, Any]:
         except ValueError:
             code = str(raw_code).strip() or None
 
+    header_keys = _SECRET_HEADER_KEYS if secrecy_level > 0 else _PUBLIC_HEADER_KEYS
     header = {
         key: process.get(key)
-        for key in (
-            "name",
-            "instance",
-            "area",
-            "justice_description",
-            "county",
-            "state",
-            "city",
-            "amount",
-        )
+        for key in header_keys
         if process.get(key) is not None
     }
+
+    # Secret source payloads remain retained in process_versions according to the
+    # retention policy, but restricted parties/subjects/movements must never be
+    # promoted into the normalized retrieval surface. Returning before movement
+    # normalization also prevents restricted text from being materialized as a
+    # lexical/vector candidate in application memory.
+    if secrecy_level > 0:
+        return {
+            "header": header,
+            "parties": [],
+            "subjects": [],
+            "steps": [],
+            "court": court,
+            "class_name": class_name,
+            "secrecy_level": secrecy_level,
+        }
 
     steps = process.get("steps") or process.get("movements") or process.get("events") or []
     normalized_steps: list[dict[str, Any]] = []

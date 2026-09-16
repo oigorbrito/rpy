@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from uuid import uuid4
 
@@ -50,6 +51,7 @@ async def test_secret_process_completes_locally_without_any_ai_provider(
     secret_party = "PARTE ULTRASSECRETA"
     secret_subject = "ASSUNTO ULTRASSECRETO"
     secret_movement = "CONTEUDO PROCESSUAL ULTRASSECRETO"
+    second_secret_movement = "SEGUNDO CONTEUDO SENSIVEL"
     forbidden_header_name = "NOME INTERNO SIGILOSO"
     forbidden_amount = "987654.32"
 
@@ -109,7 +111,7 @@ async def test_secret_process_completes_locally_without_any_ai_provider(
                                     "step_id": "secret-step-2",
                                     "step_date": "2026-02-10T12:00:00Z",
                                     "step_type": "DECISÃO",
-                                    "content": "SEGUNDO CONTEUDO SENSIVEL",
+                                    "content": second_secret_movement,
                                 },
                             ],
                         },
@@ -168,21 +170,50 @@ async def test_secret_process_completes_locally_without_any_ai_provider(
                 "SELECT count(*) FROM process_steps WHERE process_id = $1 AND embedding IS NOT NULL",
                 process["id"],
             )
-            assert step_count == 2
+            assert step_count == 0
             assert embedded_count == 0
 
-            # Sensitive source data remains available only inside PostgreSQL for the
-            # application's normal retention/audit lifecycle; none of it was loaded
-            # into the generation context because every outbound boundary above is armed.
-            assert secret_party in str(process["parties"])
-            assert secret_subject in str(process["subjects"])
-            assert forbidden_header_name in str(process["header"])
-            assert forbidden_amount in str(process["header"])
-            assert await conn.fetchval(
-                "SELECT count(*) FROM process_steps WHERE process_id = $1 AND text = $2",
-                process["id"],
+            # Restricted content is retained only in the immutable raw Judit source
+            # according to retention policy. It is never promoted into normalized
+            # process fields or the lexical/vector retrieval surface.
+            source_payload = await conn.fetchval(
+                "SELECT source_payload FROM process_versions WHERE id = $1",
+                process["current_version_id"],
+            )
+            raw_source = json.dumps(source_payload, ensure_ascii=False, default=str)
+            for restricted in (
+                secret_party,
+                secret_subject,
                 secret_movement,
-            ) == 1
+                second_secret_movement,
+                forbidden_header_name,
+                forbidden_amount,
+            ):
+                assert restricted in raw_source
+
+            normalized = json.dumps(
+                {
+                    "parties": process["parties"],
+                    "subjects": process["subjects"],
+                    "header": process["header"],
+                },
+                ensure_ascii=False,
+                default=str,
+            )
+            for restricted in (
+                secret_party,
+                secret_subject,
+                secret_movement,
+                second_secret_movement,
+                forbidden_header_name,
+                forbidden_amount,
+            ):
+                assert restricted not in normalized
+
+            assert process["parties"] == []
+            assert process["subjects"] == []
+            header = decode_json_object(process["header"], label="secret process header")
+            assert header == {"instance": 1, "area": "Cível", "state": "RS"}
 
             summary = await conn.fetchrow(
                 """
@@ -210,7 +241,7 @@ async def test_secret_process_completes_locally_without_any_ai_provider(
                 secret_party,
                 secret_subject,
                 secret_movement,
-                "SEGUNDO CONTEUDO SENSIVEL",
+                second_secret_movement,
                 forbidden_header_name,
                 forbidden_amount,
             ):
