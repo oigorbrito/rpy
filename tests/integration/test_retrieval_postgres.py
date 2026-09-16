@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import pytest
 
+import app.rag as rag
 from app.db import create_pool
 from app.migrations import migrate
 from app.retrieval import (
@@ -23,7 +24,9 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.mark.asyncio
-async def test_long_process_hybrid_retrieval_uses_postgres_lexical_pgvector_and_mandatory_steps() -> None:
+async def test_long_process_hybrid_retrieval_uses_postgres_lexical_pgvector_and_mandatory_steps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     assert TEST_DATABASE_URL is not None
     await migrate(TEST_DATABASE_URL)
     pool = await create_pool(TEST_DATABASE_URL, min_size=1, max_size=2)
@@ -181,5 +184,20 @@ async def test_long_process_hybrid_retrieval_uses_postgres_lexical_pgvector_and_
         assert 1 in selected_numbers
         assert {41, 42, 43, 44, 45}.issubset(selected_numbers)
         assert 45 in selected_numbers
+
+        # Long-process retrieval must remain operational when embeddings are
+        # intentionally disabled. In that mode only PostgreSQL lexical retrieval
+        # supplies a scored signal; no embedding provider boundary may be called.
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+        async def fail_if_vector_called(*args, **kwargs):
+            raise AssertionError("embedding provider must not be used in lexical-only mode")
+
+        monkeypatch.setattr(rag, "ensure_step_embeddings", fail_if_vector_called)
+        monkeypatch.setattr(rag, "embed_query", fail_if_vector_called)
+        context = await rag._load_context(pool, process_id, version_id)
+        rendered_steps = "\n".join(step["text"] for step in context["steps"])
+        assert "Tutela provisória analisada em decisão interlocutória." in rendered_steps
+        assert "outro processo" not in rendered_steps
     finally:
         await pool.close()
