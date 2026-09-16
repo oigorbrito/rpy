@@ -10,7 +10,11 @@ import asyncpg
 
 _TOKEN_RE = re.compile(r"[\wÀ-ÿ]+", re.UNICODE)
 MILESTONE_RE = re.compile(
-    r"\b(SENTEN[CÇ]A|AC[ÓO]RD[ÃA]O|CITA[CÇ][ÃA]O|DECIS[ÃA]O|TR[ÂA]NSITO\s+EM\s+JULGADO|AUDI[ÊE]NCIA)\b",
+    r"\b("
+    r"SENTEN[CÇ]A|AC[ÓO]RD[ÃA]O|LIMINAR|TUTELA|CITA[CÇ][ÃA]O|AUDI[ÊE]NCIA|"
+    r"TR[ÂA]NSITO\s+EM\s+JULGADO|ARQUIVAMENTO|EXTIN[CÇ][ÃA]O|PER[ÍI]CIA|PENHORA|"
+    r"BAIXA\s+DEFINITIVA|RECURSO|APELA[CÇ][ÃA]O|EMBARGOS|DECIS[ÃA]O"
+    r")\b",
     re.IGNORECASE,
 )
 
