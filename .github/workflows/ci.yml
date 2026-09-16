@@ -67,6 +67,9 @@ jobs:
       - name: Unit tests
         run: pytest -q tests --ignore=tests/integration
 
+      - name: Frontend behavior tests
+        run: node tests/frontend_behavior_test.mjs
+
       - name: Container image smoke
         run: |
           docker build -t "rpy-ci:${GITHUB_SHA}" .
