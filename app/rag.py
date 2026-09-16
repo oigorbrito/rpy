@@ -122,6 +122,23 @@ def _serialize_steps(ranked: list[Any]) -> list[dict[str, Any]]:
     ]
 
 
+def _source_step_gap_warnings(steps: list[Any]) -> list[str]:
+    if len(steps) < 2:
+        return []
+    source_numbers = [step.source_step_number for step in steps]
+    if any(number is None for number in source_numbers):
+        return []
+
+    numbers = [int(number) for number in source_numbers if number is not None]
+    warnings: list[str] = []
+    for previous, current in zip(numbers, numbers[1:]):
+        if current > previous + 1:
+            warnings.append(
+                f"Há salto na numeração de movimentos da fonte: {previous}→{current}."
+            )
+    return warnings
+
+
 async def _load_process(
     pool: asyncpg.Pool,
     process_id: UUID,
@@ -174,8 +191,12 @@ async def _load_context(
         steps = await load_steps(conn, version_id=version_id)
 
     base["step_count"] = len(steps)
-    if not steps:
-        base["source_warnings"] = [EMPTY_STEPS_WARNING]
+    source_warnings = (
+        [EMPTY_STEPS_WARNING] if not steps else _source_step_gap_warnings(steps)
+    )
+    if source_warnings:
+        base["source_warnings"] = source_warnings
+
     vector_scores: dict[UUID, float] | None = None
     if len(steps) > 40:
         await ensure_step_embeddings(pool, version_id=version_id)
