@@ -50,6 +50,13 @@ _ATTENTION_HEADING_RE = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 _NEXT_HEADING_RE = re.compile(r"^#{1,6}\s+\S", re.MULTILINE)
+_HEADING_RE = re.compile(r"^#{1,6}\s+(?P<title>.+?)\s*$", re.MULTILINE)
+_CONDITIONAL_SECTION_ORDER = (
+    "Decisões",
+    "Prazos em curso",
+    "Processos relacionados",
+    "Anexos",
+)
 
 
 @dataclass(slots=True)
@@ -162,6 +169,30 @@ def _jsx_errors(text: str) -> list[str]:
     return errors
 
 
+def _conditional_section_order_errors(text: str) -> list[str]:
+    expected = {
+        _normalize_party_name(title): index
+        for index, title in enumerate(_CONDITIONAL_SECTION_ORDER)
+    }
+    observed: list[tuple[int, int, str]] = []
+    for match in _HEADING_RE.finditer(text):
+        title = match.group("title").strip()
+        normalized = _normalize_party_name(title)
+        if normalized in expected:
+            observed.append((match.start(), expected[normalized], title))
+
+    previous_order = -1
+    for _, order, title in observed:
+        if order < previous_order:
+            return [
+                "conditional sections must follow order: "
+                + " → ".join(_CONDITIONAL_SECTION_ORDER)
+                + f"; out-of-order section: {title}"
+            ]
+        previous_order = order
+    return []
+
+
 def _canonical_date(value: str) -> str | None:
     for fmt in ("%Y-%m-%d", "%d/%m/%Y"):
         try:
@@ -267,4 +298,5 @@ def validar(
                     errors.append(f"required attention fact missing: {phrase}")
 
     errors.extend(_jsx_errors(text))
+    errors.extend(_conditional_section_order_errors(text))
     return ValidationResult(passed=not errors, errors=errors)
