@@ -35,8 +35,8 @@ O fresh clone foi validado em Windows fora do ambiente de desenvolvimento anteri
 a imagem foi reconstruída, migrations 001-014 foram aplicadas e o smoke terminou com
 `RPY OFFLINE SMOKE: PASS`, `summary=valid`, `jobs=complete` e `providers=0`.
 
-A versão permanece `0.1.0` até existir uma política explícita de versionamento;
-nenhuma tag é criada por este documento.
+A versão formal deste primeiro release offline é `0.1.0`, em linha com o valor já
+declarado em `pyproject.toml`. A tag prevista é `v0.1.0`.
 
 ## Matriz de evidências
 
