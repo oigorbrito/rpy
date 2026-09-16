@@ -246,21 +246,43 @@ def main() -> int:
             "failures": failures,
         }
 
-    safe_report: dict[str, Any] = dict(report)
-    case_metrics = safe_report.get("case_metrics")
+    # Build the CLI report from an explicit allowlist.  The evaluator keeps
+    # source-derived values in memory for assertions, but its stdout is an
+    # operational log boundary and must contain only aggregate evidence.
+    safe_report: dict[str, Any] = {
+        "cases": report.get("cases", 0),
+        "metrics": report.get("metrics", {}),
+        "counts": report.get("counts", {}),
+        "case_metrics": {},
+    }
+    case_metrics = report.get("case_metrics")
     if isinstance(case_metrics, dict):
-        redacted_case_metrics: dict[str, Any] = {}
-        for case_id, case_data in case_metrics.items():
-            if isinstance(case_data, dict):
-                sanitized = dict(case_data)
-                secret_leaks = sanitized.get("secret_leaks")
-                if isinstance(secret_leaks, list):
-                    sanitized["secret_leaks_count"] = len(secret_leaks)
-                    sanitized["secret_leaks"] = ["[REDACTED]"] if secret_leaks else []
-                redacted_case_metrics[case_id] = sanitized
-            else:
-                redacted_case_metrics[case_id] = case_data
-        safe_report["case_metrics"] = redacted_case_metrics
+        allowed_case_fields = {
+            "mode",
+            "selected",
+            "policy_relevant_selected",
+            "milestone_expected",
+            "milestone_recovered",
+            "source_presence",
+            "secret_checks",
+        }
+        safe_report["case_metrics"] = {
+            str(case_id): {
+                key: case_data[key]
+                for key in allowed_case_fields
+                if key in case_data
+            }
+            for case_id, case_data in case_metrics.items()
+            if isinstance(case_data, dict)
+        }
+    if "baseline_check" in report:
+        baseline_check = report["baseline_check"]
+        if isinstance(baseline_check, dict):
+            safe_report["baseline_check"] = {
+                "baseline_version": baseline_check.get("baseline_version"),
+                "passed": bool(baseline_check.get("passed")),
+                "failure_count": len(baseline_check.get("failures", [])),
+            }
 
     print(json.dumps(safe_report, ensure_ascii=False, indent=2, sort_keys=True))
     return 1 if failures else 0
