@@ -5,6 +5,7 @@ from pathlib import Path
 from uuid import uuid4
 import httpx
 import app.rag as rag
+import app.process_requests as process_requests
 from app.api import app
 from app.db import create_pool
 from app.migrations import migrate
@@ -28,7 +29,11 @@ async def main() -> None:
         async def fake_generate(_client, _context, validation_errors=None):
             assert validation_errors is None
             return f"# Resumo do processo\n\nProcesso {code}. Situação processual registrada."
-        rag.anthropic_client, rag._generate = forbidden, fake_generate
+        rag.anthropic_client = lambda *_args, **_kwargs: object()
+        rag._generate = fake_generate
+        process_requests.create_lawsuit_request = forbidden
+        rag.ensure_step_embeddings = forbidden
+        rag.embed_query = forbidden
         lawsuit = {"callback_id": callback_id, "event_type": "response_created", "reference_type": "request", "reference_id": request_id, "payload": {"request_id": request_id, "response_id": response_id, "response_type": "lawsuit", "response_data": {"code": code, "class_name": "Ação Cível", "court": "TJRS", "header": {}, "parties": [{"name": "Parte A"}], "subjects": [{"name": "Contrato"}], "steps": [{"step_number": i, "title": f"Movimento {i}", "text": "Registro sintético."} for i in range(1, 4)]}, "tags": {"cached_response": False}}}
         completion = {"callback_id": f"offline-completion-{uuid4()}", "event_type": "request_completed", "reference_type": "request", "reference_id": request_id, "payload": {"status": "completed"}}
         transport = httpx.ASGITransport(app=app)
@@ -38,9 +43,13 @@ async def main() -> None:
         worker = Worker(pool, WorkerSettings(database_url=database_url, concurrency=1, heartbeat_interval_seconds=60, stale_after_seconds=120, task_timeout_seconds=20, reclaim_interval_seconds=60))
         while await worker.process_one(): pass
         async with pool.acquire() as conn:
-            state = await conn.fetchrow("SELECT p.current_version_id, count(DISTINCT pv.id) AS versions, count(DISTINCT ps.id) AS summaries FROM processes p JOIN process_versions pv ON pv.id = p.current_version_id LEFT JOIN process_summaries ps ON ps.version_id = pv.id WHERE p.code = $1 GROUP BY p.current_version_id", code)
+            state = await conn.fetchrow("SELECT p.current_version_id, count(DISTINCT p.id) AS processes, count(DISTINCT pv.id) AS versions, count(DISTINCT ps.id) FILTER (WHERE (ps.validation->>'passed')::boolean) AS valid_summaries, count(DISTINCT ps.id) AS summaries FROM processes p JOIN process_versions pv ON pv.id = p.current_version_id LEFT JOIN process_summaries ps ON ps.version_id = pv.id WHERE p.code = $1 GROUP BY p.current_version_id", code)
             jobs = await conn.fetchrow("SELECT count(*) FILTER (WHERE status = 'completed') AS completed, count(*) FILTER (WHERE status = 'dead') AS dead FROM jobs")
-            assert state and state["current_version_id"] and int(state["versions"]) == 1 and int(state["summaries"]) == 1 and jobs["completed"] >= 2 and jobs["dead"] == 0
+            logical_jobs = await conn.fetchrow("SELECT count(*) AS total, count(DISTINCT idempotency_key) AS unique_keys FROM jobs WHERE idempotency_key LIKE $1", f"%{request_id}%")
+            assert state and state["current_version_id"] and int(state["processes"]) == 1 and int(state["versions"]) == 1
+            assert int(state["summaries"]) == 1 and int(state["valid_summaries"]) == 1 and int(state["current_version_id"] is not None)
+            assert jobs["completed"] >= 2 and jobs["dead"] == 0 and logical_jobs["total"] == logical_jobs["unique_keys"]
+            assert await conn.fetchval("SELECT count(*) FROM process_steps ps JOIN process_versions pv ON pv.id = ps.version_id WHERE pv.id = $1", state["current_version_id"]) == 3
         async with httpx.AsyncClient(transport=transport, base_url="http://offline") as client:
             response = await client.get(f"/processes/{code}", headers={"Authorization": f"Bearer {bearer}"})
             assert response.status_code == 200 and response.json()["summary_status"] == "available" and response.json()["summary"]["validation"]["passed"] is True
