@@ -69,8 +69,13 @@ def main() -> int:
             errors.append("README must declare the MIT project license")
         if not license_text.startswith("MIT License"):
             errors.append("LICENSE must contain the MIT license text")
-        if "HydraTask" not in notice_text or "Iank314/task-queue" not in notice_text:
-            errors.append("NOTICE must retain third-party provenance entries")
+        for marker in (
+            "Projects with published permissive licenses:",
+            "Projects used with direct author permission:",
+            "Rpy is licensed under the MIT License.",
+        ):
+            if marker not in notice_text:
+                errors.append(f"NOTICE missing required provenance marker: {marker}")
 
         mode = smoke_sh.stat().st_mode
         if not mode & stat.S_IXUSR:
