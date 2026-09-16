@@ -139,6 +139,7 @@ def rag_invariant_violations() -> list[str]:
     rag_text = read(rag)
     validation_text = read(validation)
     retrieval_text = read(retrieval)
+    retrieval_compact = re.sub(r"\s+", " ", retrieval_text)
     prompt_text = read(prompts) if prompts.exists() else ""
     if "validar(" not in rag_text:
         errors.append("RAG publishing path must call validar()")
@@ -158,8 +159,14 @@ def rag_invariant_violations() -> list[str]:
         errors.append("secret cases must retain deterministic local generation")
     if "class\\s*=" not in validation_text:
         errors.append("validator must reject class= in JSX")
-    if "0.5 * lexical" not in retrieval_text or "0.5 * vector" not in retrieval_text:
+    if "BM25_WEIGHT = 0.5" not in retrieval_text or "VECTOR_WEIGHT = 0.5" not in retrieval_text:
         errors.append("long retrieval must preserve 0.5 BM25 / 0.5 vector weighting")
+    expected_weighted_score = (
+        "base_score = BM25_WEIGHT * lexical.get(step.id, 0.0) + "
+        "VECTOR_WEIGHT * vector.get(step.id, 0.0)"
+    )
+    if expected_weighted_score not in retrieval_compact:
+        errors.append("long retrieval score must use the configured BM25/vector weights")
     if "len(steps) > 40" in rag_text and not embeddings.exists():
         errors.append("conditional vector retrieval requires app/embeddings.py")
     return errors
