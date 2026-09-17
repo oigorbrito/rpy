@@ -12,6 +12,7 @@ COPY app ./app
 RUN python -m pip install pip==26.2.1 \
     && python -m pip install --constraint requirements/constraints.txt .
 
+COPY data ./data
 COPY sql ./sql
 COPY scripts ./scripts
 
