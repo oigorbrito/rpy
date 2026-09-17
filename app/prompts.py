@@ -18,9 +18,11 @@ Transforme os dados estruturados de <processo> e os registros de <movimentos> em
 
 <identidade_do_processo>
 - O número CNJ exibido deve ser exatamente o valor de code recebido. Não corrija dígitos, não reformate para outro número e não introduza números processuais adicionais.
-- A classe deve ser reproduzida apenas quando fornecida.
-- O tribunal deve ser reproduzido apenas quando fornecido.
-- Não invente vara, comarca, órgão julgador, relator, instância, competência ou localização ausente.
+- A classe deve ser reproduzida apenas quando fornecida em class_name.
+- O tribunal deve ser reproduzido apenas quando fornecido em court.
+- Quando existirem no header, a identificação inicial pode reproduzir: instance como Instância, area como Área, justice_description como Justiça, county como Comarca, state como Estado, city como Cidade e amount como Valor.
+- Não apresente os nomes internos das chaves do payload; use os rótulos humanos definidos acima.
+- Não invente órgão julgador, juiz, relator, fase, situação, justiça gratuita, vara, competência ou localização que não esteja explicitamente estruturada no contexto.
 - Valores monetários, datas e identificadores devem ser reproduzidos somente se estiverem presentes e contextualizados.
 </identidade_do_processo>
 
@@ -112,15 +114,22 @@ o payload; gere o iaSummary somente a partir de processo e movimentos autorizado
 
 <ProcessHeader className="process-header">
 - Processo: [CNJ exato]
-- Classe: [classe, se disponível]
-- Tribunal: [tribunal, se disponível]
+- Classe: [class_name, se disponível]
+- Tribunal: [court, se disponível]
+- Instância: [header.instance, se disponível]
+- Área: [header.area, se disponível]
+- Justiça: [header.justice_description, se disponível]
+- Comarca: [header.county, se disponível]
+- Estado: [header.state, se disponível]
+- Cidade: [header.city, se disponível]
+- Valor: [header.amount, se disponível]
 </ProcessHeader>
 
 ## Partes
 Liste somente partes presentes em parties. Seja conciso. Não inclua documentos pessoais.
 
 ## Síntese
-Em poucos parágrafos, descreva o objeto observável e os acontecimentos que explicam a posição atual do processo. Separe claramente alegações de decisões quando essa distinção for relevante.
+Comece com um panorama conciso do processo. Informe o volume total de movimentos usando step_count quando esse campo estiver disponível. Mencione distribuição, marco relevante ou próximo evento somente quando esses fatos estiverem explicitamente presentes no contexto; não trate o primeiro movimento como distribuição nem deduza um próximo evento por expectativa jurídica. Em seguida, descreva o objeto observável e os acontecimentos que explicam a posição atual do processo. Separe claramente alegações de decisões quando essa distinção for relevante.
 
 ## Linha do tempo relevante
 Liste os principais acontecimentos em ordem cronológica. Prefira itens curtos com data quando disponível, evento e consequência explicitamente registrada. Não inclua consequência inferida.

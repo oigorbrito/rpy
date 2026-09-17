@@ -43,3 +43,28 @@ def test_iasummary_contract_is_not_defined_by_frontend_or_external_summary() -> 
     assert "processo e movimentos autorizados" in prompt
     assert "Não explique mecanismos internos" in prompt
     assert "conhecimento externo" in prompt
+
+
+def test_iasummary_identification_uses_only_structured_available_fields() -> None:
+    prompt = PROCESS_SUMMARY_SYSTEM_PROMPT
+
+    for label in (
+        "Instância: [header.instance, se disponível]",
+        "Área: [header.area, se disponível]",
+        "Justiça: [header.justice_description, se disponível]",
+        "Comarca: [header.county, se disponível]",
+        "Estado: [header.state, se disponível]",
+        "Cidade: [header.city, se disponível]",
+        "Valor: [header.amount, se disponível]",
+    ):
+        assert label in prompt
+
+    assert "Não invente órgão julgador, juiz, relator, fase, situação, justiça gratuita" in prompt
+
+
+def test_iasummary_panorama_is_evidence_bound() -> None:
+    prompt = PROCESS_SUMMARY_SYSTEM_PROMPT
+
+    assert "Informe o volume total de movimentos usando step_count" in prompt
+    assert "não trate o primeiro movimento como distribuição" in prompt
+    assert "nem deduza um próximo evento por expectativa jurídica" in prompt
