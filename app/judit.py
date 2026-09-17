@@ -260,8 +260,10 @@ def _source_step_number(step: dict[str, Any]) -> int | None:
 def extract_promotable_fields(process: dict[str, Any]) -> dict[str, Any]:
     classifications = process.get("classifications") or []
     class_name = None
+    class_code = None
     if classifications and isinstance(classifications[0], dict):
         class_name = classifications[0].get("name")
+        class_code = classifications[0].get("code")
     class_name = class_name or process.get("class_name") or process.get("class")
 
     courts = process.get("courts") or []
@@ -284,12 +286,11 @@ def extract_promotable_fields(process: dict[str, Any]) -> dict[str, Any]:
         for key in header_keys
         if process.get(key) is not None
     }
+    if secrecy_level == 0 and class_code is not None:
+        rendered_class_code = str(class_code).strip()
+        if rendered_class_code:
+            header["class_code"] = rendered_class_code
 
-    # Secret source payloads remain retained in process_versions according to the
-    # retention policy, but restricted parties/subjects/movements must never be
-    # promoted into the normalized retrieval surface. Returning before movement
-    # normalization also prevents restricted text from being materialized as a
-    # lexical/vector candidate in application memory.
     if secrecy_level > 0:
         return {
             "header": header,

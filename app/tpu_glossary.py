@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from dataclasses import dataclass
@@ -7,11 +8,9 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal, Sequence
 
-DEFAULT_TPU_GLOSSARY_PATH = (
-    Path(__file__).resolve().parent.parent / "data" / "tpu" / "2026-09-12.json"
-)
 TPU_GLOSSARY_PATH_ENV = "TPU_GLOSSARY_PATH"
 TPU_SCHEMA_VERSION = 1
+TPU_SNAPSHOT_RELATIVE_PATH = Path("data") / "tpu" / "2026-09-12.json"
 
 TPUKind = Literal["class", "subject"]
 
@@ -27,6 +26,10 @@ class TPUDefinition:
     source: str
     source_ref: str
 
+    @property
+    def definition_sha256(self) -> str:
+        return hashlib.sha256(self.definition.encode("utf-8")).hexdigest()
+
     def as_context(self) -> dict[str, str]:
         return {
             "kind": self.kind,
@@ -37,6 +40,19 @@ class TPUDefinition:
             "publisher": self.publisher,
             "source": self.source,
             "source_ref": self.source_ref,
+            "definition_sha256": self.definition_sha256,
+        }
+
+    def as_provenance(self, *, source_order: int) -> dict[str, str | int]:
+        return {
+            "kind": self.kind,
+            "code": self.code,
+            "tpu_version": self.tpu_version,
+            "publisher": self.publisher,
+            "source": self.source,
+            "source_ref": self.source_ref,
+            "definition_sha256": self.definition_sha256,
+            "source_order": source_order,
         }
 
 
@@ -57,13 +73,23 @@ class TPUCatalog:
         return self.entries.get((kind, normalized))
 
 
+def _default_catalog_path() -> Path:
+    runtime_path = Path.cwd() / TPU_SNAPSHOT_RELATIVE_PATH
+    if runtime_path.is_file():
+        return runtime_path
+    source_path = Path(__file__).resolve().parent.parent / TPU_SNAPSHOT_RELATIVE_PATH
+    if source_path.is_file():
+        return source_path
+    return runtime_path
+
+
 def _catalog_path(path: str | Path | None = None) -> Path:
     if path is not None:
         return Path(path)
     configured = str(os.environ.get(TPU_GLOSSARY_PATH_ENV) or "").strip()
     if configured:
         return Path(configured)
-    return DEFAULT_TPU_GLOSSARY_PATH
+    return _default_catalog_path()
 
 
 def load_tpu_catalog(path: str | Path | None = None) -> TPUCatalog:
@@ -152,18 +178,12 @@ def _subject_code(subject: Any) -> str | None:
     return rendered or None
 
 
-def resolve_process_tpu_context(
+def resolve_process_tpu_definitions(
     *,
     class_code: str | int | None,
     subjects: Sequence[Any],
     catalog: TPUCatalog | None = None,
-) -> list[dict[str, str]]:
-    """Resolve only codes present in the process against the pinned local snapshot.
-
-    Unknown or malformed codes are omitted. No name matching, fuzzy completion or
-    network fallback is attempted, so the glossary cannot silently invent a
-    definition that is absent from the versioned source.
-    """
+) -> list[TPUDefinition]:
     active = catalog or get_tpu_catalog()
     resolved: list[TPUDefinition] = []
 
@@ -180,5 +200,26 @@ def resolve_process_tpu_context(
         definition = active.resolve(kind="subject", code=code)
         if definition is not None:
             resolved.append(definition)
+    return resolved
 
-    return [definition.as_context() for definition in resolved]
+
+def resolve_process_tpu_context(
+    *,
+    class_code: str | int | None,
+    subjects: Sequence[Any],
+    catalog: TPUCatalog | None = None,
+) -> list[dict[str, str]]:
+    """Resolve only codes present in the process against the pinned local snapshot.
+
+    Unknown or malformed codes are omitted. No name matching, fuzzy completion or
+    network fallback is attempted, so the glossary cannot silently invent a
+    definition that is absent from the versioned source.
+    """
+    return [
+        definition.as_context()
+        for definition in resolve_process_tpu_definitions(
+            class_code=class_code,
+            subjects=subjects,
+            catalog=catalog,
+        )
+    ]

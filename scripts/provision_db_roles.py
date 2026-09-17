@@ -19,6 +19,7 @@ API_READ_TABLES = (
     "process_versions",
     "process_summaries",
     "process_summary_sources",
+    "process_summary_glossary_sources",
     "tenant_processes",
     "tenant_judit_requests",
     "public_summary_requests",
@@ -129,6 +130,9 @@ async def provision(database_url: str) -> None:
                 f"GRANT SELECT, INSERT, UPDATE, DELETE ON process_summary_sources TO {worker}"
             )
             await conn.execute(
+                f"GRANT SELECT, INSERT, UPDATE, DELETE ON process_summary_glossary_sources TO {worker}"
+            )
+            await conn.execute(
                 f"GRANT SELECT, INSERT, UPDATE, DELETE ON process_step_embeddings TO {worker}"
             )
 
@@ -152,9 +156,6 @@ async def provision(database_url: str) -> None:
             await conn.execute(f"GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO {backup}")
             await conn.execute(f"GRANT INSERT ON backup_runs TO {backup}")
 
-            # Future objects created by the migration role remain private by default.
-            # Only the backup role receives read access automatically; runtime DML
-            # for new tables must be granted explicitly alongside the migration.
             await conn.execute(
                 f"ALTER DEFAULT PRIVILEGES FOR ROLE {migrator_ident} IN SCHEMA public "
                 f"GRANT SELECT ON TABLES TO {backup}"
