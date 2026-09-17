@@ -45,12 +45,13 @@ Production has no fallback values for:
 - `SCHEDULER_DATABASE_URL`;
 - `BACKUP_DATABASE_URL`;
 - `ANTHROPIC_API_KEY`;
-- `OPENAI_API_KEY`;
 - `JUDIT_WEBHOOK_TOKEN`;
 - `RPY_BEARER_TOKENS`;
 - `RPY_OPS_TOKEN`.
 
-Inject them from the deployment platform's secret manager or equivalent environment mechanism. Do not place populated values in the repository or bake them into the image. `.env.production.example` is a shape-only template. Staging and production must use separate secret sources; do not point both environments at the same PostgreSQL credentials or reuse HTTP/provider secrets between them.
+`OPENAI_API_KEY` is conditional: it is required only while `EMBEDDING_SPACE_RUNTIME_ENABLED=false`, which preserves the historical OpenAI `vector(1536)` retrieval path. A deployment with `EMBEDDING_SPACE_RUNTIME_ENABLED=true`, `EMBEDDING_PROVIDER=bge` and `BGE_EMBEDDING_MODEL=BAAI/bge-m3` does not require an OpenAI credential. The BGE dependencies and model artifact/cache must already exist in the worker image or deployment environment before that switch is enabled. The current controlled runtime accepts only BGE; selecting Cohere is rejected until its runtime adapter exists.
+
+Inject secrets from the deployment platform's secret manager or equivalent environment mechanism. Do not place populated values in the repository or bake them into the image. `.env.production.example` is a shape-only template. Staging and production must use separate secret sources; do not point both environments at the same PostgreSQL credentials or reuse HTTP/provider secrets between them.
 
 Database credentials are split by responsibility. The five URLs must use distinct PostgreSQL login roles and target the same application database:
 
@@ -63,7 +64,7 @@ Database credentials are split by responsibility. The five URLs must use distinc
 Secrets are scoped by service instead of being copied to the whole stack:
 
 - `api` receives `API_DATABASE_URL` plus Judit, bearer-token and ops credentials;
-- `worker-*` receives `WORKER_DATABASE_URL` plus Anthropic/OpenAI credentials and provider settings;
+- `worker-*` receives `WORKER_DATABASE_URL`, Anthropic, embedding runtime settings, and `OPENAI_API_KEY` only when the legacy embedding path is selected;
 - `scheduler` receives only `SCHEDULER_DATABASE_URL` and retention/scheduling settings;
 - `migrate` receives the migration URL plus the four runtime/backup URLs needed to provision and rotate their roles;
 - provider keys must not be present in API, scheduler or migration environments;
@@ -72,6 +73,18 @@ Secrets are scoped by service instead of being copied to the whole stack:
 If a PostgreSQL password contains reserved URL characters, URL-encode it in the corresponding database URL. Do not reuse the migration/admin role for API, worker, scheduler or backup access.
 
 Bearer-token rotation is performed by temporarily mapping both old and new tokens to the same tenant, deploying that overlap, migrating clients, and then removing the old token in a later deploy.
+
+## Embedding rollout and rollback
+
+The production worker environment always carries the rollout selectors so both workers agree on one semantic space:
+
+- `EMBEDDING_SPACE_RUNTIME_ENABLED` defaults to `false`;
+- `EMBEDDING_PROVIDER` defaults to `bge` for the isolated runtime;
+- `BGE_EMBEDDING_MODEL` is pinned to `BAAI/bge-m3`;
+- `BGE_EMBEDDING_DEVICE` and `BGE_EMBEDDING_USE_FP16` control local inference characteristics;
+- `EMBEDDING_MODEL` remains the legacy OpenAI model selector.
+
+Before enabling BGE in production, prepare the optional embedding dependencies and model cache/artifact, run the historical reindex command in bounded resumable batches, and collect the retrieval-quality evidence required by #124. Rollback does not delete BGE vectors: set `EMBEDDING_SPACE_RUNTIME_ENABLED=false`, restore `OPENAI_API_KEY`, and the workers return to the preserved legacy embedding column.
 
 ## Deploy sequence
 
@@ -95,6 +108,8 @@ The deploy-environment preflight rejects configuration that:
 
 - uses a mutable image reference instead of a full SHA-256 digest;
 - leaves required values empty or at documented placeholder values;
+- omits `OPENAI_API_KEY` while the legacy embedding path is selected;
+- enables the isolated embedding runtime with a provider/model that is not currently supported;
 - reuses a PostgreSQL login identity across migration/API/worker/scheduler/backup responsibilities;
 - points the role-specific URLs at different PostgreSQL databases;
 - supplies an invalid bearer-token-to-tenant mapping.
@@ -110,6 +125,7 @@ The compose validator rejects changes that:
 - change the explicit API worker count;
 - alter the two-worker / one-scheduler topology;
 - remove required service-specific configuration;
+- allow the two workers to disagree on embedding rollout/model settings;
 - distribute provider or HTTP-facing secrets to unrelated services.
 
 This contract is intentionally small. Platform-specific manifests (Kubernetes, ECS, Nomad, Fly.io, Render, etc.) should reproduce these invariants rather than introduce a second application architecture.
