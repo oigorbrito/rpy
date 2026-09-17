@@ -30,7 +30,11 @@ async def replace_summary_sources(
     version_id: UUID,
     sources: Sequence[dict[str, Any]],
 ) -> None:
-    """Atomically replace movement provenance for a persisted summary."""
+    """Atomically replace movement provenance for a persisted summary.
+
+    Only identifiers and safe positional metadata are stored. Movement text,
+    provider prompts, raw source payloads and party data never cross this table.
+    """
     await conn.execute(
         "DELETE FROM process_summary_sources WHERE summary_id = $1",
         summary_id,
@@ -43,6 +47,8 @@ async def replace_summary_sources(
         step_id = source.get("step_id")
         if not isinstance(step_id, UUID):
             raise ValueError("summary source step_id must be a UUID")
+        step_number = int(source["step_number"])
+        source_order = int(source["source_order"])
         records.append(
             (
                 summary_id,
@@ -50,9 +56,9 @@ async def replace_summary_sources(
                 version_id,
                 "movement",
                 step_id,
-                int(source["step_number"]),
+                step_number,
                 source.get("occurred_at"),
-                int(source["source_order"]),
+                source_order,
             )
         )
 
@@ -64,48 +70,6 @@ async def replace_summary_sources(
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         """,
         records,
-    )
-
-
-async def replace_summary_glossary_sources(
-    conn: asyncpg.Connection,
-    *,
-    summary_id: UUID,
-    process_id: UUID,
-    version_id: UUID,
-    sources: Sequence[dict[str, Any]],
-) -> None:
-    """Persist only safe glossary identifiers/version/hash, never provider text."""
-    await conn.execute(
-        "DELETE FROM process_summary_glossary_sources WHERE summary_id = $1",
-        summary_id,
-    )
-    if not sources:
-        return
-
-    await conn.executemany(
-        """
-        INSERT INTO process_summary_glossary_sources (
-            summary_id, process_id, version_id, kind, code, tpu_version,
-            publisher, source, source_ref, definition_sha256, source_order
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-        """,
-        [
-            (
-                summary_id,
-                process_id,
-                version_id,
-                str(source["kind"]),
-                str(source["code"]),
-                str(source["tpu_version"]),
-                str(source["publisher"]),
-                str(source["source"]),
-                str(source["source_ref"]),
-                str(source["definition_sha256"]),
-                int(source["source_order"]),
-            )
-            for source in sources
-        ],
     )
 
 
