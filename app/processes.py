@@ -6,6 +6,7 @@ from uuid import UUID
 
 import asyncpg
 
+from app.attachments import sync_attachment_manifest
 from app.json_utils import decode_json_list, decode_json_object
 from app.process_semantics import SEMANTIC_SCHEMA_VERSION, semantic_fingerprint
 
@@ -207,12 +208,31 @@ async def _current_semantic_fingerprint(
         process_id,
         version_id,
     )
+    attachment_rows = await conn.fetch(
+        """
+        SELECT source_attachment_id, source_date, source_name
+        FROM process_attachments
+        WHERE process_id=$1 AND version_id=$2
+        ORDER BY source_attachment_id
+        """,
+        process_id,
+        version_id,
+    )
     steps = [dict(row) for row in rows]
+    attachments = [
+        {
+            "attachment_id": row["source_attachment_id"],
+            "attachment_date": row["source_date"],
+            "attachment_name": row["source_name"],
+        }
+        for row in attachment_rows
+    ]
     return semantic_fingerprint(
         header=decode_json_object(process["header"], label="process header"),
         parties=decode_json_list(process["parties"], label="process parties"),
         subjects=decode_json_list(process["subjects"], label="process subjects"),
         steps=steps,
+        attachments=attachments,
         court=process["court"],
         class_name=process["class_name"],
         secrecy_level=int(process["secrecy_level"] or 0),
@@ -228,16 +248,19 @@ async def finalize_version(
     parties: list[dict[str, Any]],
     subjects: list[Any],
     steps: list[dict[str, Any]],
+    attachments: list[dict[str, Any]] | None = None,
     court: str | None = None,
     class_name: str | None = None,
     secrecy_level: int = 0,
 ) -> bool:
     """Finalize a version, avoiding promotion when normalized semantics are unchanged."""
+    attachment_manifest = attachments or []
     candidate_fingerprint = semantic_fingerprint(
         header=header,
         parties=parties,
         subjects=subjects,
         steps=steps,
+        attachments=attachment_manifest,
         court=court,
         class_name=class_name,
         secrecy_level=secrecy_level,
@@ -285,6 +308,12 @@ async def finalize_version(
                 version_id=current_version_id,
             )
             if current_fingerprint == candidate_fingerprint:
+                await sync_attachment_manifest(
+                    conn,
+                    process_id=process_id,
+                    version_id=version_id,
+                    attachments=attachment_manifest,
+                )
                 await conn.execute(
                     """
                     UPDATE process_versions
@@ -324,6 +353,13 @@ async def finalize_version(
                     for step in steps
                 ],
             )
+
+        await sync_attachment_manifest(
+            conn,
+            process_id=process_id,
+            version_id=version_id,
+            attachments=attachment_manifest,
+        )
 
         await conn.execute(
             """
