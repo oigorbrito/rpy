@@ -167,12 +167,7 @@ def rerank_steps(
     scores: dict[UUID, float],
     limit: int = 15,
 ) -> list[Step]:
-    """Apply injected reranker scores while preserving mandatory movements.
-
-    The scorer is deliberately outside this function: a future BGE or
-    explicitly authorized Cohere adapter can provide scores without changing
-    candidate filtering or the mandatory-evidence contract.
-    """
+    """Apply injected reranker scores while preserving mandatory movements."""
     if limit <= 0:
         raise ValueError("reranker limit must be positive")
     if not steps:
@@ -268,6 +263,19 @@ async def vector_search(
     embedding: Sequence[float],
     limit: int = 30,
 ) -> dict[UUID, float]:
+    from app.embedding_runtime import (
+        embedding_space_runtime_enabled,
+        get_active_embedding_runtime,
+    )
+
+    if embedding_space_runtime_enabled():
+        return await get_active_embedding_runtime().vector_search(
+            conn,
+            version_id=version_id,
+            embedding=[float(value) for value in embedding],
+            limit=limit,
+        )
+
     rows = await conn.fetch(
         """
         SELECT id, 1 - (embedding <=> $2::vector) AS similarity

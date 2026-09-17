@@ -7,6 +7,10 @@ from uuid import UUID
 
 import asyncpg
 
+from app.embedding_runtime import (
+    embedding_space_runtime_enabled,
+    get_active_embedding_runtime,
+)
 from app.providers import (
     call_with_retries,
     embedding_settings,
@@ -15,9 +19,9 @@ from app.providers import (
 )
 
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
-# Schema contract: sql/002_process_data.sql defines process_steps.embedding as
-# vector(1536). Changing this value requires a database migration and index rebuild;
-# it is intentionally not configurable through the environment.
+# Legacy rollback contract: sql/002_process_data.sql defines process_steps.embedding
+# as vector(1536). The provider/model-isolated runtime stores new vectors in
+# process_step_embeddings and never mixes them with this column.
 VECTOR_DIMENSIONS = 1536
 EMBEDDING_BATCH_SIZE = 64
 _DIMENSION_CONFIGURABLE_MODELS = {"text-embedding-3-small", "text-embedding-3-large"}
@@ -25,19 +29,23 @@ _FIXED_1536_MODELS = {"text-embedding-ada-002"}
 
 
 def vector_retrieval_configured() -> bool:
-    """Return whether the current embedding provider is explicitly configured.
+    """Return whether vector retrieval is available for the selected rollout mode.
 
-    Absence of an embedding credential means long-process retrieval runs in
-    PostgreSQL lexical-only mode. Once configured, provider failures remain
-    explicit rather than silently changing retrieval semantics.
+    The new semantic-space runtime is explicit and local BGE-only for now. When
+    disabled, the historical OpenAI/vector(1536) path remains available as a
+    rollback boundary. Provider failures are never converted into cross-space
+    fallback.
     """
+    if embedding_space_runtime_enabled():
+        get_active_embedding_runtime()
+        return True
     return bool(str(os.environ.get("OPENAI_API_KEY") or "").strip())
 
 
 def _client():
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is required when vector retrieval is used")
+        raise RuntimeError("OPENAI_API_KEY is required when legacy vector retrieval is used")
     return openai_client(api_key)
 
 
@@ -59,8 +67,6 @@ def _request_kwargs(texts: Sequence[str]) -> dict[str, Any]:
         "model": model,
         "input": list(texts),
     }
-    # OpenAI text-embedding-3 models support explicit dimensionality. Pin them to
-    # PostgreSQL vector(1536) even when the larger model is selected.
     if model in _DIMENSION_CONFIGURABLE_MODELS:
         request["dimensions"] = VECTOR_DIMENSIONS
     return request
@@ -85,14 +91,7 @@ def _validate_response(data: Sequence[Any], *, expected_count: int) -> list[list
     return vectors
 
 
-async def embed_texts(texts: Sequence[str]) -> list[list[float]]:
-    if not texts:
-        return []
-    if any(not str(text).strip() for text in texts):
-        raise ValueError("embedding inputs must be non-empty text")
-
-    # Validate before API-key lookup and before any provider/network work so bad
-    # deployment configuration fails deterministically and cheaply.
+async def _legacy_embed_texts(texts: Sequence[str]) -> list[list[float]]:
     validate_embedding_model()
     client = _client()
     settings = embedding_settings()
@@ -108,9 +107,27 @@ async def embed_texts(texts: Sequence[str]) -> list[list[float]]:
     return _validate_response(response.data, expected_count=len(texts))
 
 
+async def embed_texts(texts: Sequence[str]) -> list[list[float]]:
+    if not texts:
+        return []
+    values = [str(text) for text in texts]
+    if any(not value.strip() for value in values):
+        raise ValueError("embedding inputs must be non-empty text")
+
+    if embedding_space_runtime_enabled():
+        runtime = get_active_embedding_runtime()
+        return await runtime.encoder.embed_documents(values)
+    return await _legacy_embed_texts(values)
+
+
 async def embed_query(text: str) -> list[float]:
-    embeddings = await embed_texts([text])
-    return embeddings[0]
+    value = str(text)
+    if not value.strip():
+        raise ValueError("embedding query must be non-empty text")
+    if embedding_space_runtime_enabled():
+        return await get_active_embedding_runtime().embed_query(value)
+    vectors = await embed_texts([value])
+    return vectors[0]
 
 
 async def ensure_step_embeddings(
@@ -118,7 +135,13 @@ async def ensure_step_embeddings(
     *,
     version_id: UUID,
 ) -> int:
-    """Embed only non-empty movements that do not already have vectors."""
+    """Embed movements in exactly one semantic space for the active rollout mode."""
+    if embedding_space_runtime_enabled():
+        return await get_active_embedding_runtime().ensure_step_embeddings(
+            pool,
+            version_id=version_id,
+        )
+
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
