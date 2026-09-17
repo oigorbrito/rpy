@@ -18,6 +18,7 @@ API_READ_TABLES = (
     "processes",
     "process_versions",
     "process_summaries",
+    "process_summary_sources",
     "tenant_processes",
     "tenant_judit_requests",
     "public_summary_requests",
@@ -118,6 +119,9 @@ async def provision(database_url: str) -> None:
             )
             await conn.execute(
                 f"GRANT SELECT, INSERT, UPDATE ON process_summaries TO {worker}"
+            )
+            await conn.execute(
+                f"GRANT SELECT, INSERT, UPDATE, DELETE ON process_summary_sources TO {worker}"
             )
 
             scheduler = _quote_ident("rpy_scheduler")
