@@ -138,6 +138,9 @@ async def provision(database_url: str) -> None:
                 f"GRANT SELECT, INSERT, UPDATE, DELETE ON process_summary_glossary_sources TO {worker}"
             )
             await conn.execute(
+                f"GRANT SELECT, INSERT, UPDATE, DELETE ON process_datajud_field_provenance TO {worker}"
+            )
+            await conn.execute(
                 f"GRANT SELECT, INSERT, UPDATE, DELETE ON process_step_embeddings TO {worker}"
             )
             await conn.execute(
