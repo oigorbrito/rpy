@@ -1,6 +1,6 @@
 # Attachment processing boundary
 
-Issue #137 introduces attachment support in staged blocks. This document defines the processing contract before downloader, parser or OCR code is enabled.
+Issue #137 introduces attachment support in staged blocks. This document defines the processing contract before downloader or OCR code is enabled.
 
 ## Phase 1: durable state foundation
 
@@ -29,17 +29,30 @@ UTF-8 text is decoded locally, CRLF/CR line endings are normalized to LF, empty 
 
 Text chunking is deterministic and non-overlapping. It prefers a whitespace/newline boundary in the latter half of the configured chunk window and stores normalized character positions as half-open `[char_start, char_end)` offsets. Reprocessing the same source attachment replaces chunks atomically through the Phase 1 persistence primitive.
 
-This phase still does not activate Judit downloads, PDF parsing, image parsing or OCR.
+## Phase 3: PDF text-layer processing
+
+`application/pdf` bytes already obtained by an authorized caller are parsed locally with `pypdf`. The same byte limit is applied before parsing. The parser requires a PDF header and does not fetch fonts, images, models or any other network resource.
+
+For each page with extractable text:
+
+- line endings are normalized;
+- text is chunked with the same deterministic non-overlapping algorithm;
+- `page_start`/`page_end` identify the one-based source page;
+- `char_start`/`char_end` are half-open offsets inside that normalized page text.
+
+Malformed/non-PDF bytes are `corrupt`. Password-protected PDFs are `unreadable` because Rpy has no authorized password contract. PDFs with no extractable text layer are `unreadable` with `pdf_text_unavailable`; they are not silently treated as empty or sent to an external service. That state is the explicit handoff point for the future local OCR path.
+
+`pypdf` is pinned through the repository dependency lock. Raw PDF bytes are never persisted by this layer.
 
 ## Planned local processing
 
 The supported parsing targets are:
 
-1. PDF documents with an extractable text layer;
-2. UTF-8 plain text where the source metadata identifies a textual attachment;
-3. raster/image-only PDF or supported image content only through a local OCR path.
+1. PDF documents with an extractable text layer — implemented by Phase 3;
+2. UTF-8 plain text where the source metadata identifies a textual attachment — implemented by Phase 2;
+3. raster/image-only PDF or supported image content only through a local OCR path — pending benchmark and implementation.
 
-UTF-8 plain text is now implemented by Phase 2. PDF text-layer parsing is the next local block. OCR remains intentionally deferred until an offline engine and supported image formats are benchmarked. OCR must use a local/offline engine rather than sending document images or bytes to an external model. No network-dependent model download may be added to CI or the standard offline image.
+OCR remains intentionally deferred until an offline engine and supported image formats are benchmarked. OCR must use a local/offline engine rather than sending document images or bytes to an external model. No network-dependent model download may be added to CI or the standard offline image.
 
 ## Chunking contract
 
