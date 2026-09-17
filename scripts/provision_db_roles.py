@@ -135,6 +135,9 @@ async def provision(database_url: str) -> None:
             await conn.execute(
                 f"GRANT SELECT, INSERT, UPDATE, DELETE ON process_step_embeddings TO {worker}"
             )
+            await conn.execute(
+                f"GRANT SELECT, INSERT, UPDATE, DELETE ON process_attachments, attachment_chunks TO {worker}"
+            )
 
             scheduler = _quote_ident("rpy_scheduler")
             await conn.execute(f"GRANT SELECT, DELETE ON processes TO {scheduler}")
