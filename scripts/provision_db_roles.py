@@ -22,6 +22,8 @@ API_READ_TABLES = (
     "tenant_processes",
     "tenant_judit_requests",
     "public_summary_requests",
+    "judit_trackings",
+    "judit_tracking_refreshes",
     "jobs",
     "judit_deliveries",
     "judit_request_completions",
@@ -100,7 +102,7 @@ async def provision(database_url: str) -> None:
                 f"GRANT SELECT ON {', '.join(_quote_ident(t) for t in API_READ_TABLES)} TO {api}"
             )
             await conn.execute(
-                f"GRANT INSERT, UPDATE ON processes, process_versions, tenant_judit_requests, public_summary_requests TO {api}"
+                f"GRANT INSERT, UPDATE ON processes, process_versions, tenant_judit_requests, public_summary_requests, judit_trackings TO {api}"
             )
             await conn.execute(
                 "GRANT INSERT ON access_log, judit_deliveries, judit_request_completions, jobs, tenant_processes TO "
@@ -112,6 +114,9 @@ async def provision(database_url: str) -> None:
             await conn.execute(f"GRANT SELECT, UPDATE ON processes, process_versions TO {worker}")
             await conn.execute(
                 f"GRANT SELECT, UPDATE ON tenant_judit_requests, public_summary_requests TO {worker}"
+            )
+            await conn.execute(
+                f"GRANT SELECT, UPDATE ON judit_trackings, judit_tracking_refreshes TO {worker}"
             )
             await conn.execute(f"GRANT SELECT, INSERT ON tenant_processes TO {worker}")
             await conn.execute(
@@ -130,6 +135,13 @@ async def provision(database_url: str) -> None:
             scheduler = _quote_ident("rpy_scheduler")
             await conn.execute(f"GRANT SELECT, DELETE ON processes TO {scheduler}")
             await conn.execute(f"GRANT SELECT ON process_versions TO {scheduler}")
+            await conn.execute(f"GRANT SELECT, INSERT, UPDATE ON jobs TO {scheduler}")
+            await conn.execute(
+                f"GRANT SELECT, UPDATE ON judit_trackings TO {scheduler}"
+            )
+            await conn.execute(
+                f"GRANT SELECT, INSERT ON judit_tracking_refreshes TO {scheduler}"
+            )
             await conn.execute(f"GRANT DELETE ON judit_deliveries, jobs TO {scheduler}")
             await conn.execute(
                 f"GRANT SELECT, DELETE ON judit_request_completions TO {scheduler}"
