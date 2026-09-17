@@ -74,16 +74,39 @@ async def test_enabled_runtime_routes_query_reindex_and_search_without_legacy_pr
     assert len(result) == 1
 
 
-def test_cohere_runtime_fails_explicitly_without_cross_provider_fallback(
+def test_cohere_runtime_requires_explicit_external_authorization(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("EMBEDDING_SPACE_RUNTIME_ENABLED", "true")
     monkeypatch.setenv("EMBEDDING_PROVIDER", "cohere")
-    monkeypatch.setenv("ALLOW_EXTERNAL_EMBEDDINGS", "true")
+    monkeypatch.delenv("ALLOW_EXTERNAL_EMBEDDINGS", raising=False)
     embedding_runtime.clear_embedding_runtime_cache()
 
-    with pytest.raises(RuntimeError, match="Cohere embedding runtime is not implemented"):
+    with pytest.raises(RuntimeError, match="ALLOW_EXTERNAL_EMBEDDINGS=true"):
         embedding_runtime.get_active_embedding_runtime()
+
+
+def test_authorized_cohere_runtime_uses_separate_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created = []
+
+    class FakeCohereEncoder:
+        def __init__(self, **kwargs):
+            created.append(dict(kwargs))
+
+    monkeypatch.setenv("EMBEDDING_SPACE_RUNTIME_ENABLED", "true")
+    monkeypatch.setenv("EMBEDDING_PROVIDER", "cohere")
+    monkeypatch.setenv("ALLOW_EXTERNAL_EMBEDDINGS", "true")
+    monkeypatch.setattr(embedding_runtime, "CohereEmbeddingEncoder", FakeCohereEncoder)
+    embedding_runtime.clear_embedding_runtime_cache()
+
+    first = embedding_runtime.get_active_embedding_runtime()
+    second = embedding_runtime.get_active_embedding_runtime()
+
+    assert first is second
+    assert first.space.key == "cohere:embed-v4.0:1024"
+    assert created == [{"model": "embed-v4.0"}]
 
 
 def test_bge_runtime_is_cached_by_deployment_settings(
