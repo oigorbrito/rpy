@@ -20,6 +20,7 @@ from app.provenance import (
     replace_summary_attachment_sources,
     selected_attachment_sources,
 )
+from app.rag import _load_context
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(
@@ -206,6 +207,47 @@ async def test_generation_tenant_and_context_are_bound_to_authorized_request() -
         assert len(sources) == 1
         assert "text" not in sources[0]
         assert statuses == {"ready": 1}
+
+        context = await _load_context(
+            pool,
+            process_id,
+            version_id,
+            tenant_id=tenant_a,
+        )
+        assert context["attachment_status"] == {"ready": 1}
+        assert len(context["attachments"]) == 1
+        assert "penhora" in context["attachments"][0]["text"].lower()
+        assert len(context["_attachment_sources"]) == 1
+        assert "text" not in context["_attachment_sources"][0]
+
+        context_without_tenant = await _load_context(pool, process_id, version_id)
+        assert "attachments" not in context_without_tenant
+        assert context_without_tenant["_attachment_sources"] == []
+    finally:
+        await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_secret_rag_context_never_loads_attachment_text() -> None:
+    assert TEST_DATABASE_URL is not None
+    await migrate(TEST_DATABASE_URL)
+    pool = await asyncpg.create_pool(TEST_DATABASE_URL, min_size=1, max_size=2)
+    try:
+        async with pool.acquire() as conn:
+            await _reset(conn)
+            tenant_a, _, process_id, version_id, _ = await _fixture(conn)
+            await conn.execute("UPDATE processes SET secrecy_level=1 WHERE id=$1", process_id)
+
+        context = await _load_context(
+            pool,
+            process_id,
+            version_id,
+            tenant_id=tenant_a,
+        )
+        assert context["secrecy_level"] == 1
+        assert context["_attachment_sources"] == []
+        assert "attachments" not in context
+        assert "attachment_status" not in context
     finally:
         await pool.close()
 
