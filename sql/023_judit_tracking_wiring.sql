@@ -55,6 +55,8 @@ FOR EACH ROW EXECUTE FUNCTION reconcile_judit_tracking_process_version();
 CREATE OR REPLACE FUNCTION complete_judit_tracking_refresh()
 RETURNS trigger
 LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
 AS $$
 BEGIN
     UPDATE judit_tracking_refreshes
