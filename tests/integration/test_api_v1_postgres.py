@@ -180,6 +180,20 @@ async def test_v1_idempotency_states_authorization_and_sanitized_sources(monkeyp
                 tenant_a,
                 process_id,
             )
+            await conn.executemany(
+                """
+                INSERT INTO process_attachments (
+                    process_id, version_id, source_attachment_id, status
+                ) VALUES ($1, $2, $3, $4)
+                """,
+                [
+                    (process_id, version_id, "doc-ready", "ready"),
+                    (process_id, version_id, "doc-pending", "pending"),
+                    (process_id, version_id, "doc-unavailable", "unavailable"),
+                    (process_id, version_id, "doc-corrupt", "corrupt"),
+                    (process_id, version_id, "doc-unreadable", "unreadable"),
+                ],
+            )
             await conn.execute(
                 """
                 INSERT INTO process_steps (
@@ -282,6 +296,19 @@ async def test_v1_idempotency_states_authorization_and_sanitized_sources(monkeyp
             assert completed_body["status"] == "completed"
             assert completed_body["iaSummary"] == "# Resumo válido"
             assert completed_body["validation"]["passed"] is True
+            assert completed_body["flags"]["reused_existing_summary"] is False
+            assert completed_body["flags"]["attachments"] == {
+                "total": 5,
+                "status_counts": {
+                    "pending": 1,
+                    "ready": 1,
+                    "unavailable": 1,
+                    "corrupt": 1,
+                    "unreadable": 1,
+                },
+                "processing_complete": False,
+                "degraded": True,
+            }
             assert completed_body["usage"] == {
                 "model": "fake-offline",
                 "prompt_version": "test-v1",
@@ -298,6 +325,8 @@ async def test_v1_idempotency_states_authorization_and_sanitized_sources(monkeyp
             assert summary.status_code == 200
             assert summary.json()["iaSummary"] == "# Resumo válido"
             assert summary.json()["validation"]["passed"] is True
+            assert summary.json()["flags"]["attachments"]["degraded"] is True
+            assert summary.json()["flags"]["attachments"]["status_counts"]["pending"] == 1
 
             sources = await client.get(
                 f"/v1/processos/{other_code}/fontes", headers=auth_a
@@ -308,6 +337,14 @@ async def test_v1_idempotency_states_authorization_and_sanitized_sources(monkeyp
             assert movement["step_number"] == 1
             assert movement["source_step_number"] == 77
             assert movement["title"] == "SENTENÇA"
+            assert source_body["flags"]["attachments"]["degraded"] is True
+            assert source_body["flags"]["attachments"]["status_counts"] == {
+                "pending": 1,
+                "ready": 1,
+                "unavailable": 1,
+                "corrupt": 1,
+                "unreadable": 1,
+            }
             rendered_sources = json.dumps(source_body, ensure_ascii=False)
             assert raw_sentinel not in rendered_sources
             assert "source_payload" not in rendered_sources

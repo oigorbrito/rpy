@@ -97,6 +97,17 @@ Attachment retrieval is fail-closed:
 
 A later downloader must fetch bytes only from the source authorized for the process/tenant and must never log document bodies, signed download URLs, credentials or raw provider payloads.
 
+## Phase 5: public status signals
+
+Attachment processing state is surfaced without granting the API direct access to attachment rows or chunk text.
+
+- `process_attachment_status_counts` exposes only per-process/per-version aggregate counts for `pending`, `ready`, `unavailable`, `corrupt` and `unreadable`;
+- public `/v1` responses merge those counts under `flags.attachments`, including `total`, `processing_complete` and `degraded`;
+- no attachment id, source id, chunk id, raw text, byte hash or provider payload is exposed through this status surface;
+- generation converts non-ready/error counts into deterministic factual warnings that validation requires inside the summary's `Pontos de atenção` section;
+- `ready` alone does not create a warning; one failed attachment does not invalidate otherwise valid movement/context data;
+- secret-process generation still returns before external-provider attachment retrieval.
+
 ## Judit activation gate
 
 `with_attachments` remains `false` until all of the following exist in one tested rollout:

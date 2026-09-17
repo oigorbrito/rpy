@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 import asyncpg
 
 from app.attachment_context import load_attachment_context, resolve_generation_tenant
+from app.attachment_signals import attachment_status_warnings
 from app.db import create_pool
 from app.embeddings import (
     embed_query,
@@ -303,6 +304,9 @@ async def _load_context(
         base["_attachment_sources"] = attachment_sources
         if status_counts:
             base["attachment_status"] = status_counts
+            warnings = attachment_status_warnings(status_counts)
+            if warnings:
+                base.setdefault("source_warnings", []).extend(warnings)
         if attachments:
             base["attachments"] = attachments
     return base
