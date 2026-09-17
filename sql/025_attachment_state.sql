@@ -27,12 +27,18 @@ CREATE TABLE IF NOT EXISTS attachment_chunks (
     version_id UUID NOT NULL REFERENCES process_versions(id) ON DELETE CASCADE,
     chunk_index INTEGER NOT NULL CHECK (chunk_index >= 0),
     text TEXT NOT NULL CHECK (length(text) > 0),
-    page_start INTEGER CHECK (page_start IS NULL OR page_start >= 1),
-    page_end INTEGER CHECK (page_end IS NULL OR page_end >= page_start),
-    char_start INTEGER CHECK (char_start IS NULL OR char_start >= 0),
-    char_end INTEGER CHECK (char_end IS NULL OR char_end >= char_start),
+    page_start INTEGER,
+    page_end INTEGER,
+    char_start INTEGER,
+    char_end INTEGER,
     content_sha256 TEXT NOT NULL CHECK (content_sha256 ~ '^[0-9a-f]{64}$'),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK ((page_start IS NULL) = (page_end IS NULL)),
+    CHECK (page_start IS NULL OR page_start >= 1),
+    CHECK (page_end IS NULL OR page_end >= page_start),
+    CHECK ((char_start IS NULL) = (char_end IS NULL)),
+    CHECK (char_start IS NULL OR char_start >= 0),
+    CHECK (char_end IS NULL OR char_end >= char_start),
     UNIQUE (attachment_id, chunk_index)
 );
 
