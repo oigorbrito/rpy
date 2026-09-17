@@ -24,6 +24,7 @@ from app.providers import (
     call_with_retries,
     is_retryable_anthropic_error,
 )
+from app.provenance import replace_summary_sources, selected_movement_sources
 from app.reranker_bge import BGERerankerScorer, bge_reranker_enabled
 from app.reranking import RERANK_CANDIDATE_LIMIT, select_context_steps
 from app.retrieval import lexical_search, load_steps, vector_search
@@ -216,6 +217,7 @@ async def _load_context(
             "parties": [],
             "subjects": [],
             "steps": [],
+            "_selected_sources": [],
         }
 
     async with pool.acquire() as conn:
@@ -262,6 +264,7 @@ async def _load_context(
         vector_scores=vector_scores,
         scorer=reranker_scorer,
     )
+    base["_selected_sources"] = selected_movement_sources(ranked)
     base["steps"] = _serialize_steps(ranked)
     return base
 
@@ -469,45 +472,56 @@ async def _persist_summary(
     usage: dict[str, Any] | None = None,
     cache_hit: bool | None = None,
     cost_usd: float | None = None,
+    selected_sources: list[dict[str, Any]] | None = None,
 ) -> bool:
-    row = await conn.fetchrow(
-        """
-        INSERT INTO process_summaries (
-            process_id, version_id, markdown, validation, model, prompt_version,
-            generation_ms, usage, cache_hit, cost_usd
-        ) VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8::jsonb, $9, $10)
-        ON CONFLICT (process_id, version_id)
-        DO UPDATE SET markdown = EXCLUDED.markdown,
-                      validation = EXCLUDED.validation,
-                      model = EXCLUDED.model,
-                      prompt_version = EXCLUDED.prompt_version,
-                      generation_ms = EXCLUDED.generation_ms,
-                      usage = EXCLUDED.usage,
-                      cache_hit = EXCLUDED.cache_hit,
-                      cost_usd = EXCLUDED.cost_usd,
-                      created_at = NOW()
-        WHERE COALESCE((process_summaries.validation->>'passed')::boolean, false) = false
-           OR (
-                COALESCE((EXCLUDED.validation->>'passed')::boolean, false) = true
-                AND (
-                    process_summaries.prompt_version IS DISTINCT FROM EXCLUDED.prompt_version
-                    OR process_summaries.model IS DISTINCT FROM EXCLUDED.model
-                )
-           )
-        RETURNING id
-        """,
-        process_id,
-        version_id,
-        text,
-        validation,
-        model,
-        prompt_version,
-        generation_ms,
-        json.dumps(usage or {}),
-        cache_hit,
-        cost_usd,
-    )
-    return row is not None
+    async with conn.transaction():
+        row = await conn.fetchrow(
+            """
+            INSERT INTO process_summaries (
+                process_id, version_id, markdown, validation, model, prompt_version,
+                generation_ms, usage, cache_hit, cost_usd
+            ) VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8::jsonb, $9, $10)
+            ON CONFLICT (process_id, version_id)
+            DO UPDATE SET markdown = EXCLUDED.markdown,
+                          validation = EXCLUDED.validation,
+                          model = EXCLUDED.model,
+                          prompt_version = EXCLUDED.prompt_version,
+                          generation_ms = EXCLUDED.generation_ms,
+                          usage = EXCLUDED.usage,
+                          cache_hit = EXCLUDED.cache_hit,
+                          cost_usd = EXCLUDED.cost_usd,
+                          created_at = NOW()
+            WHERE COALESCE((process_summaries.validation->>'passed')::boolean, false) = false
+               OR (
+                    COALESCE((EXCLUDED.validation->>'passed')::boolean, false) = true
+                    AND (
+                        process_summaries.prompt_version IS DISTINCT FROM EXCLUDED.prompt_version
+                        OR process_summaries.model IS DISTINCT FROM EXCLUDED.model
+                    )
+               )
+            RETURNING id
+            """,
+            process_id,
+            version_id,
+            text,
+            validation,
+            model,
+            prompt_version,
+            generation_ms,
+            json.dumps(usage or {}),
+            cache_hit,
+            cost_usd,
+        )
+        if row is None:
+            return False
+        await replace_summary_sources(
+            conn,
+            summary_id=row["id"],
+            process_id=process_id,
+            version_id=version_id,
+            sources=selected_sources or [],
+        )
+    return True
 
 
 async def _load_publishable_summary(
@@ -621,6 +635,7 @@ async def generate_summary(
             usage=usage,
             cache_hit=cache_hit,
             cost_usd=cost_usd,
+            selected_sources=list(context.get("_selected_sources", [])),
         )
     return {
         "validation": validation,
