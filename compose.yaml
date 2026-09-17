@@ -61,7 +61,10 @@ services:
   worker-1:
     build: .
     command: ["python", "-m", "app.worker"]
-    environment: *rpy-env
+    environment:
+      <<: *rpy-env
+      JUDIT_API_KEY: ${JUDIT_API_KEY:-}
+      JUDIT_TIMEOUT_SECONDS: ${JUDIT_TIMEOUT_SECONDS:-15}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -70,7 +73,10 @@ services:
   worker-2:
     build: .
     command: ["python", "-m", "app.worker"]
-    environment: *rpy-env
+    environment:
+      <<: *rpy-env
+      JUDIT_API_KEY: ${JUDIT_API_KEY:-}
+      JUDIT_TIMEOUT_SECONDS: ${JUDIT_TIMEOUT_SECONDS:-15}
     depends_on:
       migrate:
         condition: service_completed_successfully
