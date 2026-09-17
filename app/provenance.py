@@ -160,7 +160,7 @@ async def load_used_summary_sources(
         """,
         summary_id,
     )
-    return [
+    sources: list[dict[str, Any]] = [
         {
             "kind": "movement",
             "chunk_type": str(row["chunk_type"]),
@@ -178,3 +178,30 @@ async def load_used_summary_sources(
         }
         for row in rows
     ]
+
+    glossary_rows = await conn.fetch(
+        """
+        SELECT kind, code, tpu_version, publisher, source, source_ref,
+               definition_sha256, source_order
+        FROM process_summary_glossary_sources
+        WHERE summary_id = $1
+        ORDER BY source_order
+        """,
+        summary_id,
+    )
+    sources.extend(
+        {
+            "kind": "tpu_glossary",
+            "glossary_kind": str(row["kind"]),
+            "code": str(row["code"]),
+            "tpu_version": str(row["tpu_version"]),
+            "publisher": str(row["publisher"]),
+            "source": str(row["source"]),
+            "source_ref": str(row["source_ref"]),
+            "definition_sha256": str(row["definition_sha256"]),
+            "used_for_summary": True,
+            "source_order": int(row["source_order"]),
+        }
+        for row in glossary_rows
+    )
+    return sources
