@@ -43,6 +43,8 @@ SONNET_MODEL = "claude-sonnet-5"
 OPUS_MODEL = "claude-opus-5"
 MODEL = SONNET_MODEL  # Backward-compatible default model constant.
 OPUS_STEP_THRESHOLD = 100
+SHORT_SUMMARY_STEP_MAX = 15
+MEDIUM_SUMMARY_STEP_MAX = 60
 MAX_TOKENS = 4000
 PROMPT_VERSION = "process-summary-v2"
 SECRET_MODEL = "local-deterministic"
@@ -385,6 +387,28 @@ def _validate_provider_summary(text: str, context: dict[str, Any]) -> Validation
     )
 
 
+def summary_volume_instruction(step_count: int) -> str:
+    """Return a qualitative density profile without inventing word-count limits."""
+    if step_count < 0:
+        raise ValueError("step_count must be non-negative")
+    if step_count <= SHORT_SUMMARY_STEP_MAX:
+        return (
+            "Processo curto (até 15 movimentos): produza uma síntese curta e direta, "
+            "sem expandir eventos simples nem repetir informação entre seções."
+        )
+    if step_count <= MEDIUM_SUMMARY_STEP_MAX:
+        return (
+            "Processo de volume intermediário (16 a 60 movimentos): use síntese "
+            "moderada, agrupando atos repetitivos e preservando os marcos que "
+            "explicam a situação atual."
+        )
+    return (
+        "Processo longo (mais de 60 movimentos): aplique compressão forte, "
+        "priorize marcos, decisões e o estado atual, e não tente reproduzir "
+        "cronologicamente todo ato de expediente."
+    )
+
+
 def _generation_model(context: dict[str, Any]) -> str:
     return (
         OPUS_MODEL
@@ -459,8 +483,11 @@ async def _generate(
         )
 
     provider_process, provider_steps = _provider_payload(context)
+    volume_instruction = summary_volume_instruction(int(context.get("step_count") or 0))
     user_prompt = (
-        "<processo>\n"
+        "<perfil_de_extensao>\n"
+        + volume_instruction
+        + "\n</perfil_de_extensao>\n<processo>\n"
         + json.dumps(provider_process, ensure_ascii=False, default=str)
         + "\n</processo>\n<movimentos>\n"
         + json.dumps(provider_steps, ensure_ascii=False, default=str)
