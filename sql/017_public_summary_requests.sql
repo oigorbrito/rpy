@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS public_summary_requests (
     idempotency_key TEXT NOT NULL,
     request_fingerprint TEXT NOT NULL,
     status public_summary_status NOT NULL DEFAULT 'queued',
-    tenant_request_id UUID REFERENCES tenant_judit_requests(id) ON DELETE SET NULL,
+    tenant_judit_request_id UUID REFERENCES tenant_judit_requests(id) ON DELETE SET NULL,
     process_id UUID REFERENCES processes(id) ON DELETE SET NULL,
     version_id UUID REFERENCES process_versions(id) ON DELETE SET NULL,
     summary_id UUID REFERENCES process_summaries(id) ON DELETE SET NULL,
@@ -41,9 +41,9 @@ ON public_summary_requests (tenant_id, status, updated_at DESC);
 CREATE INDEX IF NOT EXISTS public_summary_requests_process_idx
 ON public_summary_requests (tenant_id, process_code, updated_at DESC);
 
-CREATE INDEX IF NOT EXISTS public_summary_requests_tenant_request_idx
-ON public_summary_requests (tenant_request_id, updated_at DESC)
-WHERE tenant_request_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS public_summary_requests_acquisition_idx
+ON public_summary_requests (tenant_judit_request_id, updated_at DESC)
+WHERE tenant_judit_request_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS public_summary_requests_version_idx
 ON public_summary_requests (version_id, updated_at DESC)
