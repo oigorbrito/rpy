@@ -45,6 +45,18 @@ class TPUDefinition:
             "definition_sha256": self.definition_sha256,
         }
 
+    def as_provenance(self, *, source_order: int) -> dict[str, str | int]:
+        return {
+            "kind": self.kind,
+            "code": self.code,
+            "tpu_version": self.tpu_version,
+            "publisher": self.publisher,
+            "source": self.source,
+            "source_ref": self.source_ref,
+            "definition_sha256": self.definition_sha256,
+            "source_order": source_order,
+        }
+
 
 @dataclass(frozen=True, slots=True)
 class TPUCatalog:
