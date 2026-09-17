@@ -61,12 +61,15 @@ def test_bge_image_readiness_rejects_online_or_wrong_artifact(
     assert any("BGE_EMBEDDING_PATH must equal" in error for error in errors)
 
 
-def test_bge_dockerfile_uses_external_offline_contexts() -> None:
+def test_bge_dockerfile_uses_hashed_external_offline_contexts() -> None:
     dockerfile = (Path(__file__).resolve().parents[1] / "Dockerfile.bge").read_text(
         encoding="utf-8"
     )
     assert "COPY --from=bge_wheels" in dockerfile
     assert "COPY --from=bge_model" in dockerfile
+    assert "COPY scripts/verify_bge_image_runtime.py" in dockerfile
+    assert "requirements.lock" in dockerfile
+    assert "--require-hashes" in dockerfile
     assert "--no-index" in dockerfile
     assert "HF_HUB_OFFLINE=1" in dockerfile
     assert "TRANSFORMERS_OFFLINE=1" in dockerfile
