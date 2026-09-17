@@ -101,7 +101,8 @@ async def test_empty_steps_warning_is_sent_to_single_correction_attempt(monkeypa
     async def fake_existing(pool, process_id, version_id):
         return None
 
-    async def fake_context(pool, process_id, version_id):
+    async def fake_context(pool, process_id, version_id, *, tenant_id=None):
+        assert tenant_id is None
         return context
 
     async def fake_generate(client, supplied_context, validation_errors=None):
