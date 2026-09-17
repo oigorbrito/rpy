@@ -13,6 +13,7 @@ from app.datajud_provenance import (
     replace_datajud_field_provenance,
 )
 from app.migrations import migrate
+from app.rag import _load_process
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(
@@ -161,3 +162,56 @@ async def test_datajud_provenance_rejects_cross_process_version_scope() -> None:
             )
     finally:
         await conn.close()
+
+
+@pytest.mark.asyncio
+async def test_rag_load_process_reads_only_persisted_datajud_conflict_fields() -> None:
+    assert TEST_DATABASE_URL is not None
+    await migrate(TEST_DATABASE_URL)
+    pool = await asyncpg.create_pool(TEST_DATABASE_URL, min_size=1, max_size=2)
+    try:
+        async with pool.acquire() as conn:
+            process_id = await conn.fetchval(
+                """
+                INSERT INTO processes (code, class_name, header)
+                VALUES ($1, 'Classe Oficial', '{"county":"Canoas"}'::jsonb)
+                RETURNING id
+                """,
+                "0000000-00.2026.8.21.0149",
+            )
+            version_id = await conn.fetchval(
+                """
+                INSERT INTO process_versions (process_id, source_request_id, finalized)
+                VALUES ($1, $2, TRUE)
+                RETURNING id
+                """,
+                process_id,
+                f"datajud-rag-{uuid4()}",
+            )
+            await conn.execute(
+                "UPDATE processes SET current_version_id=$2 WHERE id=$1",
+                process_id,
+                version_id,
+            )
+            await conn.executemany(
+                """
+                INSERT INTO process_datajud_field_provenance (
+                    process_id, version_id, field_name, selected_source,
+                    selected_value, conflict, source_ref
+                )
+                VALUES ($1, $2, $3, 'datajud', $4::jsonb, $5, 'DataJud fixture 146')
+                """,
+                [
+                    (process_id, version_id, "class_name", '"Classe Oficial"', True),
+                    (process_id, version_id, "county", '"Canoas"', True),
+                    (process_id, version_id, "class_code", '"7"', False),
+                ],
+            )
+
+        loaded = await _load_process(pool, process_id, version_id)
+
+        assert loaded["_datajud_conflict_fields"] == ["class_name", "county"]
+        assert loaded["class_name"] == "Classe Oficial"
+        assert loaded["header"]["county"] == "Canoas"
+    finally:
+        await pool.close()
