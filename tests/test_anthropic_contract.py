@@ -6,7 +6,16 @@ from typing import Any
 import pytest
 
 from app.prompts import PROCESS_SUMMARY_SYSTEM_PROMPT
-from app.rag import MODEL, PROMPT_VERSION, _generate
+from app.rag import (
+    MAX_OUTPUT_TOKENS,
+    MODEL,
+    OPUS_MODEL,
+    OPUS_STEP_THRESHOLD,
+    PROMPT_VERSION,
+    SONNET_MODEL,
+    _generate,
+    generation_model_for_context,
+)
 
 
 @dataclass
@@ -34,10 +43,8 @@ class _Client:
         self.messages = _Messages()
 
 
-@pytest.mark.asyncio
-async def test_sonnet_5_request_uses_cacheable_system_prompt_without_custom_sampling() -> None:
-    client = _Client()
-    context = {
+def _context(*, step_count: int = 1) -> dict[str, Any]:
+    return {
         "code": "0000000-00.0000.0.00.0601",
         "class_name": "Procedimento Comum",
         "court": "TJRS",
@@ -45,19 +52,30 @@ async def test_sonnet_5_request_uses_cacheable_system_prompt_without_custom_samp
         "parties": [],
         "subjects": [],
         "secrecy_level": 0,
-        "steps": [{"step_number": 1, "title": "DISTRIBUIÇÃO", "text": "Distribuído."}],
+        "step_count": step_count,
+        "steps": [
+            {"step_number": 1, "title": "DISTRIBUIÇÃO", "text": "Distribuído."}
+        ],
     }
+
+
+@pytest.mark.asyncio
+async def test_sonnet_request_uses_documented_generation_contract() -> None:
+    client = _Client()
+    context = _context(step_count=OPUS_STEP_THRESHOLD)
 
     text = await _generate(client, context)
 
     assert text == "# Resumo válido"
     assert len(client.messages.calls) == 1
     request = client.messages.calls[0]
-    assert request["model"] == MODEL == "claude-sonnet-5"
+    assert request["model"] == MODEL == SONNET_MODEL == "claude-sonnet-5"
+    assert request["max_tokens"] == MAX_OUTPUT_TOKENS == 4000
     assert PROMPT_VERSION == "process-summary-v2"
     assert "temperature" not in request
     assert "top_p" not in request
     assert "top_k" not in request
+    assert "stream" not in request
 
     system = request["system"]
     assert len(system) == 1
@@ -65,9 +83,7 @@ async def test_sonnet_5_request_uses_cacheable_system_prompt_without_custom_samp
     assert system[0]["text"] == PROCESS_SUMMARY_SYSTEM_PROMPT
     assert system[0]["cache_control"] == {"type": "ephemeral"}
 
-    # Conservative proxy for Sonnet 5's 1,024-token prompt-cache minimum.
-    # Portuguese legal prose typically tokenizes to more than one token per word,
-    # so 1,100+ whitespace-delimited words provides margin without tokenizer coupling.
+    # Conservative proxy for the provider's prompt-cache minimum.
     assert len(PROCESS_SUMMARY_SYSTEM_PROMPT.split()) >= 1100
 
     user_content = request["messages"][0]["content"]
@@ -77,18 +93,25 @@ async def test_sonnet_5_request_uses_cacheable_system_prompt_without_custom_samp
 
 
 @pytest.mark.asyncio
+async def test_more_than_100_movements_routes_generation_to_opus() -> None:
+    client = _Client()
+    context = _context(step_count=OPUS_STEP_THRESHOLD + 1)
+
+    assert generation_model_for_context(context) == OPUS_MODEL == "claude-opus-5"
+    await _generate(client, context)
+
+    request = client.messages.calls[0]
+    assert request["model"] == OPUS_MODEL
+    assert request["max_tokens"] == 4000
+    assert "temperature" not in request
+    assert "stream" not in request
+
+
+@pytest.mark.asyncio
 async def test_validation_errors_are_sent_only_in_dynamic_user_content() -> None:
     client = _Client()
-    context = {
-        "code": "0000000-00.0000.0.00.0602",
-        "class_name": "Classe",
-        "court": None,
-        "header": {},
-        "parties": [],
-        "subjects": [],
-        "secrecy_level": 0,
-        "steps": [],
-    }
+    context = _context(step_count=0)
+    context["steps"] = []
     errors = ["prognostic language is prohibited", "JSX must use className="]
 
     await _generate(client, context, errors)
