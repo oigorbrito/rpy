@@ -7,6 +7,7 @@ from uuid import UUID
 import asyncpg
 
 from app.datajud_enrichment import DataJudMergeResult, FieldProvenance
+from app.json_utils import decode_json_value
 
 
 def datajud_conflict_warning(field: str) -> str:
@@ -83,7 +84,7 @@ async def load_datajud_field_provenance(
         {
             "field": str(row["field_name"]),
             "selected_source": str(row["selected_source"]),
-            "selected_value": row["selected_value"],
+            "selected_value": decode_json_value(row["selected_value"]),
             "conflict": bool(row["conflict"]),
             "source_ref": row["source_ref"],
         }
