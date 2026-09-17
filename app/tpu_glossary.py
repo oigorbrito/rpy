@@ -8,11 +8,9 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal, Sequence
 
-DEFAULT_TPU_GLOSSARY_PATH = (
-    Path(__file__).resolve().parent.parent / "data" / "tpu" / "2026-09-12.json"
-)
 TPU_GLOSSARY_PATH_ENV = "TPU_GLOSSARY_PATH"
 TPU_SCHEMA_VERSION = 1
+TPU_SNAPSHOT_RELATIVE_PATH = Path("data") / "tpu" / "2026-09-12.json"
 
 TPUKind = Literal["class", "subject"]
 
@@ -75,13 +73,23 @@ class TPUCatalog:
         return self.entries.get((kind, normalized))
 
 
+def _default_catalog_path() -> Path:
+    runtime_path = Path.cwd() / TPU_SNAPSHOT_RELATIVE_PATH
+    if runtime_path.is_file():
+        return runtime_path
+    source_path = Path(__file__).resolve().parent.parent / TPU_SNAPSHOT_RELATIVE_PATH
+    if source_path.is_file():
+        return source_path
+    return runtime_path
+
+
 def _catalog_path(path: str | Path | None = None) -> Path:
     if path is not None:
         return Path(path)
     configured = str(os.environ.get(TPU_GLOSSARY_PATH_ENV) or "").strip()
     if configured:
         return Path(configured)
-    return DEFAULT_TPU_GLOSSARY_PATH
+    return _default_catalog_path()
 
 
 def load_tpu_catalog(path: str | Path | None = None) -> TPUCatalog:
