@@ -3,7 +3,7 @@ from __future__ import annotations
 from app.judit import extract_promotable_fields
 
 
-def test_public_judit_fields_preserve_source_and_add_derived_tpu_context() -> None:
+def test_public_judit_fields_preserve_tpu_codes_without_derived_definitions() -> None:
     process = {
         "code": "0000000-00.2026.8.21.1380",
         "secrecy_level": 0,
@@ -19,18 +19,10 @@ def test_public_judit_fields_preserve_source_and_add_derived_tpu_context() -> No
         {"code": "5804", "name": "ASSUNTO RECEBIDO DA JUDIT"}
     ]
     assert fields["header"]["class_code"] == "7"
-    glossary = fields["header"]["tpu_glossary"]
-    assert [(item["kind"], item["code"]) for item in glossary] == [
-        ("class", "7"),
-        ("subject", "5804"),
-    ]
-    assert {item["tpu_version"] for item in glossary} == {"2026-09-12"}
-    assert all(len(item["definition_sha256"]) == 64 for item in glossary)
-    assert glossary[0]["name"] == "Procedimento Comum Cível"
-    assert glossary[1]["name"] == "Investigação de Paternidade"
+    assert "tpu_glossary" not in fields["header"]
 
 
-def test_unknown_tpu_codes_do_not_gain_invented_definitions() -> None:
+def test_unknown_tpu_codes_remain_source_fields_without_invented_definitions() -> None:
     fields = extract_promotable_fields(
         {
             "code": "0000000-00.2026.8.21.1381",
@@ -46,7 +38,7 @@ def test_unknown_tpu_codes_do_not_gain_invented_definitions() -> None:
     assert fields["subjects"] == [{"code": "888888", "name": "Assunto recebido"}]
 
 
-def test_secret_process_does_not_resolve_or_promote_tpu_glossary() -> None:
+def test_secret_process_does_not_promote_tpu_codes_or_subjects() -> None:
     fields = extract_promotable_fields(
         {
             "code": "0000000-00.2026.8.21.1382",
