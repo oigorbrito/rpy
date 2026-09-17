@@ -22,6 +22,24 @@ def selected_movement_sources(ranked: Sequence[RankedStep]) -> list[dict[str, An
     ]
 
 
+def selected_attachment_sources(chunks: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return text-free provenance for the exact attachment chunks sent to generation."""
+    return [
+        {
+            "attachment_id": chunk["attachment_id"],
+            "attachment_chunk_id": chunk["chunk_id"],
+            "source_attachment_id": str(chunk["source_attachment_id"]),
+            "page_start": chunk.get("page_start"),
+            "page_end": chunk.get("page_end"),
+            "char_start": chunk.get("char_start"),
+            "char_end": chunk.get("char_end"),
+            "content_sha256": str(chunk["content_sha256"]),
+            "source_order": source_order,
+        }
+        for source_order, chunk in enumerate(chunks)
+    ]
+
+
 async def replace_summary_sources(
     conn: asyncpg.Connection,
     *,
@@ -68,6 +86,63 @@ async def replace_summary_sources(
             summary_id, process_id, version_id, chunk_type,
             step_id, step_number, occurred_at, source_order
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        """,
+        records,
+    )
+
+
+async def replace_summary_attachment_sources(
+    conn: asyncpg.Connection,
+    *,
+    summary_id: UUID,
+    process_id: UUID,
+    version_id: UUID,
+    sources: Sequence[dict[str, Any]],
+) -> None:
+    """Replace attachment provenance without storing attachment text."""
+    await conn.execute(
+        "DELETE FROM process_summary_attachment_sources WHERE summary_id = $1",
+        summary_id,
+    )
+    if not sources:
+        return
+
+    records: list[tuple[Any, ...]] = []
+    for source in sources:
+        attachment_id = source.get("attachment_id")
+        chunk_id = source.get("attachment_chunk_id")
+        if not isinstance(attachment_id, UUID) or not isinstance(chunk_id, UUID):
+            raise ValueError("attachment provenance ids must be UUIDs")
+        source_attachment_id = str(source.get("source_attachment_id") or "").strip()
+        digest = str(source.get("content_sha256") or "").strip().lower()
+        if not source_attachment_id:
+            raise ValueError("attachment provenance source_attachment_id is required")
+        if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+            raise ValueError("invalid attachment provenance content_sha256")
+        records.append(
+            (
+                summary_id,
+                process_id,
+                version_id,
+                attachment_id,
+                chunk_id,
+                source_attachment_id,
+                source.get("page_start"),
+                source.get("page_end"),
+                source.get("char_start"),
+                source.get("char_end"),
+                digest,
+                int(source.get("source_order", 0)),
+            )
+        )
+
+    await conn.executemany(
+        """
+        INSERT INTO process_summary_attachment_sources (
+            summary_id, process_id, version_id, attachment_id, attachment_chunk_id,
+            source_attachment_id, page_start, page_end, char_start, char_end,
+            content_sha256, source_order
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
         """,
         records,
     )
@@ -178,6 +253,34 @@ async def load_used_summary_sources(
         }
         for row in rows
     ]
+
+    attachment_rows = await conn.fetch(
+        """
+        SELECT attachment_id, attachment_chunk_id, source_attachment_id,
+               page_start, page_end, char_start, char_end,
+               content_sha256, source_order
+        FROM process_summary_attachment_sources
+        WHERE summary_id = $1
+        ORDER BY source_order
+        """,
+        summary_id,
+    )
+    sources.extend(
+        {
+            "kind": "attachment",
+            "used_for_summary": True,
+            "attachment_id": str(row["attachment_id"]),
+            "attachment_chunk_id": str(row["attachment_chunk_id"]),
+            "source_attachment_id": str(row["source_attachment_id"]),
+            "page_start": row["page_start"],
+            "page_end": row["page_end"],
+            "char_start": row["char_start"],
+            "char_end": row["char_end"],
+            "content_sha256": str(row["content_sha256"]),
+            "source_order": int(row["source_order"]),
+        }
+        for row in attachment_rows
+    )
 
     glossary_rows = await conn.fetch(
         """

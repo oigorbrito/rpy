@@ -214,6 +214,72 @@ async def load_authorized_attachment_chunks(
     return [dict(row) for row in rows]
 
 
+async def search_authorized_attachment_chunks(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    process_id: UUID,
+    version_id: UUID,
+    query: str,
+    limit: int = 12,
+) -> list[dict[str, object]]:
+    """Rank ready chunks only after the tenant/process/current-version boundary is applied."""
+    if limit <= 0:
+        raise ValueError("attachment retrieval limit must be greater than zero")
+    normalized_query = query.strip()
+    if not normalized_query:
+        return []
+
+    rows = await conn.fetch(
+        """
+        WITH authorized_chunks AS (
+            SELECT pa.id AS attachment_id,
+                   pa.source_attachment_id,
+                   ac.id AS chunk_id,
+                   ac.chunk_index,
+                   ac.text,
+                   ac.page_start,
+                   ac.page_end,
+                   ac.char_start,
+                   ac.char_end,
+                   ac.content_sha256,
+                   to_tsvector('portuguese', ac.text) AS document
+            FROM tenant_processes tp
+            JOIN processes p
+              ON p.id=tp.process_id
+             AND p.id=$2
+             AND p.current_version_id=$3
+             AND p.secrecy_level=0
+            JOIN process_attachments pa
+              ON pa.process_id=p.id
+             AND pa.version_id=$3
+             AND pa.status='ready'
+            JOIN attachment_chunks ac
+              ON ac.attachment_id=pa.id
+             AND ac.process_id=p.id
+             AND ac.version_id=$3
+            WHERE tp.tenant_id=$1
+        ), q AS (
+            SELECT websearch_to_tsquery('portuguese', $4) AS query
+        )
+        SELECT authorized_chunks.*,
+               ts_rank_cd(authorized_chunks.document, q.query) AS lexical_score
+        FROM authorized_chunks, q
+        WHERE authorized_chunks.document @@ q.query
+        ORDER BY lexical_score DESC,
+                 source_attachment_id,
+                 chunk_index
+        LIMIT $5
+        """,
+        tenant_id,
+        process_id,
+        version_id,
+        normalized_query,
+        limit,
+    )
+    return [dict(row) for row in rows]
+
+
 async def attachment_status_counts(
     conn: asyncpg.Connection,
     *,

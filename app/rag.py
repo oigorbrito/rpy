@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 
 import asyncpg
 
+from app.attachment_context import load_attachment_context, resolve_generation_tenant
 from app.db import create_pool
 from app.embeddings import (
     embed_query,
@@ -25,6 +26,7 @@ from app.providers import (
     is_retryable_anthropic_error,
 )
 from app.provenance import (
+    replace_summary_attachment_sources,
     replace_summary_glossary_sources,
     replace_summary_sources,
     selected_movement_sources,
@@ -209,6 +211,7 @@ async def _load_context(
     pool: asyncpg.Pool,
     process_id: UUID,
     version_id: UUID,
+    tenant_id: UUID | None = None,
 ) -> dict[str, Any]:
     base = await _load_process(pool, process_id, version_id)
 
@@ -223,6 +226,7 @@ async def _load_context(
             "subjects": [],
             "steps": [],
             "_selected_sources": [],
+            "_attachment_sources": [],
             "_glossary_sources": [],
         }
 
@@ -285,6 +289,22 @@ async def _load_context(
     )
     base["_selected_sources"] = selected_movement_sources(ranked)
     base["steps"] = _serialize_steps(ranked)
+
+    base["_attachment_sources"] = []
+    if tenant_id is not None:
+        attachments, attachment_sources, status_counts = await load_attachment_context(
+            pool,
+            tenant_id=tenant_id,
+            process_id=process_id,
+            version_id=version_id,
+            process_context=base,
+            base_query=RETRIEVAL_QUERY,
+        )
+        base["_attachment_sources"] = attachment_sources
+        if status_counts:
+            base["attachment_status"] = status_counts
+        if attachments:
+            base["attachments"] = attachments
     return base
 
 
@@ -492,6 +512,7 @@ async def _persist_summary(
     cache_hit: bool | None = None,
     cost_usd: float | None = None,
     selected_sources: list[dict[str, Any]] | None = None,
+    attachment_sources: list[dict[str, Any]] | None = None,
     glossary_sources: list[dict[str, Any]] | None = None,
 ) -> bool:
     async with conn.transaction():
@@ -541,6 +562,13 @@ async def _persist_summary(
             version_id=version_id,
             sources=selected_sources or [],
         )
+        await replace_summary_attachment_sources(
+            conn,
+            summary_id=row["id"],
+            process_id=process_id,
+            version_id=version_id,
+            sources=attachment_sources or [],
+        )
         await replace_summary_glossary_sources(
             conn,
             summary_id=row["id"],
@@ -589,6 +617,8 @@ async def generate_summary(
     pool: asyncpg.Pool,
     process_id: UUID,
     version_id: UUID,
+    *,
+    tenant_id: UUID | None = None,
 ) -> dict[str, Any]:
     existing = await _load_publishable_summary(pool, process_id, version_id)
     if existing is not None:
@@ -604,7 +634,7 @@ async def generate_summary(
         }
 
     started = perf_counter()
-    context = await _load_context(pool, process_id, version_id)
+    context = await _load_context(pool, process_id, version_id, tenant_id=tenant_id)
 
     model = MODEL
     prompt_version = PROMPT_VERSION
@@ -663,6 +693,7 @@ async def generate_summary(
             cache_hit=cache_hit,
             cost_usd=cost_usd,
             selected_sources=list(context.get("_selected_sources", [])),
+            attachment_sources=list(context.get("_attachment_sources", [])),
             glossary_sources=list(context.get("_glossary_sources", [])),
         )
     return {
@@ -686,6 +717,20 @@ async def generate_process_summary_task(payload: dict[str, Any]) -> dict[str, An
     version_id = UUID(str(payload["version_id"]))
     pool = await create_pool(database_url, min_size=1, max_size=4)
     try:
-        return await generate_summary(pool, process_id, version_id)
+        tenant_id = await resolve_generation_tenant(
+            pool,
+            judit_request_id=(
+                str(payload["judit_request_id"])
+                if payload.get("judit_request_id")
+                else None
+            ),
+            process_id=process_id,
+        )
+        return await generate_summary(
+            pool,
+            process_id,
+            version_id,
+            tenant_id=tenant_id,
+        )
     finally:
         await pool.close()

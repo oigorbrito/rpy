@@ -69,6 +69,9 @@ async def test_runtime_database_roles_are_least_privilege(monkeypatch: pytest.Mo
             "SELECT has_table_privilege('rpy_api', 'processes', 'SELECT')"
         )
         assert await admin.fetchval(
+            "SELECT has_table_privilege('rpy_api', 'process_summary_attachment_sources', 'SELECT')"
+        )
+        assert await admin.fetchval(
             "SELECT has_table_privilege('rpy_api', 'access_log', 'INSERT')"
         )
         assert await admin.fetchval(
@@ -126,6 +129,9 @@ async def test_runtime_database_roles_are_least_privilege(monkeypatch: pytest.Mo
         assert await admin.fetchval(
             "SELECT has_table_privilege('rpy_worker', 'attachment_chunks', 'SELECT,INSERT,UPDATE,DELETE')"
         )
+        assert await admin.fetchval(
+            "SELECT has_table_privilege('rpy_worker', 'process_summary_attachment_sources', 'SELECT,INSERT,UPDATE,DELETE')"
+        )
         assert not await admin.fetchval(
             "SELECT has_table_privilege('rpy_worker', 'public_summary_requests', 'DELETE')"
         )
@@ -154,6 +160,9 @@ async def test_runtime_database_roles_are_least_privilege(monkeypatch: pytest.Mo
         assert not await admin.fetchval(
             "SELECT has_table_privilege('rpy_scheduler', 'attachment_chunks', 'SELECT')"
         )
+        assert not await admin.fetchval(
+            "SELECT has_table_privilege('rpy_scheduler', 'process_summary_attachment_sources', 'SELECT')"
+        )
 
         assert await admin.fetchval(
             "SELECT has_table_privilege('rpy_backup', 'processes', 'SELECT')"
@@ -163,6 +172,9 @@ async def test_runtime_database_roles_are_least_privilege(monkeypatch: pytest.Mo
         )
         assert await admin.fetchval(
             "SELECT has_table_privilege('rpy_backup', 'attachment_chunks', 'SELECT')"
+        )
+        assert await admin.fetchval(
+            "SELECT has_table_privilege('rpy_backup', 'process_summary_attachment_sources', 'SELECT')"
         )
         assert await admin.fetchval(
             "SELECT has_table_privilege('rpy_backup', 'backup_runs', 'INSERT')"
@@ -178,6 +190,7 @@ async def test_runtime_database_roles_are_least_privilege(monkeypatch: pytest.Mo
         assert await api.fetchval("SELECT count(*) FROM processes") is not None
         assert await api.fetchval("SELECT count(*) FROM public_summary_requests") is not None
         assert await api.fetchval("SELECT count(*) FROM judit_trackings") is not None
+        assert await api.fetchval("SELECT count(*) FROM process_summary_attachment_sources") is not None
         with pytest.raises(asyncpg.InsufficientPrivilegeError):
             await api.fetchval("SELECT count(*) FROM attachment_chunks")
         with pytest.raises(asyncpg.InsufficientPrivilegeError):
