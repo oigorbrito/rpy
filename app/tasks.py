@@ -32,9 +32,3 @@ def resolve_task(name: str) -> TaskHandler:
 @task("healthcheck")
 async def healthcheck(payload: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, "payload": payload}
-
-
-# Worker startup imports app.tasks transitively before resolving jobs. Import the
-# tracking task module here after the decorator/registry exist so its handlers are
-# registered without adding another ad-hoc import list to app.worker.
-import app.judit_tracking  # noqa: E402,F401
