@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import importlib.util
 import json
 from pathlib import Path
 from time import perf_counter
@@ -10,12 +11,25 @@ from typing import Any
 from app.reranker_bge import BGERerankerScorer
 from app.reranking import select_context_steps
 from app.retrieval import Step
-from scripts.evaluate_offline_pipeline import (
-    DEFAULT_DATASET,
-    _milestone_text,
-    _synthetic_steps,
-    load_dataset,
-)
+
+_EVALUATOR_PATH = Path(__file__).with_name("evaluate_offline_pipeline.py")
+_SPEC = importlib.util.spec_from_file_location("evaluate_offline_pipeline_for_reranker", _EVALUATOR_PATH)
+assert _SPEC is not None and _SPEC.loader is not None
+_EVALUATOR = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(_EVALUATOR)
+DEFAULT_DATASET = _EVALUATOR.DEFAULT_DATASET
+
+
+def load_dataset(path: Path = DEFAULT_DATASET) -> list[dict[str, Any]]:
+    return _EVALUATOR.load_dataset(path)
+
+
+def _synthetic_steps(case: dict[str, Any]):
+    return _EVALUATOR._synthetic_steps(case)
+
+
+def _milestone_text(label: str) -> str:
+    return _EVALUATOR._milestone_text(label)
 
 
 def _synthetic_scorer(query: str, steps: list[Step]) -> dict[Any, float]:
