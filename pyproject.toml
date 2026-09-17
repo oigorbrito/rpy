@@ -30,6 +30,9 @@ dev = [
 reranker = [
   "FlagEmbedding>=1.4.2,<1.5",
 ]
+embeddings = [
+  "FlagEmbedding>=1.4.2,<1.5",
+]
 
 [project.urls]
 Repository = "https://github.com/oigorbrito/rpy"
