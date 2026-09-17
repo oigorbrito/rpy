@@ -41,6 +41,23 @@ def _response(payload: dict[str, Any], *, principal: RequestPrincipal, status_co
     return response
 
 
+def _summary_usage(row: asyncpg.Record) -> dict[str, Any] | None:
+    if row["model"] is None:
+        return None
+    result: dict[str, Any] = {
+        "model": row["model"],
+        "prompt_version": row["prompt_version"],
+        "generation_ms": int(row["generation_ms"] or 0),
+    }
+    provider_usage = _json_object(row["provider_usage"])
+    result.update(provider_usage)
+    if row["cache_hit"] is not None:
+        result["cache_hit"] = bool(row["cache_hit"])
+    if row["cost_usd"] is not None:
+        result["cost_usd"] = float(row["cost_usd"])
+    return result
+
+
 async def _load_sources(
     conn: asyncpg.Connection,
     *,
@@ -117,7 +134,10 @@ async def _job_payload(
                ps.validation,
                ps.model,
                ps.prompt_version,
-               ps.generation_ms
+               ps.generation_ms,
+               ps.usage AS provider_usage,
+               ps.cache_hit,
+               ps.cost_usd
         FROM public_summary_requests psr
         LEFT JOIN process_summaries ps ON ps.id = psr.summary_id
         WHERE psr.id = $1 AND psr.tenant_id = $2
@@ -137,13 +157,6 @@ async def _job_payload(
         if row["validation"] is not None
         else None
     )
-    usage = None
-    if row["model"] is not None:
-        usage = {
-            "model": row["model"],
-            "prompt_version": row["prompt_version"],
-            "generation_ms": int(row["generation_ms"] or 0),
-        }
     payload = {
         "job_id": str(row["id"]),
         "poll_url": f"/v1/resumos/{row['id']}",
@@ -151,7 +164,7 @@ async def _job_payload(
         "cnj": str(row["process_code"]),
         "source_updated_at": row["source_updated_at"],
         "sources": sources,
-        "usage": usage,
+        "usage": _summary_usage(row),
         "flags": _json_object(row["flags"]),
         "validation": validation,
         "iaSummary": row["markdown"] if validation and validation.get("passed") is True else None,
@@ -171,7 +184,8 @@ async def _latest_summary_payload(
         return None
     summary = await conn.fetchrow(
         """
-        SELECT id, markdown, validation, model, prompt_version, generation_ms, created_at
+        SELECT id, markdown, validation, model, prompt_version, generation_ms,
+               usage AS provider_usage, cache_hit, cost_usd, created_at
         FROM process_summaries
         WHERE process_id = $1
           AND version_id = $2
@@ -192,11 +206,7 @@ async def _latest_summary_payload(
         "cnj": code,
         "source_updated_at": process["updated_at"],
         "sources": sources,
-        "usage": {
-            "model": summary["model"],
-            "prompt_version": summary["prompt_version"],
-            "generation_ms": int(summary["generation_ms"] or 0),
-        },
+        "usage": _summary_usage(summary),
         "flags": {"secrecy": int(process["secrecy_level"] or 0) > 0},
         "validation": validation,
         "iaSummary": summary["markdown"],

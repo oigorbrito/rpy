@@ -143,12 +143,20 @@ def rag_invariant_violations() -> list[str]:
     prompt_text = read(prompts) if prompts.exists() else ""
     if "validar(" not in rag_text:
         errors.append("RAG publishing path must call validar()")
-    if 'MODEL = "claude-sonnet-5"' not in rag_text:
-        errors.append("RAG must use Claude Sonnet 5")
+    if 'SONNET_MODEL = "claude-sonnet-5"' not in rag_text:
+        errors.append("RAG default generation model must be Claude Sonnet 5")
+    if 'OPUS_MODEL = "claude-opus-5"' not in rag_text:
+        errors.append("RAG long-process generation model must be Claude Opus 5")
+    if "OPUS_STEP_THRESHOLD = 100" not in rag_text:
+        errors.append("RAG must select Opus only above 100 total movements")
+    if "MAX_TOKENS = 4000" not in rag_text or '"max_tokens": MAX_TOKENS' not in rag_text:
+        errors.append("generation requests must pin max_tokens=4000")
     if "REQUESTED_TEMPERATURE = 0.2" not in rag_text:
         errors.append("RAG must preserve the requested temperature 0.2 design intent")
-    if "SONNET_5_SUPPORTS_CUSTOM_TEMPERATURE = False" not in rag_text:
-        errors.append("Sonnet 5 request must document current custom-temperature incompatibility")
+    if "CURRENT_MODELS_SUPPORT_CUSTOM_TEMPERATURE = False" not in rag_text:
+        errors.append("current Sonnet/Opus requests must document custom-temperature incompatibility")
+    if 'if CURRENT_MODELS_SUPPORT_CUSTOM_TEMPERATURE:' not in rag_text:
+        errors.append("custom temperature must only be sent behind the explicit provider capability guard")
     if '"cache_control"' not in rag_text:
         errors.append("system prompt must use Anthropic cache_control")
     if not prompts.exists() or "PROCESS_SUMMARY_SYSTEM_PROMPT" not in prompt_text:

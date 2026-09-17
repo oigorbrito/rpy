@@ -76,6 +76,9 @@ async def test_existing_valid_summary_skips_context_retrieval_and_providers(monk
             "validation": {"passed": True, "errors": []},
             "model": "claude-sonnet-5",
             "generation_ms": 123,
+            "usage": {},
+            "cache_hit": None,
+            "cost_usd": None,
             "persisted": False,
             "reused": True,
         }
