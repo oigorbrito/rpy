@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -29,8 +30,10 @@ async def test_bge_encoder_is_lazy_and_uses_distinct_query_corpus_methods(
     fake = FakeBGEModel()
     loads: list[dict[str, Any]] = []
 
-    def fake_loader(*, model: str, use_fp16: bool, device: str | None):
-        loads.append({"model": model, "use_fp16": use_fp16, "device": device})
+    def fake_loader(*, model_source: str, use_fp16: bool, device: str | None):
+        loads.append(
+            {"model_source": model_source, "use_fp16": use_fp16, "device": device}
+        )
         return fake
 
     monkeypatch.setattr(embeddings_bge, "_load_bge_model", fake_loader)
@@ -41,7 +44,11 @@ async def test_bge_encoder_is_lazy_and_uses_distinct_query_corpus_methods(
     query = await encoder.embed_query("sentença")
 
     assert len(loads) == 1
-    assert loads[0] == {"model": "BAAI/bge-m3", "use_fp16": False, "device": "cpu"}
+    assert loads[0] == {
+        "model_source": "BAAI/bge-m3",
+        "use_fp16": False,
+        "device": "cpu",
+    }
     assert len(documents) == 2
     assert all(len(vector) == 1024 for vector in documents)
     assert len(query) == 1024
@@ -57,6 +64,36 @@ async def test_bge_encoder_is_lazy_and_uses_distinct_query_corpus_methods(
             {"return_dense": True, "return_sparse": False, "return_colbert_vecs": False},
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_bge_encoder_uses_local_artifact_without_changing_semantic_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    fake = FakeBGEModel()
+    loads: list[str] = []
+    artifact = tmp_path / "bge-m3"
+    artifact.mkdir()
+
+    def fake_loader(*, model_source: str, use_fp16: bool, device: str | None):
+        loads.append(model_source)
+        return fake
+
+    monkeypatch.setattr(embeddings_bge, "_load_bge_model", fake_loader)
+    encoder = BGEEmbeddingEncoder(artifact_path=str(artifact), device="cpu")
+    vector = await encoder.embed_query("consulta")
+
+    assert encoder.space.key == "bge:BAAI/bge-m3:1024"
+    assert encoder.model_source == str(artifact)
+    assert loads == [str(artifact)]
+    assert len(vector) == 1024
+
+
+def test_bge_encoder_rejects_missing_local_artifact(tmp_path: Path) -> None:
+    missing = tmp_path / "missing"
+    with pytest.raises(RuntimeError, match="BGE_EMBEDDING_PATH does not exist"):
+        BGEEmbeddingEncoder(artifact_path=str(missing))
 
 
 @pytest.mark.asyncio
