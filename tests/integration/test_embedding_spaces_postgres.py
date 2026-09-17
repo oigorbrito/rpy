@@ -87,6 +87,8 @@ async def test_embedding_spaces_coexist_without_cross_provider_ranking() -> None
             )
             assert bge_results[step_id] == pytest.approx(1.0)
             assert cohere_results[step_id] == pytest.approx(1.0)
+    finally:
+        await pool.close()
 
 
 @pytest.mark.asyncio
