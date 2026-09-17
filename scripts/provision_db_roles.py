@@ -20,6 +20,7 @@ API_READ_TABLES = (
     "process_summaries",
     "process_summary_sources",
     "process_summary_attachment_sources",
+    "process_attachment_status_counts",
     "process_summary_glossary_sources",
     "tenant_processes",
     "tenant_judit_requests",
