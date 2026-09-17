@@ -112,7 +112,8 @@ async def test_secret_generation_does_not_require_or_call_anthropic(monkeypatch)
     async def fake_load_publishable_summary(pool, process_id, version_id):
         return None
 
-    async def fake_load_context(pool, process_id, version_id):
+    async def fake_load_context(pool, process_id, version_id, *, tenant_id=None):
+        assert tenant_id is None
         return context
 
     async def fake_persist_summary(conn, **kwargs):
@@ -146,7 +147,8 @@ async def test_secret_generation_rejects_regression_that_leaks_party_name(monkey
     async def fake_load_publishable_summary(pool, process_id, version_id):
         return None
 
-    async def fake_load_context(pool, process_id, version_id):
+    async def fake_load_context(pool, process_id, version_id, *, tenant_id=None):
+        assert tenant_id is None
         return context
 
     async def fake_persist_summary(conn, **kwargs):
