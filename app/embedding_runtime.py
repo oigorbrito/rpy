@@ -11,6 +11,7 @@ from app.embedding_store import upsert_step_embeddings, vector_search_space
 from app.embeddings_bge import BGEEmbeddingEncoder
 
 EMBEDDING_BATCH_SIZE = 64
+_RUNTIME_CACHE: dict[tuple[str, bool, str | None], "ActiveEmbeddingRuntime"] = {}
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -102,8 +103,8 @@ class ActiveEmbeddingRuntime:
         )
 
 
-def build_active_embedding_runtime() -> ActiveEmbeddingRuntime:
-    """Build the explicitly enabled deployment runtime without provider fallback."""
+def get_active_embedding_runtime() -> ActiveEmbeddingRuntime:
+    """Resolve and cache the explicitly enabled local runtime by deployment settings."""
     if not embedding_space_runtime_enabled():
         raise RuntimeError("embedding-space runtime is not enabled")
     space = active_embedding_space()
@@ -112,5 +113,23 @@ def build_active_embedding_runtime() -> ActiveEmbeddingRuntime:
             "Cohere embedding runtime is not implemented yet; "
             "do not enable it or fall back across semantic spaces"
         )
-    encoder = BGEEmbeddingEncoder(model=space.model)
-    return ActiveEmbeddingRuntime(space=space, encoder=encoder)
+    use_fp16 = _env_bool("BGE_EMBEDDING_USE_FP16", False)
+    device = str(os.environ.get("BGE_EMBEDDING_DEVICE") or "").strip() or None
+    key = (space.key, use_fp16, device)
+    runtime = _RUNTIME_CACHE.get(key)
+    if runtime is None:
+        runtime = ActiveEmbeddingRuntime(
+            space=space,
+            encoder=BGEEmbeddingEncoder(
+                model=space.model,
+                use_fp16=use_fp16,
+                device=device,
+            ),
+        )
+        _RUNTIME_CACHE[key] = runtime
+    return runtime
+
+
+def clear_embedding_runtime_cache() -> None:
+    """Test/rollout helper; existing model instances are released by process lifetime."""
+    _RUNTIME_CACHE.clear()
