@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from uuid import uuid4
 
@@ -64,7 +65,7 @@ async def _fixture(conn, *, secrecy_level: int = 0):
             number,
             f"Movimento {number}",
             f"payload sensível {number}",
-            {"source_step_number": number * 10},
+            json.dumps({"source_step_number": number * 10}),
         )
     return process_id, version_id, step_ids
 
