@@ -234,6 +234,29 @@ def _parse_datetime(value: Any) -> datetime | None:
     return parsed.astimezone(_SAO_PAULO)
 
 
+def _safe_attachments(process: dict[str, Any]) -> list[dict[str, Any]]:
+    safe: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for attachment in process.get("attachments") or []:
+        if not isinstance(attachment, dict):
+            continue
+        raw_id = attachment.get("attachment_id")
+        attachment_id = str(raw_id or "").strip()
+        if not attachment_id or attachment_id in seen:
+            continue
+        seen.add(attachment_id)
+        raw_name = attachment.get("attachment_name")
+        name = str(raw_name).strip() if raw_name is not None else None
+        safe.append(
+            {
+                "attachment_id": attachment_id,
+                "attachment_date": _parse_datetime(attachment.get("attachment_date")),
+                "attachment_name": name or None,
+            }
+        )
+    return safe
+
+
 def _normalize_step_text(value: Any) -> str:
     text = str(value or "").replace("\u00a0", " ")
     text = _LEADING_STEP_NUMBER_RE.sub("", text, count=1)
@@ -297,6 +320,7 @@ def extract_promotable_fields(process: dict[str, Any]) -> dict[str, Any]:
             "parties": [],
             "subjects": [],
             "steps": [],
+            "attachments": [],
             "court": court,
             "class_name": class_name,
             "secrecy_level": secrecy_level,
@@ -344,6 +368,7 @@ def extract_promotable_fields(process: dict[str, Any]) -> dict[str, Any]:
         "parties": _safe_parties(process),
         "subjects": _safe_subjects(process),
         "steps": normalized_steps,
+        "attachments": _safe_attachments(process),
         "court": court,
         "class_name": class_name,
         "secrecy_level": secrecy_level,
