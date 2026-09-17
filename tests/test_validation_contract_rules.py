@@ -8,7 +8,12 @@ STEPS = [
     {"step_number": 3, "occurred_at": "2026-09-16T14:00:00+00:00"},
 ]
 SOURCE = (
-    '{"header":{"distribution_date":"2026-09-13"},'
+    '{"header":{"distribution_date":"2026-09-13","area":"Cível",'
+    '"county":"Porto Alegre","phase":"Conhecimento",'
+    '"judging_body":"2ª Vara Cível"},'
+    '"class_name":"Procedimento Comum Cível",'
+    '"subjects":["Contratos","Responsabilidade Civil"],'
+    '"tags":["urgente"],'
     '"steps":[{"occurred_at":"2026-09-14T12:00:00+00:00"},'
     '{"occurred_at":"2026-09-15T13:00:00+00:00"},'
     '{"occurred_at":"2026-09-16T14:00:00+00:00"}]}'
@@ -55,6 +60,57 @@ def test_rejects_date_absent_from_source_context() -> None:
     )
     assert result.passed is False
     assert "date not present in source context: 2026-09-17" in result.errors
+
+
+def test_accepts_source_backed_structured_fields() -> None:
+    result = validar(
+        text=(
+            "- Área: Cível\n"
+            "- Classe: Procedimento Comum Cível\n"
+            "- Comarca: Porto Alegre\n"
+            "- Órgão julgador: 2ª Vara Cível\n"
+            "- Fase: Conhecimento\n"
+            "- Assuntos: Contratos; Responsabilidade Civil\n"
+            "- Tags: urgente"
+        ),
+        code=CODE,
+        parties=PARTIES,
+        source_text=SOURCE,
+    )
+    assert result.passed is True
+
+
+def test_rejects_structured_field_value_absent_from_source_context() -> None:
+    result = validar(
+        text="- Área: Penal\n- Classe: Habeas Corpus",
+        code=CODE,
+        parties=PARTIES,
+        source_text=SOURCE,
+    )
+    assert result.passed is False
+    assert "source-backed field mismatch: Área=Penal" in result.errors
+    assert "source-backed field mismatch: Classe=Habeas Corpus" in result.errors
+
+
+def test_rejects_only_missing_item_from_subject_list() -> None:
+    result = validar(
+        text="Assuntos: Contratos, Direito Tributário",
+        code=CODE,
+        parties=PARTIES,
+        source_text=SOURCE,
+    )
+    assert result.passed is False
+    assert "source-backed field mismatch: Assuntos=Direito Tributário" in result.errors
+    assert "source-backed field mismatch: Assuntos=Contratos" not in result.errors
+
+
+def test_does_not_apply_source_backed_claim_check_without_source_context() -> None:
+    result = validar(
+        text="Área: Penal",
+        code=CODE,
+        parties=PARTIES,
+    )
+    assert result.passed is True
 
 
 def test_accepts_nonempty_attention_section_when_required() -> None:
