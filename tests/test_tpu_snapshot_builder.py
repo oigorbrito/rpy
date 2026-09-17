@@ -1,15 +1,21 @@
 import hashlib
+import importlib.util
 import json
 from pathlib import Path
 
 import pytest
 
 from app.tpu_glossary import load_tpu_catalog
-from scripts.build_tpu_snapshot import (
-    build_snapshot,
-    load_normalized_csv,
-    write_snapshot,
-)
+
+MODULE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "build_tpu_snapshot.py"
+spec = importlib.util.spec_from_file_location("build_tpu_snapshot", MODULE_PATH)
+assert spec is not None and spec.loader is not None
+builder = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(builder)
+
+build_snapshot = builder.build_snapshot
+load_normalized_csv = builder.load_normalized_csv
+write_snapshot = builder.write_snapshot
 
 
 def _write_csv(path: Path, body: str) -> None:
