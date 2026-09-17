@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 
 from app.embedding_spaces import BGE_MODEL, EmbeddingSpace, assert_embedding_dimensions
@@ -20,7 +21,18 @@ def _env_bool(name: str, default: bool = False) -> bool:
     raise RuntimeError(f"{name} must be a boolean")
 
 
-def _load_bge_model(*, model: str, use_fp16: bool, device: str | None) -> Any:
+def _artifact_source(model: str, artifact_path: str | None) -> str:
+    if artifact_path is None:
+        return model
+    path = Path(artifact_path).expanduser()
+    if not path.exists():
+        raise RuntimeError(f"BGE_EMBEDDING_PATH does not exist: {path}")
+    if not path.is_dir():
+        raise RuntimeError(f"BGE_EMBEDDING_PATH must be a directory: {path}")
+    return str(path)
+
+
+def _load_bge_model(*, model_source: str, use_fp16: bool, device: str | None) -> Any:
     try:
         from FlagEmbedding import BGEM3FlagModel
     except ImportError as exc:
@@ -35,7 +47,7 @@ def _load_bge_model(*, model: str, use_fp16: bool, device: str | None) -> Any:
     }
     if device:
         kwargs["devices"] = device
-    return BGEM3FlagModel(model, **kwargs)
+    return BGEM3FlagModel(model_source, **kwargs)
 
 
 def _dense_vectors(raw: Any, *, expected: int, space: EmbeddingSpace) -> list[list[float]]:
@@ -59,21 +71,26 @@ def _dense_vectors(raw: Any, *, expected: int, space: EmbeddingSpace) -> list[li
 class BGEEmbeddingEncoder:
     """Lazy local dense encoder for BAAI/bge-m3.
 
-    Model loading is deferred until vector retrieval/reindex actually needs it.
-    The encoder deliberately distinguishes query and corpus methods so the
-    retrieval-specific behavior from FlagEmbedding remains explicit.
+    Semantic identity stays pinned to BAAI/bge-m3 even when model bytes are
+    supplied from a deployment-local artifact directory.
     """
 
     def __init__(
         self,
         *,
         model: str = BGE_MODEL,
+        artifact_path: str | None = None,
         use_fp16: bool | None = None,
         device: str | None = None,
     ) -> None:
         self.space = EmbeddingSpace(provider="bge", model=model)
         if self.space.model != BGE_MODEL:
             raise RuntimeError(f"unsupported BGE embedding model: {self.space.model}")
+        configured_path = (
+            os.environ.get("BGE_EMBEDDING_PATH") if artifact_path is None else artifact_path
+        )
+        self.artifact_path = str(configured_path or "").strip() or None
+        self.model_source = _artifact_source(self.space.model, self.artifact_path)
         self.use_fp16 = (
             _env_bool("BGE_EMBEDDING_USE_FP16", False)
             if use_fp16 is None
@@ -86,7 +103,7 @@ class BGEEmbeddingEncoder:
     def _instance(self) -> Any:
         if self._model is None:
             self._model = _load_bge_model(
-                model=self.space.model,
+                model_source=self.model_source,
                 use_fp16=self.use_fp16,
                 device=self.device,
             )
