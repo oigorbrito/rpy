@@ -15,6 +15,29 @@ VECTOR_WEIGHT = 0.5
 RECENCY_BOOST_MAX = 0.3
 MANDATORY_RECENT_STEPS = 5
 
+# Retrieval is shared by tenant-authorized API flows and background summary jobs.
+# Tenant authorization happens before a process/version reaches this layer; this
+# predicate revalidates the durable process/version/CNJ boundary and excludes
+# movement-level privacy/secrecy mismatches before context or reranking.
+ELIGIBLE_PROCESS_STEP_SQL = """
+    ps.process_id = pv.process_id
+    AND p.id = pv.process_id
+    AND COALESCE(NULLIF(ps.metadata->>'cnj', ''), p.code) = p.code
+    AND (
+        NOT (ps.metadata ? 'instance')
+        OR NOT (p.header ? 'instance')
+        OR ps.metadata->>'instance' = p.header->>'instance'
+    )
+    AND lower(COALESCE(ps.metadata->>'private', 'false'))
+        NOT IN ('true', '1', 'yes')
+    AND p.secrecy_level = 0
+    AND CASE
+        WHEN COALESCE(ps.metadata->>'secrecy_level', '') ~ '^[0-9]+$'
+        THEN (ps.metadata->>'secrecy_level')::integer
+        ELSE 0
+    END = 0
+"""
+
 _TOKEN_RE = re.compile(r"[\wÀ-ÿ]+", re.UNICODE)
 MILESTONE_RE = re.compile(
     r"\b("
@@ -192,22 +215,50 @@ def rerank_steps(
     return sorted(selected.values(), key=lambda item: item.step_number)
 
 
+async def _eligible_score_map(
+    conn: asyncpg.Connection,
+    *,
+    version_id: UUID,
+    scores: dict[UUID, float],
+) -> dict[UUID, float]:
+    if not scores:
+        return {}
+    rows = await conn.fetch(
+        f"""
+        SELECT ps.id
+        FROM process_steps ps
+        JOIN process_versions pv ON pv.id = ps.version_id
+        JOIN processes p ON p.id = pv.process_id
+        WHERE ps.version_id = $1
+          AND ps.id = ANY($2::uuid[])
+          AND {ELIGIBLE_PROCESS_STEP_SQL}
+        """,
+        version_id,
+        list(scores),
+    )
+    eligible = {row["id"] for row in rows}
+    return {step_id: score for step_id, score in scores.items() if step_id in eligible}
+
+
 async def load_steps(conn: asyncpg.Connection, *, version_id: UUID) -> list[Step]:
     rows = await conn.fetch(
-        """
-        SELECT id,
-               step_number,
-               title,
-               text,
-               occurred_at,
+        f"""
+        SELECT ps.id,
+               ps.step_number,
+               ps.title,
+               ps.text,
+               ps.occurred_at,
                CASE
-                   WHEN (metadata->>'source_step_number') ~ '^[0-9]+$'
-                   THEN (metadata->>'source_step_number')::integer
+                   WHEN (ps.metadata->>'source_step_number') ~ '^[0-9]+$'
+                   THEN (ps.metadata->>'source_step_number')::integer
                    ELSE NULL
                END AS source_step_number
-        FROM process_steps
-        WHERE version_id = $1
-        ORDER BY step_number ASC
+        FROM process_steps ps
+        JOIN process_versions pv ON pv.id = ps.version_id
+        JOIN processes p ON p.id = pv.process_id
+        WHERE ps.version_id = $1
+          AND {ELIGIBLE_PROCESS_STEP_SQL}
+        ORDER BY ps.step_number ASC
         """,
         version_id,
     )
@@ -236,17 +287,20 @@ async def lexical_search(
     limit: int = 40,
 ) -> dict[UUID, float]:
     rows = await conn.fetch(
-        """
-        SELECT id,
+        f"""
+        SELECT ps.id,
                ts_rank_cd(
-                   to_tsvector('portuguese', coalesce(title, '') || ' ' || text),
+                   to_tsvector('portuguese', coalesce(ps.title, '') || ' ' || ps.text),
                    websearch_to_tsquery('portuguese', $2)
                ) AS lexical_rank
-        FROM process_steps
-        WHERE version_id = $1
-          AND to_tsvector('portuguese', coalesce(title, '') || ' ' || text)
+        FROM process_steps ps
+        JOIN process_versions pv ON pv.id = ps.version_id
+        JOIN processes p ON p.id = pv.process_id
+        WHERE ps.version_id = $1
+          AND {ELIGIBLE_PROCESS_STEP_SQL}
+          AND to_tsvector('portuguese', coalesce(ps.title, '') || ' ' || ps.text)
               @@ websearch_to_tsquery('portuguese', $2)
-        ORDER BY lexical_rank DESC, step_number DESC
+        ORDER BY lexical_rank DESC, ps.step_number DESC
         LIMIT $3
         """,
         version_id,
@@ -269,19 +323,24 @@ async def vector_search(
     )
 
     if embedding_space_runtime_enabled():
-        return await get_active_embedding_runtime().vector_search(
+        scores = await get_active_embedding_runtime().vector_search(
             conn,
             version_id=version_id,
             embedding=[float(value) for value in embedding],
             limit=limit,
         )
+        return await _eligible_score_map(conn, version_id=version_id, scores=scores)
 
     rows = await conn.fetch(
-        """
-        SELECT id, 1 - (embedding <=> $2::vector) AS similarity
-        FROM process_steps
-        WHERE version_id = $1 AND embedding IS NOT NULL
-        ORDER BY embedding <=> $2::vector
+        f"""
+        SELECT ps.id, 1 - (ps.embedding <=> $2::vector) AS similarity
+        FROM process_steps ps
+        JOIN process_versions pv ON pv.id = ps.version_id
+        JOIN processes p ON p.id = pv.process_id
+        WHERE ps.version_id = $1
+          AND ps.embedding IS NOT NULL
+          AND {ELIGIBLE_PROCESS_STEP_SQL}
+        ORDER BY ps.embedding <=> $2::vector
         LIMIT $3
         """,
         version_id,
