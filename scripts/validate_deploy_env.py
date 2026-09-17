@@ -28,6 +28,7 @@ REQUIRED_KEYS = (
 )
 PLACEHOLDER_MARKERS = ("replace-with", "<64-hex-digest>", "example")
 BGE_MODEL = "BAAI/bge-m3"
+COHERE_MODEL = "embed-v4.0"
 
 
 def _load_env_file(path: Path) -> dict[str, str]:
@@ -91,26 +92,43 @@ def _validate_embedding_runtime(values: dict[str, str], errors: list[str]) -> No
         return
 
     provider = str(values.get("EMBEDDING_PROVIDER") or "bge").strip().casefold()
-    if provider != "bge":
-        errors.append(
-            "EMBEDDING_PROVIDER must be 'bge' when EMBEDDING_SPACE_RUNTIME_ENABLED is true; "
-            "the Cohere runtime adapter is not implemented"
-        )
+    if provider == "bge":
+        model = str(values.get("BGE_EMBEDDING_MODEL") or BGE_MODEL).strip()
+        if model != BGE_MODEL:
+            errors.append(f"BGE_EMBEDDING_MODEL must be {BGE_MODEL!r}")
+
+        artifact_path = str(values.get("BGE_EMBEDDING_PATH") or "").strip()
+        if not artifact_path:
+            errors.append(
+                "BGE_EMBEDDING_PATH is required when BGE embeddings are active"
+            )
+        elif any(marker in artifact_path.lower() for marker in PLACEHOLDER_MARKERS):
+            errors.append("BGE_EMBEDDING_PATH still contains a placeholder value")
+        elif not Path(artifact_path).is_absolute():
+            errors.append("BGE_EMBEDDING_PATH must be an absolute path inside the worker container")
         return
 
-    model = str(values.get("BGE_EMBEDDING_MODEL") or BGE_MODEL).strip()
-    if model != BGE_MODEL:
-        errors.append(f"BGE_EMBEDDING_MODEL must be {BGE_MODEL!r}")
+    if provider == "cohere":
+        try:
+            external_allowed = _bool_value(values, "ALLOW_EXTERNAL_EMBEDDINGS", False)
+        except ValueError as exc:
+            errors.append(str(exc))
+            return
+        if not external_allowed:
+            errors.append("Cohere embeddings require ALLOW_EXTERNAL_EMBEDDINGS=true")
 
-    artifact_path = str(values.get("BGE_EMBEDDING_PATH") or "").strip()
-    if not artifact_path:
-        errors.append(
-            "BGE_EMBEDDING_PATH is required when EMBEDDING_SPACE_RUNTIME_ENABLED is true"
-        )
-    elif any(marker in artifact_path.lower() for marker in PLACEHOLDER_MARKERS):
-        errors.append("BGE_EMBEDDING_PATH still contains a placeholder value")
-    elif not Path(artifact_path).is_absolute():
-        errors.append("BGE_EMBEDDING_PATH must be an absolute path inside the worker container")
+        model = str(values.get("COHERE_EMBEDDING_MODEL") or COHERE_MODEL).strip()
+        if model != COHERE_MODEL:
+            errors.append(f"COHERE_EMBEDDING_MODEL must be {COHERE_MODEL!r}")
+
+        api_key = str(values.get("COHERE_API_KEY") or "").strip()
+        if not api_key:
+            errors.append("COHERE_API_KEY is required when Cohere embeddings are active")
+        elif any(marker in api_key.lower() for marker in PLACEHOLDER_MARKERS):
+            errors.append("COHERE_API_KEY still contains a placeholder value")
+        return
+
+    errors.append("EMBEDDING_PROVIDER must be 'bge' or 'cohere'")
 
 
 def validate(values: dict[str, str]) -> list[str]:

@@ -9,6 +9,7 @@ from uuid import UUID
 
 from app.db import create_pool
 from app.embedding_runtime import get_active_embedding_runtime
+from app.embedding_spaces import COHERE_PROVIDER
 
 DEFAULT_BATCH_VERSIONS = 25
 
@@ -39,12 +40,14 @@ async def list_version_batch(
                          AND pse.step_id IS NULL
                    ) AS missing_embeddings
             FROM process_versions pv
+            JOIN processes p ON p.id = pv.process_id
             LEFT JOIN process_steps ps ON ps.version_id = pv.id
             LEFT JOIN process_step_embeddings pse
               ON pse.step_id = ps.id
              AND pse.provider = $1
              AND pse.model = $2
             WHERE pv.finalized = TRUE
+              AND ($1 <> 'cohere' OR coalesce(p.secrecy_level, 0) = 0)
               AND (
                   $4::uuid IS NULL
                   OR (pv.created_at, pv.id) > (

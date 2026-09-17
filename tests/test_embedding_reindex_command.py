@@ -44,8 +44,12 @@ class FakePool:
 
 
 class FakeRuntime:
-    def __init__(self):
-        self.space = SimpleNamespace(provider="bge", model="BAAI/bge-m3", key="bge:BAAI/bge-m3:1024")
+    def __init__(self, provider="bge", model="BAAI/bge-m3"):
+        self.space = SimpleNamespace(
+            provider=provider,
+            model=model,
+            key=f"{provider}:{model}:1024",
+        )
         self.calls = []
 
     async def ensure_step_embeddings(self, pool, *, version_id):
@@ -80,6 +84,20 @@ async def test_reindex_batch_is_resumable_and_skips_complete_versions() -> None:
     _, args = pool.conn.calls[0]
     assert args[:3] == ("bge", "BAAI/bge-m3", 2)
     assert args[3] is None
+
+
+@pytest.mark.asyncio
+async def test_external_reindex_query_excludes_secret_processes() -> None:
+    pool = FakePool([])
+    runtime = FakeRuntime(provider="cohere", model="embed-v4.0")
+
+    report = await _REINDEX.reindex_batch(pool, runtime=runtime, limit=5, dry_run=True)
+
+    query, args = pool.conn.calls[0]
+    assert "($1 <> 'cohere' OR coalesce(p.secrecy_level, 0) = 0)" in query
+    assert "JOIN processes p ON p.id = pv.process_id" in query
+    assert args[:3] == ("cohere", "embed-v4.0", 5)
+    assert report["space"] == "cohere:embed-v4.0:1024"
 
 
 @pytest.mark.asyncio
