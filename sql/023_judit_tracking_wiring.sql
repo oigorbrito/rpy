@@ -1,3 +1,15 @@
+ALTER TABLE judit_trackings
+    ADD COLUMN IF NOT EXISTS last_reconciled_at TIMESTAMPTZ;
+
+CREATE INDEX IF NOT EXISTS judit_trackings_reconcile_window_idx
+    ON judit_trackings (
+        GREATEST(
+            COALESCE(last_event_at, created_at),
+            COALESCE(last_reconciled_at, created_at)
+        )
+    )
+    WHERE status = 'active';
+
 CREATE OR REPLACE FUNCTION reconcile_judit_tracking_process_version()
 RETURNS trigger
 LANGUAGE plpgsql
