@@ -11,7 +11,7 @@ from app.embedding_store import upsert_step_embeddings, vector_search_space
 from app.embeddings_bge import BGEEmbeddingEncoder
 
 EMBEDDING_BATCH_SIZE = 64
-_RUNTIME_CACHE: dict[tuple[str, bool, str | None], "ActiveEmbeddingRuntime"] = {}
+_RUNTIME_CACHE: dict[tuple[str, bool, str | None, str | None], "ActiveEmbeddingRuntime"] = {}
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -115,13 +115,15 @@ def get_active_embedding_runtime() -> ActiveEmbeddingRuntime:
         )
     use_fp16 = _env_bool("BGE_EMBEDDING_USE_FP16", False)
     device = str(os.environ.get("BGE_EMBEDDING_DEVICE") or "").strip() or None
-    key = (space.key, use_fp16, device)
+    artifact_path = str(os.environ.get("BGE_EMBEDDING_PATH") or "").strip() or None
+    key = (space.key, use_fp16, device, artifact_path)
     runtime = _RUNTIME_CACHE.get(key)
     if runtime is None:
         runtime = ActiveEmbeddingRuntime(
             space=space,
             encoder=BGEEmbeddingEncoder(
                 model=space.model,
+                artifact_path=artifact_path,
                 use_fp16=use_fp16,
                 device=device,
             ),

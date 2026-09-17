@@ -86,8 +86,13 @@ def test_cohere_runtime_fails_explicitly_without_cross_provider_fallback(
         embedding_runtime.get_active_embedding_runtime()
 
 
-def test_bge_runtime_is_cached_by_deployment_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_bge_runtime_is_cached_by_deployment_settings(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
     created = []
+    artifact = tmp_path / "bge-m3"
+    artifact.mkdir()
 
     class FakeEncoder:
         def __init__(self, **kwargs):
@@ -97,6 +102,7 @@ def test_bge_runtime_is_cached_by_deployment_settings(monkeypatch: pytest.Monkey
     monkeypatch.setenv("EMBEDDING_PROVIDER", "bge")
     monkeypatch.setenv("BGE_EMBEDDING_DEVICE", "cpu")
     monkeypatch.setenv("BGE_EMBEDDING_USE_FP16", "false")
+    monkeypatch.setenv("BGE_EMBEDDING_PATH", str(artifact))
     monkeypatch.setattr(embedding_runtime, "BGEEmbeddingEncoder", FakeEncoder)
     embedding_runtime.clear_embedding_runtime_cache()
 
@@ -105,5 +111,41 @@ def test_bge_runtime_is_cached_by_deployment_settings(monkeypatch: pytest.Monkey
 
     assert first is second
     assert created == [
-        {"model": "BAAI/bge-m3", "use_fp16": False, "device": "cpu"}
+        {
+            "model": "BAAI/bge-m3",
+            "artifact_path": str(artifact),
+            "use_fp16": False,
+            "device": "cpu",
+        }
+    ]
+
+
+def test_bge_runtime_cache_separates_artifact_paths(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    created = []
+    first_artifact = tmp_path / "first"
+    second_artifact = tmp_path / "second"
+    first_artifact.mkdir()
+    second_artifact.mkdir()
+
+    class FakeEncoder:
+        def __init__(self, **kwargs):
+            created.append(dict(kwargs))
+
+    monkeypatch.setenv("EMBEDDING_SPACE_RUNTIME_ENABLED", "true")
+    monkeypatch.setenv("EMBEDDING_PROVIDER", "bge")
+    monkeypatch.setattr(embedding_runtime, "BGEEmbeddingEncoder", FakeEncoder)
+    embedding_runtime.clear_embedding_runtime_cache()
+
+    monkeypatch.setenv("BGE_EMBEDDING_PATH", str(first_artifact))
+    first = embedding_runtime.get_active_embedding_runtime()
+    monkeypatch.setenv("BGE_EMBEDDING_PATH", str(second_artifact))
+    second = embedding_runtime.get_active_embedding_runtime()
+
+    assert first is not second
+    assert [item["artifact_path"] for item in created] == [
+        str(first_artifact),
+        str(second_artifact),
     ]
