@@ -38,6 +38,11 @@ WORKER_REQUIRED_ENV = {
     "ANTHROPIC_API_KEY",
     "OPENAI_API_KEY",
     "EMBEDDING_MODEL",
+    "EMBEDDING_SPACE_RUNTIME_ENABLED",
+    "EMBEDDING_PROVIDER",
+    "BGE_EMBEDDING_MODEL",
+    "BGE_EMBEDDING_DEVICE",
+    "BGE_EMBEDDING_USE_FP16",
     "ANTHROPIC_TIMEOUT_SECONDS",
     "EMBEDDING_TIMEOUT_SECONDS",
     "PROVIDER_MAX_ATTEMPTS",
@@ -209,6 +214,22 @@ def _validate_worker_shutdown(services: dict[str, Any]) -> None:
         _fail("both workers must use the same shutdown grace contract")
 
 
+def _validate_worker_embedding_contract(services: dict[str, Any]) -> None:
+    fields = (
+        "EMBEDDING_SPACE_RUNTIME_ENABLED",
+        "EMBEDDING_PROVIDER",
+        "BGE_EMBEDDING_MODEL",
+        "BGE_EMBEDDING_DEVICE",
+        "BGE_EMBEDDING_USE_FP16",
+        "EMBEDDING_MODEL",
+    )
+    left = _environment(services, "worker-1")
+    right = _environment(services, "worker-2")
+    for field in fields:
+        if left.get(field) != right.get(field):
+            _fail(f"both workers must use the same {field}")
+
+
 def validate(config: dict[str, Any]) -> None:
     services = config.get("services")
     if not isinstance(services, dict):
@@ -269,6 +290,7 @@ def validate(config: dict[str, Any]) -> None:
         _require_env(services, service_name, WORKER_REQUIRED_ENV)
     _require_env(services, "scheduler", SCHEDULER_REQUIRED_ENV)
     _validate_worker_shutdown(services)
+    _validate_worker_embedding_contract(services)
 
     _forbid_env(services, "api", PROVIDER_SECRETS | MIGRATE_REQUIRED_ENV)
     for service_name in ("worker-1", "worker-2"):
