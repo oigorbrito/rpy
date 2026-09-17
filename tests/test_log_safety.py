@@ -12,6 +12,17 @@ def test_sanitize_error_message_redacts_configured_secret(monkeypatch) -> None:
     assert REDACTED in rendered
 
 
+def test_sanitize_error_message_redacts_judit_api_key(monkeypatch) -> None:
+    monkeypatch.setenv("JUDIT_API_KEY", "judit-secret-api-key-value")
+
+    rendered = sanitize_error_message(
+        "judit request failed with key judit-secret-api-key-value"
+    )
+
+    assert "judit-secret-api-key-value" not in rendered
+    assert REDACTED in rendered
+
+
 def test_sanitize_error_message_redacts_uri_password_and_bearer() -> None:
     rendered = sanitize_error_message(
         "failed postgresql://rpy_worker:db-super-secret@postgres:5432/rpy "
