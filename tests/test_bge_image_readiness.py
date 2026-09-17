@@ -5,7 +5,11 @@ from pathlib import Path
 
 import pytest
 
-import scripts.verify_bge_image_runtime as verifier
+MODULE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "verify_bge_image_runtime.py"
+spec = importlib.util.spec_from_file_location("verify_bge_image_runtime", MODULE_PATH)
+assert spec is not None and spec.loader is not None
+verifier = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(verifier)
 
 
 def _offline_env(model_dir: Path) -> dict[str, str]:
