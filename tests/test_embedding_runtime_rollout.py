@@ -14,6 +14,7 @@ class FakeRuntime:
         self.ensure_calls = []
         self.query_calls = []
         self.search_calls = []
+        self.result_id = uuid4()
         self.encoder = self
 
     async def embed_documents(self, values):
@@ -29,7 +30,17 @@ class FakeRuntime:
 
     async def vector_search(self, conn, *, version_id, embedding, limit):
         self.search_calls.append((conn, version_id, embedding, limit))
-        return {uuid4(): 0.9}
+        return {self.result_id: 0.9}
+
+
+class FakeFilteringConnection:
+    def __init__(self, eligible_id):
+        self.eligible_id = eligible_id
+        self.fetch_calls = []
+
+    async def fetch(self, query, *args):
+        self.fetch_calls.append((query, args))
+        return [{"id": self.eligible_id}]
 
 
 def test_rollout_flag_defaults_off_and_preserves_legacy_configuration(
@@ -56,7 +67,7 @@ async def test_enabled_runtime_routes_query_reindex_and_search_without_legacy_pr
 
     version_id = uuid4()
     pool = object()
-    conn = object()
+    conn = FakeFilteringConnection(fake.result_id)
 
     assert embeddings.vector_retrieval_configured() is True
     assert await embeddings.ensure_step_embeddings(pool, version_id=version_id) == 7
@@ -71,7 +82,8 @@ async def test_enabled_runtime_routes_query_reindex_and_search_without_legacy_pr
     assert fake.ensure_calls == [(pool, version_id)]
     assert fake.query_calls == ["sentença"]
     assert fake.search_calls == [(conn, version_id, [0.5] * 1024, 12)]
-    assert len(result) == 1
+    assert result == {fake.result_id: 0.9}
+    assert len(conn.fetch_calls) == 1
 
 
 def test_cohere_runtime_requires_explicit_external_authorization(
