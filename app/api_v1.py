@@ -15,6 +15,7 @@ from app.api_key_auth import (
     authorize_api_key_process,
     log_principal_access,
 )
+from app.attachment_signals import attachment_status_flags
 from app.auth import principal_from_request, principal_from_request_unscoped, tenant_from_request
 from app.judit import normalize_cnj
 from app.json_utils import decode_json_object
@@ -57,6 +58,36 @@ def _summary_usage(row: asyncpg.Record) -> dict[str, Any] | None:
     if row["cost_usd"] is not None:
         result["cost_usd"] = float(row["cost_usd"])
     return result
+
+
+async def _load_attachment_flags(
+    conn: asyncpg.Connection,
+    *,
+    process_id: UUID | None,
+    version_id: UUID | None,
+) -> dict[str, Any]:
+    if process_id is None or version_id is None:
+        return {}
+    row = await conn.fetchrow(
+        """
+        SELECT pending_count, ready_count, unavailable_count, corrupt_count, unreadable_count
+        FROM process_attachment_status_counts
+        WHERE process_id=$1 AND version_id=$2
+        """,
+        process_id,
+        version_id,
+    )
+    if row is None:
+        return {}
+    return attachment_status_flags(
+        {
+            "pending": row["pending_count"],
+            "ready": row["ready_count"],
+            "unavailable": row["unavailable_count"],
+            "corrupt": row["corrupt_count"],
+            "unreadable": row["unreadable_count"],
+        }
+    )
 
 
 async def _load_sources(
@@ -178,6 +209,14 @@ async def _job_payload(
         if row["validation"] is not None
         else None
     )
+    flags = _json_object(row["flags"])
+    flags.update(
+        await _load_attachment_flags(
+            conn,
+            process_id=row["process_id"],
+            version_id=row["version_id"],
+        )
+    )
     payload = {
         "job_id": str(row["id"]),
         "poll_url": f"/v1/resumos/{row['id']}",
@@ -186,7 +225,7 @@ async def _job_payload(
         "source_updated_at": row["source_updated_at"],
         "sources": sources,
         "usage": _summary_usage(row),
-        "flags": _json_object(row["flags"]),
+        "flags": flags,
         "validation": validation,
         "iaSummary": row["markdown"] if validation and validation.get("passed") is True else None,
         "error_code": row["error_code"],
@@ -224,12 +263,20 @@ async def _latest_summary_payload(
         version_id=process["current_version_id"],
         summary_id=summary["id"],
     )
+    flags = {"secrecy": int(process["secrecy_level"] or 0) > 0}
+    flags.update(
+        await _load_attachment_flags(
+            conn,
+            process_id=process["id"],
+            version_id=process["current_version_id"],
+        )
+    )
     return {
         "cnj": code,
         "source_updated_at": process["updated_at"],
         "sources": sources,
         "usage": _summary_usage(summary),
-        "flags": {"secrecy": int(process["secrecy_level"] or 0) > 0},
+        "flags": flags,
         "validation": validation,
         "iaSummary": summary["markdown"],
     }
@@ -411,9 +458,17 @@ async def get_summary_sources(code: str, request: Request):
                 process_code=canonical_code,
                 action="v1_read_sources",
             )
+        flags = {"secrecy": int(process["secrecy_level"] or 0) > 0}
+        flags.update(
+            await _load_attachment_flags(
+                conn,
+                process_id=process["id"],
+                version_id=process["current_version_id"],
+            )
+        )
         return {
             "cnj": canonical_code,
             "source_updated_at": process["updated_at"],
             "sources": sources,
-            "flags": {"secrecy": int(process["secrecy_level"] or 0) > 0},
+            "flags": flags,
         }
