@@ -20,6 +20,7 @@ from app.judit import normalize_cnj
 from app.json_utils import decode_json_object
 from app.process_requests import request_process
 from app.processes import get_authorized_process, log_access
+from app.provenance import load_used_summary_sources
 from app.public_lifecycle import (
     IdempotencyConflictError,
     create_or_get_summary_request,
@@ -63,15 +64,17 @@ async def _load_sources(
     *,
     process_id: UUID | None,
     version_id: UUID | None,
+    summary_id: UUID | None = None,
 ) -> list[dict[str, Any]]:
     if process_id is None or version_id is None:
         return []
 
     version = await conn.fetchrow(
         """
-        SELECT id, source_cached_response, finalized_at
-        FROM process_versions
-        WHERE id = $1 AND process_id = $2 AND finalized = TRUE
+        SELECT pv.id, pv.source_cached_response, pv.finalized_at, p.secrecy_level
+        FROM process_versions pv
+        JOIN processes p ON p.id = pv.process_id
+        WHERE pv.id = $1 AND pv.process_id = $2 AND pv.finalized = TRUE
         """,
         version_id,
         process_id,
@@ -79,17 +82,33 @@ async def _load_sources(
     if version is None:
         return []
 
-    sources: list[dict[str, Any]] = [
-        {
-            "kind": "judit_lawsuit",
-            "source_version": str(version["id"]),
-            "cached": bool(version["source_cached_response"]),
-            "finalized_at": version["finalized_at"],
-        }
-    ]
+    root_source: dict[str, Any] = {
+        "kind": "judit_lawsuit",
+        "source_version": str(version["id"]),
+        "cached": bool(version["source_cached_response"]),
+        "finalized_at": version["finalized_at"],
+    }
+    if summary_id is not None:
+        root_source["used_for_summary"] = True
+    sources: list[dict[str, Any]] = [root_source]
+
+    # Restricted processes never expose movement-level provenance through the
+    # public sources endpoint, even if older rows exist from a prior policy.
+    if int(version["secrecy_level"] or 0) > 0:
+        return sources
+
+    if summary_id is not None:
+        used_sources = await load_used_summary_sources(conn, summary_id=summary_id)
+        if used_sources:
+            sources.extend(used_sources)
+            return sources
+
+    # Compatibility fallback for summaries created before provenance persistence
+    # and for process/source reads that do not yet have a published summary.
     steps = await conn.fetch(
         """
-        SELECT step_number,
+        SELECT id,
+               step_number,
                occurred_at,
                title,
                CASE
@@ -107,6 +126,7 @@ async def _load_sources(
     sources.extend(
         {
             "kind": "movement",
+            "step_id": str(row["id"]),
             "step_number": int(row["step_number"]),
             "source_step_number": (
                 int(row["source_step_number"])
@@ -151,6 +171,7 @@ async def _job_payload(
         conn,
         process_id=row["process_id"],
         version_id=row["version_id"],
+        summary_id=row["summary_id"],
     )
     validation = (
         _json_object(row["validation"])
@@ -201,6 +222,7 @@ async def _latest_summary_payload(
         conn,
         process_id=process["id"],
         version_id=process["current_version_id"],
+        summary_id=summary["id"],
     )
     return {
         "cnj": code,
@@ -360,10 +382,24 @@ async def get_summary_sources(code: str, request: Request):
         process = await get_authorized_process(conn, tenant_id=tenant_id, code=canonical_code)
         if process is None:
             raise HTTPException(status_code=404, detail="process not found")
+        summary_id = None
+        if process["current_version_id"] is not None:
+            summary_id = await conn.fetchval(
+                """
+                SELECT id
+                FROM process_summaries
+                WHERE process_id = $1
+                  AND version_id = $2
+                  AND COALESCE((validation->>'passed')::boolean, false) = true
+                """,
+                process["id"],
+                process["current_version_id"],
+            )
         sources = await _load_sources(
             conn,
             process_id=process["id"],
             version_id=process["current_version_id"],
+            summary_id=summary_id,
         )
         state = getattr(request, "state", None)
         principal = getattr(state, "principal", None)
