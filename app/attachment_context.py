@@ -55,7 +55,7 @@ def attachment_retrieval_query(process_context: dict[str, Any], base_query: str)
     terms: list[str] = []
     seen: set[str] = set()
     for value in values:
-        for term in re.findall(r"[\\wÀ-ÿ]+", value, flags=re.UNICODE):
+        for term in re.findall(r"\\w+", value, flags=re.UNICODE):
             normalized = term.casefold()
             if normalized in seen:
                 continue
