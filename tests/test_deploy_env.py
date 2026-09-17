@@ -28,17 +28,42 @@ def _valid_values() -> dict[str, str]:
     }
 
 
+def _enable_bge(values: dict[str, str]) -> None:
+    values.pop("OPENAI_API_KEY", None)
+    values["EMBEDDING_SPACE_RUNTIME_ENABLED"] = "true"
+    values["EMBEDDING_PROVIDER"] = "bge"
+    values["BGE_EMBEDDING_MODEL"] = "BAAI/bge-m3"
+    values["BGE_EMBEDDING_PATH"] = "/opt/rpy/models/bge-m3"
+
+
 def test_valid_deploy_environment_passes() -> None:
     assert preflight.validate(_valid_values()) == []
 
 
 def test_bge_runtime_does_not_require_openai_key() -> None:
     values = _valid_values()
-    values.pop("OPENAI_API_KEY")
-    values["EMBEDDING_SPACE_RUNTIME_ENABLED"] = "true"
-    values["EMBEDDING_PROVIDER"] = "bge"
-    values["BGE_EMBEDDING_MODEL"] = "BAAI/bge-m3"
+    _enable_bge(values)
     assert preflight.validate(values) == []
+
+
+def test_bge_runtime_requires_local_artifact_path() -> None:
+    values = _valid_values()
+    _enable_bge(values)
+    values.pop("BGE_EMBEDDING_PATH")
+    assert (
+        "BGE_EMBEDDING_PATH is required when EMBEDDING_SPACE_RUNTIME_ENABLED is true"
+        in preflight.validate(values)
+    )
+
+
+def test_bge_runtime_requires_absolute_artifact_path() -> None:
+    values = _valid_values()
+    _enable_bge(values)
+    values["BGE_EMBEDDING_PATH"] = "models/bge-m3"
+    assert (
+        "BGE_EMBEDDING_PATH must be an absolute path inside the worker container"
+        in preflight.validate(values)
+    )
 
 
 def test_legacy_runtime_still_requires_openai_key() -> None:
@@ -53,8 +78,7 @@ def test_legacy_runtime_still_requires_openai_key() -> None:
 
 def test_bge_runtime_rejects_unimplemented_cohere_adapter() -> None:
     values = _valid_values()
-    values.pop("OPENAI_API_KEY")
-    values["EMBEDDING_SPACE_RUNTIME_ENABLED"] = "true"
+    _enable_bge(values)
     values["EMBEDDING_PROVIDER"] = "cohere"
     errors = preflight.validate(values)
     assert any("Cohere runtime adapter is not implemented" in error for error in errors)
@@ -62,8 +86,7 @@ def test_bge_runtime_rejects_unimplemented_cohere_adapter() -> None:
 
 def test_bge_runtime_rejects_wrong_model() -> None:
     values = _valid_values()
-    values.pop("OPENAI_API_KEY")
-    values["EMBEDDING_SPACE_RUNTIME_ENABLED"] = "true"
+    _enable_bge(values)
     values["BGE_EMBEDDING_MODEL"] = "other/model"
     assert "BGE_EMBEDDING_MODEL must be 'BAAI/bge-m3'" in preflight.validate(values)
 

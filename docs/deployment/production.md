@@ -49,7 +49,7 @@ Production has no fallback values for:
 - `RPY_BEARER_TOKENS`;
 - `RPY_OPS_TOKEN`.
 
-`OPENAI_API_KEY` is conditional: it is required only while `EMBEDDING_SPACE_RUNTIME_ENABLED=false`, which preserves the historical OpenAI `vector(1536)` retrieval path. A deployment with `EMBEDDING_SPACE_RUNTIME_ENABLED=true`, `EMBEDDING_PROVIDER=bge` and `BGE_EMBEDDING_MODEL=BAAI/bge-m3` does not require an OpenAI credential. The BGE dependencies and model artifact/cache must already exist in the worker image or deployment environment before that switch is enabled. The current controlled runtime accepts only BGE; selecting Cohere is rejected until its runtime adapter exists.
+`OPENAI_API_KEY` is conditional: it is required only while `EMBEDDING_SPACE_RUNTIME_ENABLED=false`, which preserves the historical OpenAI `vector(1536)` retrieval path. A deployment with `EMBEDDING_SPACE_RUNTIME_ENABLED=true`, `EMBEDDING_PROVIDER=bge` and `BGE_EMBEDDING_MODEL=BAAI/bge-m3` does not require an OpenAI credential. The current controlled runtime accepts only BGE; selecting Cohere is rejected until its runtime adapter exists.
 
 Inject secrets from the deployment platform's secret manager or equivalent environment mechanism. Do not place populated values in the repository or bake them into the image. `.env.production.example` is a shape-only template. Staging and production must use separate secret sources; do not point both environments at the same PostgreSQL credentials or reuse HTTP/provider secrets between them.
 
@@ -81,10 +81,13 @@ The production worker environment always carries the rollout selectors so both w
 - `EMBEDDING_SPACE_RUNTIME_ENABLED` defaults to `false`;
 - `EMBEDDING_PROVIDER` defaults to `bge` for the isolated runtime;
 - `BGE_EMBEDDING_MODEL` is pinned to `BAAI/bge-m3`;
+- `BGE_EMBEDDING_PATH` is the absolute path inside the worker container where the pre-provisioned BGE artifact is available;
 - `BGE_EMBEDDING_DEVICE` and `BGE_EMBEDDING_USE_FP16` control local inference characteristics;
 - `EMBEDDING_MODEL` remains the legacy OpenAI model selector.
 
-Before enabling BGE in production, prepare the optional embedding dependencies and model cache/artifact, run the historical reindex command in bounded resumable batches, and collect the retrieval-quality evidence required by #124. Rollback does not delete BGE vectors: set `EMBEDDING_SPACE_RUNTIME_ENABLED=false`, restore `OPENAI_API_KEY`, and the workers return to the preserved legacy embedding column.
+When `EMBEDDING_SPACE_RUNTIME_ENABLED=true`, production preflight requires `BGE_EMBEDDING_PATH` to be an absolute container path. This prevents a production activation from silently falling back to a model-hub download. The deployment must install the optional embeddings dependencies and either bake or mount the complete BGE artifact at that path before workers start. Runtime startup/model use then fails explicitly if the path is missing or not a directory.
+
+Before enabling BGE in production, prepare the optional embedding dependencies and local model artifact, run the historical reindex command in bounded resumable batches, and collect the retrieval-quality evidence required by #124. Rollback does not delete BGE vectors: set `EMBEDDING_SPACE_RUNTIME_ENABLED=false`, restore `OPENAI_API_KEY`, and the workers return to the preserved legacy embedding column.
 
 ## Deploy sequence
 
@@ -110,6 +113,7 @@ The deploy-environment preflight rejects configuration that:
 - leaves required values empty or at documented placeholder values;
 - omits `OPENAI_API_KEY` while the legacy embedding path is selected;
 - enables the isolated embedding runtime with a provider/model that is not currently supported;
+- enables BGE without an absolute `BGE_EMBEDDING_PATH` inside the worker container;
 - reuses a PostgreSQL login identity across migration/API/worker/scheduler/backup responsibilities;
 - points the role-specific URLs at different PostgreSQL databases;
 - supplies an invalid bearer-token-to-tenant mapping.
@@ -125,7 +129,7 @@ The compose validator rejects changes that:
 - change the explicit API worker count;
 - alter the two-worker / one-scheduler topology;
 - remove required service-specific configuration;
-- allow the two workers to disagree on embedding rollout/model settings;
+- allow the two workers to disagree on embedding rollout/model/artifact settings;
 - distribute provider or HTTP-facing secrets to unrelated services.
 
 This contract is intentionally small. Platform-specific manifests (Kubernetes, ECS, Nomad, Fly.io, Render, etc.) should reproduce these invariants rather than introduce a second application architecture.
