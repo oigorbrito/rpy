@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import os
 from dataclasses import dataclass
 from typing import Literal
 from uuid import UUID
 
 import asyncpg
+from pypdf import PdfReader
+from pypdf.errors import FileNotDecryptedError, PdfReadError
 
 from app.attachments import AttachmentChunkInput, replace_attachment_chunks, upsert_attachment_state
 
@@ -57,14 +60,15 @@ def normalize_content_type(content_type: str) -> str:
     return content_type.split(";", 1)[0].strip().lower()
 
 
-def _validate_text_payload(
+def _validate_common_payload(
     data: bytes,
     *,
     content_type: str,
+    expected_content_type: str,
     limits: AttachmentProcessingLimits,
-) -> str:
+) -> None:
     normalized_type = normalize_content_type(content_type)
-    if normalized_type != "text/plain":
+    if normalized_type != expected_content_type:
         raise AttachmentProcessingError(
             status="unreadable",
             error_code="unsupported_content_type",
@@ -79,6 +83,20 @@ def _validate_text_payload(
             status="unreadable",
             error_code="empty_attachment",
         )
+
+
+def _validate_text_payload(
+    data: bytes,
+    *,
+    content_type: str,
+    limits: AttachmentProcessingLimits,
+) -> str:
+    _validate_common_payload(
+        data,
+        content_type=content_type,
+        expected_content_type="text/plain",
+        limits=limits,
+    )
     if b"\x00" in data:
         raise AttachmentProcessingError(
             status="corrupt",
@@ -155,7 +173,87 @@ def parse_text_attachment(
     return chunk_attachment_text(text, chunk_chars=effective_limits.chunk_chars)
 
 
-async def process_text_attachment_bytes(
+def parse_pdf_attachment(
+    data: bytes,
+    *,
+    content_type: str,
+    limits: AttachmentProcessingLimits | None = None,
+) -> list[AttachmentChunkInput]:
+    """Extract text-layer PDF pages locally; image-only PDFs remain unreadable for OCR."""
+    effective_limits = limits or attachment_processing_limits()
+    _validate_common_payload(
+        data,
+        content_type=content_type,
+        expected_content_type="application/pdf",
+        limits=effective_limits,
+    )
+    if not data.lstrip().startswith(b"%PDF-"):
+        raise AttachmentProcessingError(status="corrupt", error_code="invalid_pdf_header")
+
+    try:
+        reader = PdfReader(io.BytesIO(data), strict=True)
+        if reader.is_encrypted:
+            raise AttachmentProcessingError(status="unreadable", error_code="encrypted_pdf")
+
+        chunks: list[AttachmentChunkInput] = []
+        for page_number, page in enumerate(reader.pages, start=1):
+            extracted = page.extract_text() or ""
+            normalized = extracted.replace("\r\n", "\n").replace("\r", "\n").strip()
+            if not normalized:
+                continue
+            page_chunks = chunk_attachment_text(
+                normalized,
+                chunk_chars=effective_limits.chunk_chars,
+            )
+            for chunk in page_chunks:
+                chunks.append(
+                    AttachmentChunkInput(
+                        text=chunk.text,
+                        page_start=page_number,
+                        page_end=page_number,
+                        char_start=chunk.char_start,
+                        char_end=chunk.char_end,
+                    )
+                )
+    except AttachmentProcessingError:
+        raise
+    except FileNotDecryptedError as exc:
+        raise AttachmentProcessingError(
+            status="unreadable",
+            error_code="encrypted_pdf",
+        ) from exc
+    except (PdfReadError, OSError, ValueError, TypeError) as exc:
+        raise AttachmentProcessingError(
+            status="corrupt",
+            error_code="invalid_pdf",
+        ) from exc
+
+    if not chunks:
+        raise AttachmentProcessingError(
+            status="unreadable",
+            error_code="pdf_text_unavailable",
+        )
+    return chunks
+
+
+def parse_attachment(
+    data: bytes,
+    *,
+    content_type: str,
+    limits: AttachmentProcessingLimits | None = None,
+) -> list[AttachmentChunkInput]:
+    normalized_type = normalize_content_type(content_type)
+    if normalized_type == "text/plain":
+        return parse_text_attachment(data, content_type=content_type, limits=limits)
+    if normalized_type == "application/pdf":
+        return parse_pdf_attachment(data, content_type=content_type, limits=limits)
+    raise AttachmentProcessingError(
+        status="unreadable",
+        error_code="unsupported_content_type",
+    )
+
+
+async def process_attachment_bytes(
     conn: asyncpg.Connection,
     *,
     process_id: UUID,
@@ -165,11 +263,11 @@ async def process_text_attachment_bytes(
     data: bytes,
     limits: AttachmentProcessingLimits | None = None,
 ) -> dict[str, object]:
-    """Parse and persist authorized UTF-8 text bytes without retaining the raw bytes."""
+    """Parse/persist already-authorized bytes without retaining or logging the raw document."""
     effective_limits = limits or attachment_processing_limits()
     digest = hashlib.sha256(data).hexdigest()
     try:
-        chunks = parse_text_attachment(
+        chunks = parse_attachment(
             data,
             content_type=content_type,
             limits=effective_limits,
@@ -216,3 +314,45 @@ async def process_text_attachment_bytes(
         "error_code": None,
         "chunk_count": chunk_count,
     }
+
+
+async def process_text_attachment_bytes(
+    conn: asyncpg.Connection,
+    *,
+    process_id: UUID,
+    version_id: UUID,
+    source_attachment_id: str,
+    content_type: str,
+    data: bytes,
+    limits: AttachmentProcessingLimits | None = None,
+) -> dict[str, object]:
+    """Backward-compatible text-only entry point for the Phase 2 processing block."""
+    if normalize_content_type(content_type) != "text/plain":
+        effective_limits = limits or attachment_processing_limits()
+        digest = hashlib.sha256(data).hexdigest()
+        attachment_id = await upsert_attachment_state(
+            conn,
+            process_id=process_id,
+            version_id=version_id,
+            source_attachment_id=source_attachment_id,
+            status="unreadable",
+            content_type=normalize_content_type(content_type),
+            byte_size=len(data),
+            content_sha256=digest,
+            error_code="unsupported_content_type",
+        )
+        return {
+            "attachment_id": attachment_id,
+            "status": "unreadable",
+            "error_code": "unsupported_content_type",
+            "chunk_count": 0,
+        }
+    return await process_attachment_bytes(
+        conn,
+        process_id=process_id,
+        version_id=version_id,
+        source_attachment_id=source_attachment_id,
+        content_type=content_type,
+        data=data,
+        limits=limits,
+    )
