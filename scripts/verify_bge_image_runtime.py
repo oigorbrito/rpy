@@ -1,0 +1,70 @@
+from __future__ import annotations
+
+import argparse
+import importlib.util
+import json
+import os
+from pathlib import Path
+
+REQUIRED_OFFLINE_ENV = (
+    "PIP_NO_INDEX",
+    "HF_HUB_OFFLINE",
+    "TRANSFORMERS_OFFLINE",
+    "HF_DATASETS_OFFLINE",
+)
+
+
+def validate(*, model_dir: Path, environ: dict[str, str] | None = None) -> list[str]:
+    env = dict(os.environ if environ is None else environ)
+    errors: list[str] = []
+
+    if importlib.util.find_spec("FlagEmbedding") is None:
+        errors.append("FlagEmbedding is not installed")
+
+    if not model_dir.is_dir():
+        errors.append(f"BGE model directory does not exist: {model_dir}")
+    else:
+        config = model_dir / "config.json"
+        if not config.is_file():
+            errors.append(f"BGE model artifact is missing config.json: {model_dir}")
+        else:
+            try:
+                payload = json.loads(config.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                errors.append(f"BGE model config.json is invalid: {exc}")
+            else:
+                hidden_size = payload.get("hidden_size")
+                if hidden_size not in {None, 1024}:
+                    errors.append(
+                        f"BGE model hidden_size must be 1024 when declared, got {hidden_size!r}"
+                    )
+
+    for key in REQUIRED_OFFLINE_ENV:
+        value = str(env.get(key) or "").strip().casefold()
+        if value not in {"1", "true", "yes", "on"}:
+            errors.append(f"{key} must force offline mode in the BGE image")
+
+    configured_path = str(env.get("BGE_EMBEDDING_PATH") or "").strip()
+    if configured_path != str(model_dir):
+        errors.append(
+            f"BGE_EMBEDDING_PATH must equal the verified model directory {str(model_dir)!r}"
+        )
+
+    return errors
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Verify offline BGE image readiness")
+    parser.add_argument("--model-dir", type=Path, required=True)
+    args = parser.parse_args()
+    errors = validate(model_dir=args.model_dir)
+    if errors:
+        for error in errors:
+            print(f"bge image contract: {error}")
+        return 1
+    print("bge image contract: ok")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
