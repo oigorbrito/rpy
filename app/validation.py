@@ -51,6 +51,10 @@ _ATTENTION_HEADING_RE = re.compile(
 )
 _NEXT_HEADING_RE = re.compile(r"^#{1,6}\s+\S", re.MULTILINE)
 _HEADING_RE = re.compile(r"^#{1,6}\s+(?P<title>.+?)\s*$", re.MULTILINE)
+_SOURCE_BACKED_CLAIM_RE = re.compile(
+    r"^(?:[-*]\s*)?(?P<label>Área|Assuntos?|Tags?|Comarca|Órgão julgador|Classe|Fase)\s*:\s*(?P<value>.+?)\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
 _CONDITIONAL_SECTION_ORDER = (
     "Decisões",
     "Prazos em curso",
@@ -193,6 +197,22 @@ def _conditional_section_order_errors(text: str) -> list[str]:
     return []
 
 
+def _source_backed_claim_errors(text: str, source_text: str) -> list[str]:
+    normalized_source = f" {_normalize_party_name(source_text)} "
+    errors: list[str] = []
+    for match in _SOURCE_BACKED_CLAIM_RE.finditer(text):
+        label = match.group("label").strip()
+        raw_value = match.group("value").strip()
+        values = [raw_value]
+        if _normalize_party_name(label) in {"assunto", "assuntos", "tag", "tags"}:
+            values = [part.strip() for part in re.split(r"[,;]", raw_value) if part.strip()]
+        for value in values:
+            normalized_value = _normalize_party_name(value)
+            if normalized_value and f" {normalized_value} " not in normalized_source:
+                errors.append(f"source-backed field mismatch: {label}={value}")
+    return errors
+
+
 def _canonical_date(value: str) -> str | None:
     for fmt in ("%Y-%m-%d", "%d/%m/%Y"):
         try:
@@ -278,6 +298,7 @@ def validar(
         allowed_dates = _dates(source_text)
         for generated_date in sorted(_dates(text) - allowed_dates):
             errors.append(f"date not present in source context: {generated_date}")
+        errors.extend(_source_backed_claim_errors(text, source_text))
 
     attention_body = _attention_body(text)
     if require_attention_section:
