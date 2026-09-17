@@ -161,6 +161,42 @@ def rank_steps(
     return sorted(selected.values(), key=lambda item: item.step.step_number)
 
 
+def rerank_steps(
+    *,
+    steps: Sequence[Step],
+    scores: dict[UUID, float],
+    limit: int = 15,
+) -> list[Step]:
+    """Apply injected reranker scores while preserving mandatory movements.
+
+    The scorer is deliberately outside this function: a future BGE or
+    explicitly authorized Cohere adapter can provide scores without changing
+    candidate filtering or the mandatory-evidence contract.
+    """
+    if limit <= 0:
+        raise ValueError("reranker limit must be positive")
+    if not steps:
+        return []
+
+    by_number = sorted(steps, key=lambda item: item.step_number)
+    mandatory_ids = {by_number[0].id, by_number[-1].id}
+    mandatory_ids.update(item.id for item in by_number[-MANDATORY_RECENT_STEPS:])
+    mandatory_ids.update(
+        item.id for item in by_number if MILESTONE_RE.search(item.searchable_text)
+    )
+
+    selected = {item.id: item for item in by_number if item.id in mandatory_ids}
+    ranked = sorted(
+        by_number,
+        key=lambda item: (-float(scores.get(item.id, 0.0)), item.step_number),
+    )
+    for item in ranked:
+        if len(selected) >= max(limit, len(mandatory_ids)):
+            break
+        selected.setdefault(item.id, item)
+    return sorted(selected.values(), key=lambda item: item.step_number)
+
+
 async def load_steps(conn: asyncpg.Connection, *, version_id: UUID) -> list[Step]:
     rows = await conn.fetch(
         """
