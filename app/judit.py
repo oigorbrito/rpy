@@ -6,8 +6,6 @@ from datetime import datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from app.tpu_glossary import resolve_process_tpu_context
-
 _CNJ_CANONICAL_RE = re.compile(r"^\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}$")
 _CNJ_DIGITS_RE = re.compile(r"^\d{20}$")
 _PERSONAL_ID_RE = re.compile(r"(?<!\d)(?:\d{11}|\d{14})(?!\d)")
@@ -304,14 +302,6 @@ def extract_promotable_fields(process: dict[str, Any]) -> dict[str, Any]:
             "secrecy_level": secrecy_level,
         }
 
-    subjects = _safe_subjects(process)
-    tpu_glossary = resolve_process_tpu_context(
-        class_code=header.get("class_code"),
-        subjects=subjects,
-    )
-    if tpu_glossary:
-        header["tpu_glossary"] = tpu_glossary
-
     steps = process.get("steps") or process.get("movements") or process.get("events") or []
     normalized_steps: list[dict[str, Any]] = []
     for index, step in enumerate(steps, start=1):
@@ -352,7 +342,7 @@ def extract_promotable_fields(process: dict[str, Any]) -> dict[str, Any]:
     return {
         "header": header,
         "parties": _safe_parties(process),
-        "subjects": subjects,
+        "subjects": _safe_subjects(process),
         "steps": normalized_steps,
         "court": court,
         "class_name": class_name,
