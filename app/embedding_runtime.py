@@ -1,17 +1,33 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Protocol
 from uuid import UUID
 
 import asyncpg
 
-from app.embedding_spaces import BGE_PROVIDER, EmbeddingSpace, active_embedding_space
+from app.embedding_spaces import (
+    BGE_PROVIDER,
+    COHERE_PROVIDER,
+    EmbeddingSpace,
+    active_embedding_space,
+)
 from app.embedding_store import upsert_step_embeddings, vector_search_space
 from app.embeddings_bge import BGEEmbeddingEncoder
+from app.embeddings_cohere import CohereEmbeddingEncoder
 
 EMBEDDING_BATCH_SIZE = 64
 _RUNTIME_CACHE: dict[tuple[str, bool, str | None, str | None], "ActiveEmbeddingRuntime"] = {}
+
+
+class EmbeddingEncoder(Protocol):
+    space: EmbeddingSpace
+
+    async def embed_documents(self, texts: Sequence[str]) -> list[list[float]]: ...
+
+    async def embed_query(self, text: str) -> list[float]: ...
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -34,7 +50,7 @@ def embedding_space_runtime_enabled() -> bool:
 @dataclass(slots=True)
 class ActiveEmbeddingRuntime:
     space: EmbeddingSpace
-    encoder: BGEEmbeddingEncoder
+    encoder: EmbeddingEncoder
 
     async def ensure_step_embeddings(
         self,
@@ -42,8 +58,26 @@ class ActiveEmbeddingRuntime:
         *,
         version_id: UUID,
     ) -> int:
-        """Fill only vectors missing from this exact provider/model space."""
+        """Fill only vectors missing from this exact provider/model space.
+
+        External providers are refused for secret process versions even if a caller
+        bypasses the normal RAG secrecy short-circuit.
+        """
         async with pool.acquire() as conn:
+            secrecy_level = await conn.fetchval(
+                """
+                SELECT p.secrecy_level
+                FROM process_versions pv
+                JOIN processes p ON p.id = pv.process_id
+                WHERE pv.id = $1
+                """,
+                version_id,
+            )
+            if secrecy_level is None:
+                raise LookupError("process version does not exist")
+            if self.space.provider == COHERE_PROVIDER and int(secrecy_level or 0) > 0:
+                raise RuntimeError("secret process versions cannot use external embeddings")
+
             rows = await conn.fetch(
                 """
                 SELECT ps.id,
@@ -104,32 +138,42 @@ class ActiveEmbeddingRuntime:
 
 
 def get_active_embedding_runtime() -> ActiveEmbeddingRuntime:
-    """Resolve and cache the explicitly enabled local runtime by deployment settings."""
+    """Resolve exactly one explicitly selected embedding provider for this deployment."""
     if not embedding_space_runtime_enabled():
         raise RuntimeError("embedding-space runtime is not enabled")
     space = active_embedding_space()
-    if space.provider != BGE_PROVIDER:
-        raise RuntimeError(
-            "Cohere embedding runtime is not implemented yet; "
-            "do not enable it or fall back across semantic spaces"
-        )
-    use_fp16 = _env_bool("BGE_EMBEDDING_USE_FP16", False)
-    device = str(os.environ.get("BGE_EMBEDDING_DEVICE") or "").strip() or None
-    artifact_path = str(os.environ.get("BGE_EMBEDDING_PATH") or "").strip() or None
-    key = (space.key, use_fp16, device, artifact_path)
-    runtime = _RUNTIME_CACHE.get(key)
-    if runtime is None:
-        runtime = ActiveEmbeddingRuntime(
-            space=space,
-            encoder=BGEEmbeddingEncoder(
-                model=space.model,
-                artifact_path=artifact_path,
-                use_fp16=use_fp16,
-                device=device,
-            ),
-        )
-        _RUNTIME_CACHE[key] = runtime
-    return runtime
+
+    if space.provider == BGE_PROVIDER:
+        use_fp16 = _env_bool("BGE_EMBEDDING_USE_FP16", False)
+        device = str(os.environ.get("BGE_EMBEDDING_DEVICE") or "").strip() or None
+        artifact_path = str(os.environ.get("BGE_EMBEDDING_PATH") or "").strip() or None
+        key = (space.key, use_fp16, device, artifact_path)
+        runtime = _RUNTIME_CACHE.get(key)
+        if runtime is None:
+            runtime = ActiveEmbeddingRuntime(
+                space=space,
+                encoder=BGEEmbeddingEncoder(
+                    model=space.model,
+                    artifact_path=artifact_path,
+                    use_fp16=use_fp16,
+                    device=device,
+                ),
+            )
+            _RUNTIME_CACHE[key] = runtime
+        return runtime
+
+    if space.provider == COHERE_PROVIDER:
+        key = (space.key, False, None, None)
+        runtime = _RUNTIME_CACHE.get(key)
+        if runtime is None:
+            runtime = ActiveEmbeddingRuntime(
+                space=space,
+                encoder=CohereEmbeddingEncoder(model=space.model),
+            )
+            _RUNTIME_CACHE[key] = runtime
+        return runtime
+
+    raise AssertionError(f"unhandled embedding provider: {space.provider}")
 
 
 def clear_embedding_runtime_cache() -> None:
