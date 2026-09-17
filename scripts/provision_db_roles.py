@@ -19,6 +19,7 @@ API_READ_TABLES = (
     "process_versions",
     "process_summaries",
     "process_summary_sources",
+    "process_summary_attachment_sources",
     "process_summary_glossary_sources",
     "tenant_processes",
     "tenant_judit_requests",
@@ -128,6 +129,9 @@ async def provision(database_url: str) -> None:
             )
             await conn.execute(
                 f"GRANT SELECT, INSERT, UPDATE, DELETE ON process_summary_sources TO {worker}"
+            )
+            await conn.execute(
+                f"GRANT SELECT, INSERT, UPDATE, DELETE ON process_summary_attachment_sources TO {worker}"
             )
             await conn.execute(
                 f"GRANT SELECT, INSERT, UPDATE, DELETE ON process_summary_glossary_sources TO {worker}"
