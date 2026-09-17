@@ -12,6 +12,7 @@ import asyncpg
 
 from app.attachment_context import load_attachment_context, resolve_generation_tenant
 from app.attachment_signals import attachment_status_warnings
+from app.datajud_provenance import datajud_conflict_warning
 from app.db import create_pool
 from app.embeddings import (
     embed_query,
@@ -189,9 +190,21 @@ async def _load_process(
     async with pool.acquire() as conn:
         process = await conn.fetchrow(
             """
-            SELECT id, code, court, class_name, subjects, parties, secrecy_level, header
-            FROM processes
-            WHERE id = $1 AND current_version_id = $2
+            SELECT p.id, p.code, p.court, p.class_name, p.subjects, p.parties,
+                   p.secrecy_level, p.header,
+                   COALESCE(
+                       (
+                           SELECT jsonb_agg(dfp.field_name ORDER BY dfp.field_name)
+                           FROM process_datajud_field_provenance dfp
+                           WHERE dfp.process_id = p.id
+                             AND dfp.version_id = $2
+                             AND dfp.conflict = TRUE
+                             AND dfp.selected_source = 'datajud'
+                       ),
+                       '[]'::jsonb
+                   ) AS datajud_conflict_fields
+            FROM processes p
+            WHERE p.id = $1 AND p.current_version_id = $2
             """,
             process_id,
             version_id,
@@ -207,6 +220,10 @@ async def _load_process(
         "parties": decode_json_list(process["parties"], label="process parties"),
         "secrecy_level": int(process["secrecy_level"] or 0),
         "header": decode_json_object(process["header"], label="process header"),
+        "_datajud_conflict_fields": decode_json_list(
+            process["datajud_conflict_fields"],
+            label="DataJud conflict fields",
+        ),
     }
 
 
@@ -252,6 +269,10 @@ async def _load_context(
     base["step_count"] = len(steps)
     source_warnings = (
         [EMPTY_STEPS_WARNING] if not steps else _source_step_gap_warnings(steps)
+    )
+    source_warnings.extend(
+        datajud_conflict_warning(str(field))
+        for field in base.get("_datajud_conflict_fields", [])
     )
     if source_warnings:
         base["source_warnings"] = source_warnings
