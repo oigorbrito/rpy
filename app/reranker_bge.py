@@ -31,6 +31,11 @@ def _env_bool(name: str, default: bool = False) -> bool:
     raise RuntimeError(f"{name} must be a boolean")
 
 
+def bge_reranker_enabled() -> bool:
+    """Return whether local BGE reranking is explicitly enabled for this deployment."""
+    return _env_bool("RERANKER_ENABLED", False)
+
+
 def _load_flag_reranker(*, model: str, use_fp16: bool) -> Any:
     try:
         from FlagEmbedding import FlagReranker

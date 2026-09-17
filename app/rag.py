@@ -24,7 +24,9 @@ from app.providers import (
     call_with_retries,
     is_retryable_anthropic_error,
 )
-from app.retrieval import lexical_search, load_steps, rank_steps, vector_search
+from app.reranker_bge import BGERerankerScorer, bge_reranker_enabled
+from app.reranking import RERANK_CANDIDATE_LIMIT, select_context_steps
+from app.retrieval import lexical_search, load_steps, vector_search
 from app.tasks import PermanentTaskError, task
 from app.validation import ValidationResult, validar
 
@@ -226,6 +228,11 @@ async def _load_context(
     if source_warnings:
         base["source_warnings"] = source_warnings
 
+    reranker_scorer = None
+    if len(steps) > 40 and bge_reranker_enabled():
+        reranker_scorer = BGERerankerScorer()
+    retrieval_limit = RERANK_CANDIDATE_LIMIT if reranker_scorer is not None else 40
+
     lexical_scores: dict[UUID, float] | None = None
     vector_scores: dict[UUID, float] | None = None
     if len(steps) > 40:
@@ -234,7 +241,7 @@ async def _load_context(
                 conn,
                 version_id=version_id,
                 query=RETRIEVAL_QUERY,
-                limit=40,
+                limit=retrieval_limit,
             )
 
         if vector_retrieval_configured():
@@ -245,15 +252,15 @@ async def _load_context(
                     conn,
                     version_id=version_id,
                     embedding=query_vector,
-                    limit=40,
+                    limit=retrieval_limit,
                 )
 
-    ranked = rank_steps(
+    ranked = await select_context_steps(
         query=RETRIEVAL_QUERY,
         steps=steps,
         lexical_scores=lexical_scores,
         vector_scores=vector_scores,
-        limit=20,
+        scorer=reranker_scorer,
     )
     base["steps"] = _serialize_steps(ranked)
     return base
