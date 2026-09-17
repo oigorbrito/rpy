@@ -1,4 +1,3 @@
-from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -14,7 +13,7 @@ class _FakeReranker:
 
     def compute_score(self, pairs, *, normalize):
         self.calls.append((pairs, normalize))
-        return self.scores
+        return self.scores[: len(pairs)]
 
 
 @pytest.mark.asyncio
