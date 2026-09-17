@@ -36,6 +36,15 @@ def _enable_bge(values: dict[str, str]) -> None:
     values["BGE_EMBEDDING_PATH"] = "/opt/rpy/models/bge-m3"
 
 
+def _enable_cohere(values: dict[str, str]) -> None:
+    values.pop("OPENAI_API_KEY", None)
+    values["EMBEDDING_SPACE_RUNTIME_ENABLED"] = "true"
+    values["EMBEDDING_PROVIDER"] = "cohere"
+    values["ALLOW_EXTERNAL_EMBEDDINGS"] = "true"
+    values["COHERE_EMBEDDING_MODEL"] = "embed-v4.0"
+    values["COHERE_API_KEY"] = "cohere-key"
+
+
 def test_valid_deploy_environment_passes() -> None:
     assert preflight.validate(_valid_values()) == []
 
@@ -50,10 +59,7 @@ def test_bge_runtime_requires_local_artifact_path() -> None:
     values = _valid_values()
     _enable_bge(values)
     values.pop("BGE_EMBEDDING_PATH")
-    assert (
-        "BGE_EMBEDDING_PATH is required when EMBEDDING_SPACE_RUNTIME_ENABLED is true"
-        in preflight.validate(values)
-    )
+    assert "BGE_EMBEDDING_PATH is required when BGE embeddings are active" in preflight.validate(values)
 
 
 def test_bge_runtime_requires_absolute_artifact_path() -> None:
@@ -66,6 +72,34 @@ def test_bge_runtime_requires_absolute_artifact_path() -> None:
     )
 
 
+def test_cohere_runtime_requires_explicit_authorization() -> None:
+    values = _valid_values()
+    _enable_cohere(values)
+    values["ALLOW_EXTERNAL_EMBEDDINGS"] = "false"
+    assert "Cohere embeddings require ALLOW_EXTERNAL_EMBEDDINGS=true" in preflight.validate(values)
+
+
+def test_authorized_cohere_runtime_does_not_require_openai_or_bge_path() -> None:
+    values = _valid_values()
+    _enable_cohere(values)
+    values.pop("BGE_EMBEDDING_PATH", None)
+    assert preflight.validate(values) == []
+
+
+def test_cohere_runtime_requires_key() -> None:
+    values = _valid_values()
+    _enable_cohere(values)
+    values.pop("COHERE_API_KEY")
+    assert "COHERE_API_KEY is required when Cohere embeddings are active" in preflight.validate(values)
+
+
+def test_cohere_runtime_rejects_wrong_model() -> None:
+    values = _valid_values()
+    _enable_cohere(values)
+    values["COHERE_EMBEDDING_MODEL"] = "embed-v3.0"
+    assert "COHERE_EMBEDDING_MODEL must be 'embed-v4.0'" in preflight.validate(values)
+
+
 def test_legacy_runtime_still_requires_openai_key() -> None:
     values = _valid_values()
     values.pop("OPENAI_API_KEY")
@@ -74,14 +108,6 @@ def test_legacy_runtime_still_requires_openai_key() -> None:
         "OPENAI_API_KEY is required when EMBEDDING_SPACE_RUNTIME_ENABLED is false"
         in errors
     )
-
-
-def test_bge_runtime_rejects_unimplemented_cohere_adapter() -> None:
-    values = _valid_values()
-    _enable_bge(values)
-    values["EMBEDDING_PROVIDER"] = "cohere"
-    errors = preflight.validate(values)
-    assert any("Cohere runtime adapter is not implemented" in error for error in errors)
 
 
 def test_bge_runtime_rejects_wrong_model() -> None:
