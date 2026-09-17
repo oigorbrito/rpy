@@ -32,15 +32,27 @@ dataset before redistribution terms have been reviewed.
 
 ## Licensing / redistribution status
 
-The CNJ pages above provide public consultation and downloads. During the source
-review for this change, no explicit content license governing redistribution of a
-complete TPU dump was identified on those pages. Rpy therefore does **not** claim
-that the full CNJ dataset is licensed for unrestricted redistribution.
+The CNJ pages above provide public consultation, a public WebService and versioned
+Excel/SQL downloads. CNJ Portaria 209/2019 defines open data as public,
+machine-processable data published under an open license that permits free use,
+consumption or combination with source attribution. Resolução 333/2020 uses the
+same open-license concept for judicial open data.
 
-Until the redistribution terms are reviewed, repository snapshots must contain
-only the minimum normalized entries needed for the product contract/tests, with
-source references. A full snapshot must not be imported merely because an Excel,
-SQL or API endpoint is publicly reachable.
+Those general policies strengthen the basis for reuse, but the TPU download pages
+reviewed for this project still do not attach a dataset-specific license notice to
+the complete TPU dump. Rpy therefore does **not** claim that mirroring the entire
+official dump inside this repository is expressly authorized.
+
+To avoid conflating public access with repository redistribution, the complete
+catalog may be prepared locally from an operator-obtained official export without
+committing that source artifact. The runtime remains offline and the repository
+continues to vendor only the minimal reviewed snapshot until dataset-specific
+redistribution terms are confirmed.
+
+Relevant CNJ policy sources:
+
+- https://atos.cnj.jus.br/atos/detalhar/busca-atos-adm?documento=3140
+- https://atos.cnj.jus.br/atos/detalhar/3488
 
 ## Snapshot schema
 
@@ -58,15 +70,33 @@ falls back to network access.
 ## Update procedure
 
 1. Check the CNJ version/download page and record the published TPU version.
-2. Review the source artifact/API response and the redistribution terms applicable
-   at that time.
-3. Create a **new** snapshot file; never overwrite a prior released snapshot.
-4. Preserve numeric TPU codes as strings and distinguish classes from subjects.
-5. Normalize only whitespace/encoding needed for deterministic JSON; do not invent
-   explanatory text absent from the reviewed source.
-6. Add/update tests that resolve known codes, omit unknown codes and prove the
+2. Obtain the official export/API data outside the repository and review the
+   redistribution terms applicable at that time.
+3. Normalize the entries you are authorized to use into a local UTF-8 CSV with
+   exactly these required columns: `kind,code,name,definition,source_ref`.
+   `kind` is only `class` or `subject`; numeric codes remain strings.
+4. Build a **new** snapshot without network access:
+
+   ```bash
+   python scripts/build_tpu_snapshot.py \
+     --input /secure/local/tpu-normalized.csv \
+     --output /secure/local/2026-09-12.json \
+     --tpu-version 2026-09-12 \
+     --source-version-label 12/09/2026
+   ```
+
+   The builder validates required fields/duplicates, sorts entries
+   deterministically, records the local input SHA-256 and refuses to overwrite an
+   existing snapshot.
+5. Review the generated JSON against the official source. Copy it to
+   `data/tpu/<version>.json` only when the intended redistribution/deployment use
+   is authorized. Never commit the original Excel/SQL/API dump merely because it
+   was publicly downloadable.
+6. Preserve source references and do not invent explanatory text absent from the
+   reviewed source.
+7. Add/update tests that resolve known codes, omit unknown codes and prove the
    selected snapshot version is present in generated context metadata.
-7. Run the complete Rpy CI, including offline release smoke. Runtime must remain
+8. Run the complete Rpy CI, including offline release smoke. Runtime must remain
    provider-free for glossary resolution.
 
 ## Current integration boundary
