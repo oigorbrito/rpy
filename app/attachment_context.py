@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from typing import Any
 from uuid import UUID
 
@@ -38,18 +39,29 @@ def attachment_context_limits() -> tuple[int, int]:
 
 
 def attachment_retrieval_query(process_context: dict[str, Any], base_query: str) -> str:
-    parts = [base_query]
+    """Expand legal retrieval hints without turning recall terms into an AND filter."""
+    values = [base_query]
     class_name = str(process_context.get("class_name") or "").strip()
     if class_name:
-        parts.append(class_name)
+        values.append(class_name)
     for subject in process_context.get("subjects", []):
         if not isinstance(subject, dict):
             continue
         for key in ("name", "code"):
             value = str(subject.get(key) or "").strip()
             if value:
-                parts.append(value)
-    return " ".join(parts)
+                values.append(value)
+
+    terms: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        for term in re.findall(r"[\\wÀ-ÿ]+", value, flags=re.UNICODE):
+            normalized = term.casefold()
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            terms.append(term)
+    return " OR ".join(terms)
 
 
 def _truncate(text: str, limit: int) -> str:
