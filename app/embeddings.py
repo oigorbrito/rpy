@@ -17,6 +17,7 @@ from app.providers import (
     is_retryable_openai_error,
     openai_client,
 )
+from app.retrieval import ELIGIBLE_PROCESS_STEP_SQL
 
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
 # Legacy rollback contract: sql/002_process_data.sql defines process_steps.embedding
@@ -144,16 +145,19 @@ async def ensure_step_embeddings(
 
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            """
-            SELECT id,
-                   coalesce(title, '')
-                   || CASE WHEN title IS NULL THEN '' ELSE E'\n' END
-                   || text AS content
-            FROM process_steps
-            WHERE version_id = $1
-              AND embedding IS NULL
-              AND length(trim(coalesce(title, '') || ' ' || text)) > 0
-            ORDER BY step_number ASC
+            f"""
+            SELECT ps.id,
+                   coalesce(ps.title, '')
+                   || CASE WHEN ps.title IS NULL THEN '' ELSE E'\n' END
+                   || ps.text AS content
+            FROM process_steps ps
+            JOIN process_versions pv ON pv.id = ps.version_id
+            JOIN processes p ON p.id = pv.process_id
+            WHERE ps.version_id = $1
+              AND ps.embedding IS NULL
+              AND length(trim(coalesce(ps.title, '') || ' ' || ps.text)) > 0
+              AND {ELIGIBLE_PROCESS_STEP_SQL}
+            ORDER BY ps.step_number ASC
             """,
             version_id,
         )
