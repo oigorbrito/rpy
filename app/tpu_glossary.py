@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from dataclasses import dataclass
@@ -37,6 +38,20 @@ class TPUDefinition:
             "publisher": self.publisher,
             "source": self.source,
             "source_ref": self.source_ref,
+        }
+
+    def as_provenance(self, *, source_order: int) -> dict[str, str | int]:
+        return {
+            "kind": self.kind,
+            "code": self.code,
+            "tpu_version": self.tpu_version,
+            "publisher": self.publisher,
+            "source": self.source,
+            "source_ref": self.source_ref,
+            "definition_sha256": hashlib.sha256(
+                self.definition.encode("utf-8")
+            ).hexdigest(),
+            "source_order": source_order,
         }
 
 
@@ -152,18 +167,12 @@ def _subject_code(subject: Any) -> str | None:
     return rendered or None
 
 
-def resolve_process_tpu_context(
+def resolve_process_tpu_definitions(
     *,
     class_code: str | int | None,
     subjects: Sequence[Any],
     catalog: TPUCatalog | None = None,
-) -> list[dict[str, str]]:
-    """Resolve only codes present in the process against the pinned local snapshot.
-
-    Unknown or malformed codes are omitted. No name matching, fuzzy completion or
-    network fallback is attempted, so the glossary cannot silently invent a
-    definition that is absent from the versioned source.
-    """
+) -> list[TPUDefinition]:
     active = catalog or get_tpu_catalog()
     resolved: list[TPUDefinition] = []
 
@@ -180,5 +189,45 @@ def resolve_process_tpu_context(
         definition = active.resolve(kind="subject", code=code)
         if definition is not None:
             resolved.append(definition)
+    return resolved
 
-    return [definition.as_context() for definition in resolved]
+
+def resolve_process_tpu_context(
+    *,
+    class_code: str | int | None,
+    subjects: Sequence[Any],
+    catalog: TPUCatalog | None = None,
+) -> list[dict[str, str]]:
+    """Resolve only codes present in the process against the pinned local snapshot.
+
+    Unknown or malformed codes are omitted. No name matching, fuzzy completion or
+    network fallback is attempted, so the glossary cannot silently invent a
+    definition that is absent from the versioned source.
+    """
+    return [
+        definition.as_context()
+        for definition in resolve_process_tpu_definitions(
+            class_code=class_code,
+            subjects=subjects,
+            catalog=catalog,
+        )
+    ]
+
+
+def tpu_provenance_from_context(
+    context: Sequence[dict[str, str]],
+    *,
+    catalog: TPUCatalog | None = None,
+) -> list[dict[str, str | int]]:
+    active = catalog or get_tpu_catalog()
+    sources: list[dict[str, str | int]] = []
+    for source_order, item in enumerate(context):
+        kind = item.get("kind")
+        code = item.get("code")
+        if kind not in {"class", "subject"} or not code:
+            continue
+        definition = active.resolve(kind=kind, code=code)  # type: ignore[arg-type]
+        if definition is None:
+            continue
+        sources.append(definition.as_provenance(source_order=source_order))
+    return sources
