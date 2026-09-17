@@ -102,6 +102,16 @@ def _validate_embedding_runtime(values: dict[str, str], errors: list[str]) -> No
     if model != BGE_MODEL:
         errors.append(f"BGE_EMBEDDING_MODEL must be {BGE_MODEL!r}")
 
+    artifact_path = str(values.get("BGE_EMBEDDING_PATH") or "").strip()
+    if not artifact_path:
+        errors.append(
+            "BGE_EMBEDDING_PATH is required when EMBEDDING_SPACE_RUNTIME_ENABLED is true"
+        )
+    elif any(marker in artifact_path.lower() for marker in PLACEHOLDER_MARKERS):
+        errors.append("BGE_EMBEDDING_PATH still contains a placeholder value")
+    elif not Path(artifact_path).is_absolute():
+        errors.append("BGE_EMBEDDING_PATH must be an absolute path inside the worker container")
+
 
 def validate(values: dict[str, str]) -> list[str]:
     errors: list[str] = []
