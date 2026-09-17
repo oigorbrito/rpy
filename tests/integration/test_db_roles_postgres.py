@@ -74,6 +74,15 @@ async def test_runtime_database_roles_are_least_privilege(monkeypatch: pytest.Mo
         assert await admin.fetchval(
             "SELECT has_table_privilege('rpy_api', 'public_summary_requests', 'SELECT,INSERT,UPDATE')"
         )
+        assert await admin.fetchval(
+            "SELECT has_table_privilege('rpy_api', 'judit_trackings', 'SELECT,INSERT,UPDATE')"
+        )
+        assert await admin.fetchval(
+            "SELECT has_table_privilege('rpy_api', 'judit_tracking_refreshes', 'SELECT')"
+        )
+        assert not await admin.fetchval(
+            "SELECT has_table_privilege('rpy_api', 'judit_tracking_refreshes', 'UPDATE')"
+        )
         assert not await admin.fetchval(
             "SELECT has_table_privilege('rpy_api', 'public_summary_requests', 'DELETE')"
         )
@@ -97,6 +106,12 @@ async def test_runtime_database_roles_are_least_privilege(monkeypatch: pytest.Mo
             "SELECT has_table_privilege('rpy_worker', 'tenant_judit_requests', 'SELECT,UPDATE')"
         )
         assert await admin.fetchval(
+            "SELECT has_table_privilege('rpy_worker', 'judit_trackings', 'SELECT,UPDATE')"
+        )
+        assert await admin.fetchval(
+            "SELECT has_table_privilege('rpy_worker', 'judit_tracking_refreshes', 'SELECT,UPDATE')"
+        )
+        assert await admin.fetchval(
             "SELECT has_table_privilege('rpy_worker', 'tenant_processes', 'SELECT,INSERT')"
         )
         assert not await admin.fetchval(
@@ -110,7 +125,16 @@ async def test_runtime_database_roles_are_least_privilege(monkeypatch: pytest.Mo
             "SELECT has_table_privilege('rpy_scheduler', 'processes', 'DELETE')"
         )
         assert await admin.fetchval(
-            "SELECT has_table_privilege('rpy_scheduler', 'jobs', 'DELETE')"
+            "SELECT has_table_privilege('rpy_scheduler', 'jobs', 'SELECT,INSERT,UPDATE,DELETE')"
+        )
+        assert await admin.fetchval(
+            "SELECT has_table_privilege('rpy_scheduler', 'judit_trackings', 'SELECT,UPDATE')"
+        )
+        assert await admin.fetchval(
+            "SELECT has_table_privilege('rpy_scheduler', 'judit_tracking_refreshes', 'SELECT,INSERT')"
+        )
+        assert not await admin.fetchval(
+            "SELECT has_table_privilege('rpy_scheduler', 'judit_tracking_refreshes', 'UPDATE')"
         )
         assert not await admin.fetchval(
             "SELECT has_table_privilege('rpy_scheduler', 'process_summaries', 'SELECT')"
@@ -132,6 +156,7 @@ async def test_runtime_database_roles_are_least_privilege(monkeypatch: pytest.Mo
     try:
         assert await api.fetchval("SELECT count(*) FROM processes") is not None
         assert await api.fetchval("SELECT count(*) FROM public_summary_requests") is not None
+        assert await api.fetchval("SELECT count(*) FROM judit_trackings") is not None
         with pytest.raises(asyncpg.InsufficientPrivilegeError):
             await api.execute("CREATE TABLE db_role_escape_probe (id integer)")
     finally:
