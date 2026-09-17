@@ -9,6 +9,7 @@ from datetime import timedelta
 import asyncpg
 
 from app.db import create_pool
+from app.tracking_scheduler import enqueue_due_tracking_reconciliations
 
 logger = logging.getLogger(__name__)
 LOCK_NAME = "rpy_scheduler"
@@ -139,6 +140,18 @@ async def run_scheduler() -> None:
             name="EXPUNGE_INTERVAL_SECONDS",
         )
     )
+    tracking_stale_hours = float(
+        _positive(
+            float(os.getenv("TRACKING_STALE_HOURS", "36")),
+            name="TRACKING_STALE_HOURS",
+        )
+    )
+    tracking_reconcile_batch = int(
+        _positive(
+            int(os.getenv("TRACKING_RECONCILE_BATCH", "25")),
+            name="TRACKING_RECONCILE_BATCH",
+        )
+    )
 
     pool = await create_pool(database_url, min_size=1, max_size=2)
     try:
@@ -150,6 +163,12 @@ async def run_scheduler() -> None:
             try:
                 while True:
                     async with pool.acquire() as conn:
+                        async with conn.transaction():
+                            tracking_reconciliations = await enqueue_due_tracking_reconciliations(
+                                conn,
+                                stale_after=timedelta(hours=tracking_stale_hours),
+                                limit=tracking_reconcile_batch,
+                            )
                         deleted_processes = await expurgar(
                             conn, retention_days=retention_days
                         )
@@ -165,7 +184,8 @@ async def run_scheduler() -> None:
                             retention_days=job_retention_days,
                         )
                     logger.info(
-                        "maintenance completed: %s process(es) expunged, %s terminal job(s) purged, %s Judit completion marker(s) purged, %s Judit delivery payload(s) purged",
+                        "maintenance completed: %s tracking reconciliation(s) enqueued, %s process(es) expunged, %s terminal job(s) purged, %s Judit completion marker(s) purged, %s Judit delivery payload(s) purged",
+                        tracking_reconciliations,
                         deleted_processes,
                         deleted_jobs,
                         deleted_completion_markers,
