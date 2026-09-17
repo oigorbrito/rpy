@@ -49,7 +49,7 @@ Production has no fallback values for:
 - `RPY_BEARER_TOKENS`;
 - `RPY_OPS_TOKEN`.
 
-`OPENAI_API_KEY` is conditional: it is required only while `EMBEDDING_SPACE_RUNTIME_ENABLED=false`, which preserves the historical OpenAI `vector(1536)` retrieval path. A deployment with `EMBEDDING_SPACE_RUNTIME_ENABLED=true`, `EMBEDDING_PROVIDER=bge` and `BGE_EMBEDDING_MODEL=BAAI/bge-m3` does not require an OpenAI credential. The current controlled runtime accepts only BGE; selecting Cohere is rejected until its runtime adapter exists.
+`OPENAI_API_KEY` is conditional: it is required only while `EMBEDDING_SPACE_RUNTIME_ENABLED=false`, which preserves the historical OpenAI `vector(1536)` retrieval path. With the isolated runtime enabled, BGE is the default self-hosted provider. Cohere is accepted only when the deployment explicitly selects `EMBEDDING_PROVIDER=cohere`, sets `ALLOW_EXTERNAL_EMBEDDINGS=true`, pins `COHERE_EMBEDDING_MODEL=embed-v4.0`, and supplies `COHERE_API_KEY`. Cohere is never an automatic fallback.
 
 Inject secrets from the deployment platform's secret manager or equivalent environment mechanism. Do not place populated values in the repository or bake them into the image. `.env.production.example` is a shape-only template. Staging and production must use separate secret sources; do not point both environments at the same PostgreSQL credentials or reuse HTTP/provider secrets between them.
 
@@ -64,7 +64,7 @@ Database credentials are split by responsibility. The five URLs must use distinc
 Secrets are scoped by service instead of being copied to the whole stack:
 
 - `api` receives `API_DATABASE_URL` plus Judit, bearer-token and ops credentials;
-- `worker-*` receives `WORKER_DATABASE_URL`, Anthropic, embedding runtime settings, and `OPENAI_API_KEY` only when the legacy embedding path is selected;
+- `worker-*` receives `WORKER_DATABASE_URL`, Anthropic and embedding-provider settings; external embedding credentials stay worker-only;
 - `scheduler` receives only `SCHEDULER_DATABASE_URL` and retention/scheduling settings;
 - `migrate` receives the migration URL plus the four runtime/backup URLs needed to provision and rotate their roles;
 - provider keys must not be present in API, scheduler or migration environments;
@@ -83,11 +83,17 @@ The production worker environment always carries the rollout selectors so both w
 - `BGE_EMBEDDING_MODEL` is pinned to `BAAI/bge-m3`;
 - `BGE_EMBEDDING_PATH` is the absolute path inside the worker container where the pre-provisioned BGE artifact is available;
 - `BGE_EMBEDDING_DEVICE` and `BGE_EMBEDDING_USE_FP16` control local inference characteristics;
+- `ALLOW_EXTERNAL_EMBEDDINGS` defaults to `false`;
+- `COHERE_EMBEDDING_MODEL` is pinned to `embed-v4.0`;
 - `EMBEDDING_MODEL` remains the legacy OpenAI model selector.
 
-When `EMBEDDING_SPACE_RUNTIME_ENABLED=true`, production preflight requires `BGE_EMBEDDING_PATH` to be an absolute container path. This prevents a production activation from silently falling back to a model-hub download. The deployment must install the optional embeddings dependencies and either bake or mount the complete BGE artifact at that path before workers start. Runtime startup/model use then fails explicitly if the path is missing or not a directory.
+When BGE is active, production preflight requires `BGE_EMBEDDING_PATH` to be an absolute container path. This prevents production activation from silently falling back to a model-hub download. The deployment must install the optional embeddings dependencies and either bake or mount the complete BGE artifact at that path before workers start. Runtime model use then fails explicitly if the path is missing or not a directory.
 
-Before enabling BGE in production, prepare the optional embedding dependencies and local model artifact, run the historical reindex command in bounded resumable batches, and collect the retrieval-quality evidence required by #124. Rollback does not delete BGE vectors: set `EMBEDDING_SPACE_RUNTIME_ENABLED=false`, restore `OPENAI_API_KEY`, and the workers return to the preserved legacy embedding column.
+Cohere is an external-data boundary. `ALLOW_EXTERNAL_EMBEDDINGS=true` may be set only after explicit environment-specific approval by the data/governance authority responsible for that deployment. CI and automated tests never authorize real external embeddings. Staging and production require separate approval. See `docs/engineering/external-embedding-authorization.md`.
+
+Secret process versions never cross the Cohere boundary. The normal RAG path short-circuits secret processes, the Cohere historical reindex excludes secret versions, and the embedding runtime independently rejects external embedding of a secret version. A Cohere error does not fall back to BGE, OpenAI or another provider.
+
+Switching BGE ↔ Cohere requires controlled re-embedding/reindexing into the target provider/model space even though both use 1024 dimensions. Old provider/model rows remain available for rollback and are never mixed into the active ranking. Rollback to the legacy path disables the isolated runtime and restores `OPENAI_API_KEY`.
 
 ## Deploy sequence
 
@@ -98,8 +104,9 @@ Before enabling BGE in production, prepare the optional embedding dependencies a
 5. Pull the exact digest before changing running services.
 6. Start PostgreSQL or verify the managed PostgreSQL endpoint is healthy.
 7. Run the one-shot `migrate` service to completion using the same `RPY_IMAGE` digest. This applies migrations and provisions/rotates the runtime roles.
-8. Start API, both workers, and the singleton scheduler using that digest.
-9. Route traffic only after `/ready` succeeds through the TLS-terminating reverse proxy or ingress.
+8. Reindex into the selected isolated embedding space before switching production retrieval to it.
+9. Start API, both workers, and the singleton scheduler using that digest.
+10. Route traffic only after `/ready` succeeds through the TLS-terminating reverse proxy or ingress.
 
 A deploy must stop if preflight, compose validation or migrations fail. Do not start a second scheduler to compensate for scheduler failure; restart or replace the singleton instance instead.
 
@@ -112,8 +119,9 @@ The deploy-environment preflight rejects configuration that:
 - uses a mutable image reference instead of a full SHA-256 digest;
 - leaves required values empty or at documented placeholder values;
 - omits `OPENAI_API_KEY` while the legacy embedding path is selected;
-- enables the isolated embedding runtime with a provider/model that is not currently supported;
 - enables BGE without an absolute `BGE_EMBEDDING_PATH` inside the worker container;
+- selects Cohere without `ALLOW_EXTERNAL_EMBEDDINGS=true` and `COHERE_API_KEY`;
+- selects an unsupported provider/model pair;
 - reuses a PostgreSQL login identity across migration/API/worker/scheduler/backup responsibilities;
 - points the role-specific URLs at different PostgreSQL databases;
 - supplies an invalid bearer-token-to-tenant mapping.
@@ -129,7 +137,7 @@ The compose validator rejects changes that:
 - change the explicit API worker count;
 - alter the two-worker / one-scheduler topology;
 - remove required service-specific configuration;
-- allow the two workers to disagree on embedding rollout/model/artifact settings;
+- allow the two workers to disagree on embedding rollout/provider/model/artifact settings;
 - distribute provider or HTTP-facing secrets to unrelated services.
 
 This contract is intentionally small. Platform-specific manifests (Kubernetes, ECS, Nomad, Fly.io, Render, etc.) should reproduce these invariants rather than introduce a second application architecture.
