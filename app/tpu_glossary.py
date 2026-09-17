@@ -28,6 +28,10 @@ class TPUDefinition:
     source: str
     source_ref: str
 
+    @property
+    def definition_sha256(self) -> str:
+        return hashlib.sha256(self.definition.encode("utf-8")).hexdigest()
+
     def as_context(self) -> dict[str, str]:
         return {
             "kind": self.kind,
@@ -38,20 +42,7 @@ class TPUDefinition:
             "publisher": self.publisher,
             "source": self.source,
             "source_ref": self.source_ref,
-        }
-
-    def as_provenance(self, *, source_order: int) -> dict[str, str | int]:
-        return {
-            "kind": self.kind,
-            "code": self.code,
-            "tpu_version": self.tpu_version,
-            "publisher": self.publisher,
-            "source": self.source,
-            "source_ref": self.source_ref,
-            "definition_sha256": hashlib.sha256(
-                self.definition.encode("utf-8")
-            ).hexdigest(),
-            "source_order": source_order,
+            "definition_sha256": self.definition_sha256,
         }
 
 
@@ -212,22 +203,3 @@ def resolve_process_tpu_context(
             catalog=catalog,
         )
     ]
-
-
-def tpu_provenance_from_context(
-    context: Sequence[dict[str, str]],
-    *,
-    catalog: TPUCatalog | None = None,
-) -> list[dict[str, str | int]]:
-    active = catalog or get_tpu_catalog()
-    sources: list[dict[str, str | int]] = []
-    for source_order, item in enumerate(context):
-        kind = item.get("kind")
-        code = item.get("code")
-        if kind not in {"class", "subject"} or not code:
-            continue
-        definition = active.resolve(kind=kind, code=code)  # type: ignore[arg-type]
-        if definition is None:
-            continue
-        sources.append(definition.as_provenance(source_order=source_order))
-    return sources
