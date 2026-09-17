@@ -24,11 +24,16 @@ from app.providers import (
     call_with_retries,
     is_retryable_anthropic_error,
 )
-from app.provenance import replace_summary_sources, selected_movement_sources
+from app.provenance import (
+    replace_summary_glossary_sources,
+    replace_summary_sources,
+    selected_movement_sources,
+)
 from app.reranker_bge import BGERerankerScorer, bge_reranker_enabled
 from app.reranking import RERANK_CANDIDATE_LIMIT, select_context_steps
 from app.retrieval import lexical_search, load_steps, vector_search
 from app.tasks import PermanentTaskError, task
+from app.tpu_glossary import resolve_process_tpu_definitions
 from app.validation import ValidationResult, validar
 
 SONNET_MODEL = "claude-sonnet-5"
@@ -218,7 +223,21 @@ async def _load_context(
             "subjects": [],
             "steps": [],
             "_selected_sources": [],
+            "_glossary_sources": [],
         }
+
+    definitions = resolve_process_tpu_definitions(
+        class_code=base["header"].get("class_code"),
+        subjects=base["subjects"],
+    )
+    if definitions:
+        base["tpu_glossary"] = [definition.as_context() for definition in definitions]
+        base["_glossary_sources"] = [
+            definition.as_provenance(source_order=index)
+            for index, definition in enumerate(definitions)
+        ]
+    else:
+        base["_glossary_sources"] = []
 
     async with pool.acquire() as conn:
         steps = await load_steps(conn, version_id=version_id)
@@ -473,6 +492,7 @@ async def _persist_summary(
     cache_hit: bool | None = None,
     cost_usd: float | None = None,
     selected_sources: list[dict[str, Any]] | None = None,
+    glossary_sources: list[dict[str, Any]] | None = None,
 ) -> bool:
     async with conn.transaction():
         row = await conn.fetchrow(
@@ -520,6 +540,13 @@ async def _persist_summary(
             process_id=process_id,
             version_id=version_id,
             sources=selected_sources or [],
+        )
+        await replace_summary_glossary_sources(
+            conn,
+            summary_id=row["id"],
+            process_id=process_id,
+            version_id=version_id,
+            sources=glossary_sources or [],
         )
     return True
 
@@ -636,6 +663,7 @@ async def generate_summary(
             cache_hit=cache_hit,
             cost_usd=cost_usd,
             selected_sources=list(context.get("_selected_sources", [])),
+            glossary_sources=list(context.get("_glossary_sources", [])),
         )
     return {
         "validation": validation,
