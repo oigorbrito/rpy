@@ -28,7 +28,11 @@ from app.retrieval import lexical_search, load_steps, rank_steps, vector_search
 from app.tasks import PermanentTaskError, task
 from app.validation import ValidationResult, validar
 
-MODEL = "claude-sonnet-5"
+SONNET_MODEL = "claude-sonnet-5"
+OPUS_MODEL = "claude-opus-5"
+MODEL = SONNET_MODEL  # backwards-compatible alias used by existing tests/evals
+OPUS_STEP_THRESHOLD = 100
+MAX_OUTPUT_TOKENS = 4000
 PROMPT_VERSION = "process-summary-v2"
 SECRET_MODEL = "local-deterministic"
 SECRET_PROMPT_VERSION = "secret-summary-v1"
@@ -251,6 +255,14 @@ def _is_secret_context(context: dict[str, Any]) -> bool:
     return int(context.get("secrecy_level") or 0) > 0
 
 
+def generation_model_for_context(context: dict[str, Any]) -> str:
+    return (
+        OPUS_MODEL
+        if int(context.get("step_count") or 0) > OPUS_STEP_THRESHOLD
+        else SONNET_MODEL
+    )
+
+
 def _secret_summary(context: dict[str, Any]) -> str:
     lines = [
         "# Resumo do processo",
@@ -346,8 +358,8 @@ async def _generate(
         )
 
     request: dict[str, Any] = {
-        "model": MODEL,
-        "max_tokens": 5000,
+        "model": generation_model_for_context(context),
+        "max_tokens": MAX_OUTPUT_TOKENS,
         "system": [
             {
                 "type": "text",
@@ -463,7 +475,7 @@ async def generate_summary(
     started = perf_counter()
     context = await _load_context(pool, process_id, version_id)
 
-    model = MODEL
+    model = generation_model_for_context(context)
     prompt_version = PROMPT_VERSION
     if _is_secret_context(context):
         text = _secret_summary(context)
