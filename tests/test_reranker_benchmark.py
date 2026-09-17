@@ -1,11 +1,20 @@
-import asyncio
+from __future__ import annotations
 
-from scripts.benchmark_reranker import benchmark_cases
-from scripts.evaluate_offline_pipeline import load_dataset
+import asyncio
+import importlib.util
+from pathlib import Path
+
+_BENCHMARK_PATH = Path(__file__).resolve().parents[1] / "scripts" / "benchmark_reranker.py"
+_SPEC = importlib.util.spec_from_file_location("benchmark_reranker", _BENCHMARK_PATH)
+assert _SPEC is not None and _SPEC.loader is not None
+_BENCHMARK = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(_BENCHMARK)
 
 
 def test_synthetic_reranker_benchmark_preserves_mandatory_recall_and_reduces_context() -> None:
-    report = asyncio.run(benchmark_cases(load_dataset(), scorer_name="synthetic"))
+    report = asyncio.run(
+        _BENCHMARK.benchmark_cases(_BENCHMARK.load_dataset(), scorer_name="synthetic")
+    )
 
     assert report["measured_long_cases"] > 0
     assert report["baseline"]["mandatory_milestone_recall"] == 1.0
