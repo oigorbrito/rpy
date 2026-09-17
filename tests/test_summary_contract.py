@@ -67,4 +67,4 @@ def test_iasummary_panorama_is_evidence_bound() -> None:
 
     assert "Informe o volume total de movimentos usando step_count" in prompt
     assert "não trate o primeiro movimento como distribuição" in prompt
-    assert "não deduza um próximo evento por expectativa jurídica" in prompt
+    assert "nem deduza um próximo evento por expectativa jurídica" in prompt
