@@ -44,6 +44,23 @@ Malformed/non-PDF bytes are `corrupt`. Password-protected PDFs are `unreadable` 
 
 `pypdf` is pinned through the repository dependency lock. Raw PDF bytes are never persisted by this layer.
 
+## Phase 4: authorized retrieval and summary provenance
+
+Ready attachment chunks participate in generation only when the summary job can resolve its originating tenant from the unique `judit_request_id` and that tenant is authorized for the process through `tenant_processes`. Old/internal jobs without an authorized tenant continue without attachment context rather than bypassing the authorization boundary.
+
+Retrieval is provider-free and lexical in this phase:
+
+- `attachment_chunks` has a PostgreSQL GIN index over `to_tsvector('portuguese', text)`;
+- tenant, process, current version, `ready` state and `secrecy_level=0` are applied inside the authorized candidate CTE before `ts_rank_cd` ranking;
+- the query combines the normal RAG retrieval terms with available process class/subject terms;
+- `ATTACHMENT_RETRIEVAL_LIMIT` defaults to 12 chunks;
+- `PROVIDER_ATTACHMENT_TEXT_MAX_CHARS` defaults to 20,000 total characters and bounds the attachment text sent to the generator;
+- no attachment embedding provider or reranker is introduced by this phase.
+
+The provider receives only the selected bounded attachment context plus aggregate attachment state counts. Secret processes return before any attachment query or provider access.
+
+Exact used chunks are persisted in `process_summary_attachment_sources`. Provenance contains only identifiers, source attachment id, page/character positions, SHA-256 and source order — never chunk text, document bytes, provider prompts or responses. `/v1/.../fontes` can read this safe provenance without granting the API role access to `attachment_chunks` or `process_attachments`.
+
 ## Planned local processing
 
 The supported parsing targets are:
@@ -79,10 +96,6 @@ Attachment retrieval is fail-closed:
 - fixtures and logs must use synthetic text and identifiers only.
 
 A later downloader must fetch bytes only from the source authorized for the process/tenant and must never log document bodies, signed download URLs, credentials or raw provider payloads.
-
-## Retrieval and provenance
-
-The foundation does not yet mix attachment chunks into BM25/vector retrieval. When that stage is added, attachment candidates must preserve the same tenant/process/current-version filters before ranking and must keep attachment/chunk identifiers and source positions so used passages can be persisted as safe summary provenance.
 
 ## Judit activation gate
 
