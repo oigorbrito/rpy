@@ -138,6 +138,15 @@ async def test_runtime_database_roles_are_least_privilege(monkeypatch: pytest.Mo
         assert await admin.fetchval(
             "SELECT has_table_privilege('rpy_worker', 'process_summary_attachment_sources', 'SELECT,INSERT,UPDATE,DELETE')"
         )
+        assert await admin.fetchval(
+            "SELECT has_table_privilege('rpy_worker', 'process_datajud_field_provenance', 'SELECT,INSERT,UPDATE,DELETE')"
+        )
+        assert not await admin.fetchval(
+            "SELECT has_table_privilege('rpy_api', 'process_datajud_field_provenance', 'SELECT')"
+        )
+        assert not await admin.fetchval(
+            "SELECT has_table_privilege('rpy_scheduler', 'process_datajud_field_provenance', 'SELECT')"
+        )
         assert not await admin.fetchval(
             "SELECT has_table_privilege('rpy_worker', 'public_summary_requests', 'DELETE')"
         )
@@ -198,6 +207,8 @@ async def test_runtime_database_roles_are_least_privilege(monkeypatch: pytest.Mo
         assert await api.fetchval("SELECT count(*) FROM judit_trackings") is not None
         assert await api.fetchval("SELECT count(*) FROM process_attachment_status_counts") is not None
         assert await api.fetchval("SELECT count(*) FROM process_summary_attachment_sources") is not None
+        with pytest.raises(asyncpg.InsufficientPrivilegeError):
+            await api.fetchval("SELECT count(*) FROM process_datajud_field_provenance")
         with pytest.raises(asyncpg.InsufficientPrivilegeError):
             await api.fetchval("SELECT count(*) FROM attachment_chunks")
         with pytest.raises(asyncpg.InsufficientPrivilegeError):
