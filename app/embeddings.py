@@ -126,8 +126,8 @@ async def embed_query(text: str) -> list[float]:
         raise ValueError("embedding query must be non-empty text")
     if embedding_space_runtime_enabled():
         return await get_active_embedding_runtime().embed_query(value)
-    embeddings = await _legacy_embed_texts([value])
-    return embeddings[0]
+    vectors = await embed_texts([value])
+    return vectors[0]
 
 
 async def ensure_step_embeddings(
@@ -164,7 +164,7 @@ async def ensure_step_embeddings(
     updated = 0
     for start in range(0, len(rows), EMBEDDING_BATCH_SIZE):
         batch = rows[start : start + EMBEDDING_BATCH_SIZE]
-        vectors = await _legacy_embed_texts([str(row["content"]) for row in batch])
+        vectors = await embed_texts([str(row["content"]) for row in batch])
 
         async with pool.acquire() as conn:
             async with conn.transaction():
