@@ -36,6 +36,11 @@ from app.provenance import (
 from app.reranker_provider import configured_reranker_scorer
 from app.reranking import RERANK_CANDIDATE_LIMIT, select_context_steps
 from app.retrieval import lexical_search, load_steps, vector_search
+from app.summary_output import (
+    SUMMARY_OUTPUT_SCHEMA,
+    parse_structured_summary,
+    render_structured_summary,
+)
 from app.tasks import PermanentTaskError, task
 from app.tpu_glossary import resolve_process_tpu_definitions
 from app.validation import ValidationResult, validar
@@ -47,7 +52,7 @@ OPUS_STEP_THRESHOLD = 100
 SHORT_SUMMARY_STEP_MAX = 15
 MEDIUM_SUMMARY_STEP_MAX = 60
 MAX_TOKENS = 4000
-PROMPT_VERSION = "process-summary-v3"
+PROMPT_VERSION = "process-summary-v4"
 SECRET_MODEL = "local-deterministic"
 SECRET_PROMPT_VERSION = "secret-summary-v1"
 REQUESTED_TEMPERATURE = 0.2
@@ -561,6 +566,12 @@ async def _generate(
             }
         ],
         "messages": [{"role": "user", "content": user_prompt}],
+        "output_config": {
+            "format": {
+                "type": "json_schema",
+                "schema": SUMMARY_OUTPUT_SCHEMA,
+            }
+        },
     }
     if CURRENT_MODELS_SUPPORT_CUSTOM_TEMPERATURE:
         request["temperature"] = REQUESTED_TEMPERATURE
@@ -574,7 +585,12 @@ async def _generate(
         settings=anthropic_settings(),
     )
     _record_generation_telemetry(context, message=message, model=model)
-    return _message_text(message)
+    raw = _message_text(message)
+    try:
+        payload = parse_structured_summary(raw)
+    except ValueError as exc:
+        raise PermanentTaskError("provider returned an invalid structured summary") from exc
+    return render_structured_summary(payload, context)
 
 
 async def _persist_summary(
