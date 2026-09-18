@@ -17,6 +17,24 @@ from app.queue import enqueue
 from app.tasks import task
 
 
+_EXTENSION_CONTENT_TYPES = {
+    "pdf": "application/pdf",
+    "txt": "text/plain",
+    "text": "text/plain",
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+}
+
+
+def _effective_content_type(content_type: str, extension: object) -> str:
+    normalized = str(content_type or "").split(";", 1)[0].strip().lower()
+    if normalized in {"application/pdf", "text/plain", "image/png", "image/jpeg"}:
+        return normalized
+    suffix = str(extension or "").strip().lower().lstrip(".")
+    return _EXTENSION_CONTENT_TYPES.get(suffix, normalized or "application/octet-stream")
+
+
 async def _mark_unavailable(
     conn,
     *,
@@ -134,7 +152,10 @@ async def process_judit_attachments_task(payload: dict[str, Any]) -> dict[str, A
                     process_id=process_id,
                     version_id=version_id,
                     source_attachment_id=source_id,
-                    content_type=download.content_type,
+                    content_type=_effective_content_type(
+                        download.content_type,
+                        raw.get("extension"),
+                    ),
                     data=download.data,
                     limits=limits,
                 )
