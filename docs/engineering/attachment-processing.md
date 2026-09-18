@@ -1,6 +1,6 @@
 # Attachment processing boundary
 
-Issue #137 introduces attachment support in staged blocks. This document defines the processing contract before downloader or OCR code is enabled.
+Issue #137 introduces attachment support in staged blocks. This document defines the processing contract before downloader activation; local parsing and optional image OCR remain provider-free.
 
 ## Phase 1: durable state foundation
 
@@ -61,15 +61,57 @@ The provider receives only the selected bounded attachment context plus aggregat
 
 Exact used chunks are persisted in `process_summary_attachment_sources`. Provenance contains only identifiers, source attachment id, page/character positions, SHA-256 and source order — never chunk text, document bytes, provider prompts or responses. `/v1/.../fontes` can read this safe provenance without granting the API role access to `attachment_chunks` or `process_attachments`.
 
-## Planned local processing
+## Phase 6: optional local OCR for images
 
-The supported parsing targets are:
+Rpy supports an **opt-in local** OCR path for already-authorized `image/png` and
+`image/jpeg` bytes using a locally installed Tesseract 5.x executable. Tesseract
+is Apache-2.0 licensed and uses Leptonica for image input. The standard offline
+Rpy image does not install OCR binaries or language packs, and CI does not download
+them.
 
-1. PDF documents with an extractable text layer — implemented by Phase 3;
-2. UTF-8 plain text where the source metadata identifies a textual attachment — implemented by Phase 2;
-3. raster/image-only PDF or supported image content only through a local OCR path — pending benchmark and implementation.
+Activation is explicit:
 
-OCR remains intentionally deferred until an offline engine and supported image formats are benchmarked. OCR must use a local/offline engine rather than sending document images or bytes to an external model. No network-dependent model download may be added to CI or the standard offline image.
+- `ATTACHMENT_OCR_ENABLED=true`;
+- `ATTACHMENT_OCR_BINARY`, default `tesseract`;
+- `ATTACHMENT_OCR_LANGUAGE`, default `por`;
+- `ATTACHMENT_OCR_TIMEOUT_SECONDS`, default 30.
+
+When enabled, Rpy validates byte limits and PNG/JPEG magic before invoking the
+engine. The authorized image bytes are written only to a private temporary
+directory for the subprocess invocation and are deleted when the invocation exits;
+they are never written to the database or application logs. Tesseract output is
+captured as UTF-8 text, normalized and chunked through the same deterministic
+non-overlapping path used for plain text.
+
+Failure classification is attachment-local:
+
+- OCR disabled: `unreadable/ocr_disabled`;
+- binary/language environment unavailable: `unreadable/ocr_unavailable` or `ocr_failed`;
+- timeout: `unreadable/ocr_timeout`;
+- invalid image magic: `corrupt/invalid_image_header`;
+- no recognized text: `unreadable/ocr_no_text`.
+
+Image-only/raster PDF is **not** routed through this image adapter. Tesseract is not
+the PDF parser, and Rpy has not yet selected a local PDF rasterization dependency.
+A PDF without an extractable text layer therefore remains
+`unreadable/pdf_text_unavailable` until that separate rasterization benchmark is
+completed.
+
+Official implementation references reviewed for this phase:
+- Tesseract 5.x command-line documentation;
+- Tesseract Apache-2.0 license / Leptonica image-input boundary.
+
+## Supported local processing
+
+The implemented parsing targets are:
+
+1. PDF documents with an extractable text layer — Phase 3;
+2. UTF-8 plain text — Phase 2;
+3. PNG/JPEG images through optional local Tesseract OCR — Phase 6.
+
+Raster/image-only PDF remains the only local parsing target still pending an OCR
+rasterization implementation. No network-dependent model download may be added to
+CI or the standard offline image.
 
 ## Chunking contract
 
