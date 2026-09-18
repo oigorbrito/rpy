@@ -226,3 +226,48 @@ def test_cohere_reranker_rejects_wrong_model() -> None:
     _enable_cohere_reranker(values)
     values["COHERE_RERANKER_MODEL"] = "rerank-v3.5"
     assert "COHERE_RERANKER_MODEL must be 'rerank-v4.0-pro'" in preflight.validate(values)
+
+
+def _enable_datajud(values: dict[str, str]) -> None:
+    values["DATAJUD_ENABLED"] = "true"
+    values["DATAJUD_AUTHORIZED_USE"] = "true"
+    values["DATAJUD_API_KEY"] = "datajud-public-key"
+    values["DATAJUD_BASE_URL"] = "https://api-publica.datajud.cnj.jus.br"
+    values["DATAJUD_TIMEOUT_SECONDS"] = "20"
+
+
+def test_disabled_datajud_requires_no_key_or_authorization() -> None:
+    values = _valid_values()
+    values["DATAJUD_ENABLED"] = "false"
+    assert preflight.validate(values) == []
+
+
+def test_datajud_requires_explicit_authorized_use() -> None:
+    values = _valid_values()
+    _enable_datajud(values)
+    values["DATAJUD_AUTHORIZED_USE"] = "false"
+    assert "DATAJUD_ENABLED requires DATAJUD_AUTHORIZED_USE=true" in preflight.validate(values)
+
+
+def test_datajud_requires_key_when_enabled() -> None:
+    values = _valid_values()
+    _enable_datajud(values)
+    values.pop("DATAJUD_API_KEY")
+    assert (
+        "DATAJUD_API_KEY is required when DataJud enrichment is active"
+        in preflight.validate(values)
+    )
+
+
+def test_datajud_requires_https_base_url() -> None:
+    values = _valid_values()
+    _enable_datajud(values)
+    values["DATAJUD_BASE_URL"] = "http://api-publica.datajud.cnj.jus.br"
+    assert "DATAJUD_BASE_URL must use https" in preflight.validate(values)
+
+
+def test_datajud_requires_positive_numeric_timeout() -> None:
+    values = _valid_values()
+    _enable_datajud(values)
+    values["DATAJUD_TIMEOUT_SECONDS"] = "0"
+    assert "DATAJUD_TIMEOUT_SECONDS must be greater than zero" in preflight.validate(values)

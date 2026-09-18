@@ -15,6 +15,7 @@ Externally revalidated on 2026-09-18 against official provider documentation:
 | Cohere embeddings | `embed-v4.0`, float embeddings, explicit `output_dimension=1024` | https://docs.cohere.com/docs/cohere-embed |
 | Cohere reranking | `rerank-v4.0-pro`, Rerank v2 | https://docs.cohere.com/docs/rerank |
 | Judit auth/services | `api-key`; Requests, Tracking and Lawsuits production services | https://docs.judit.io/llms.txt |
+| CNJ/DataJud enrichment | public API under explicit authorized-use gate; secret processes skipped | https://www.cnj.jus.br/sistemas/datajud/api-publica/ and Portaria CNJ 160/2020 as amended by 374/2026 |
 | Image provenance | GitHub artifact attestation bound to the published digest | https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations |
 
 The repository tests prove the request shapes with fakes and enforce these configured identifiers. This table is not a substitute for a live acceptance against the account/plan actually provisioned to the target environment.
@@ -98,6 +99,21 @@ confirm, with the provider/account actually provisioned:
 - handling of private/secret attachments.
 
 If the live contract differs from `app/judit_client.py`, update the adapter and fake contract tests first; do not patch production configuration around a code mismatch.
+
+### Optional DataJud enrichment
+
+Treat DataJud as a separate authorization boundary from Judit. Before enabling it in a target environment:
+
+- confirm the intended use is permitted under the applicable CNJ/DataJud terms;
+- record the non-sensitive approval/reference ID;
+- set `DATAJUD_ENABLED=true` only together with `DATAJUD_AUTHORIZED_USE=true`;
+- inject the current `DATAJUD_API_KEY` only into workers;
+- keep the official HTTPS base URL unless an explicitly reviewed CNJ endpoint change requires otherwise;
+- verify one authorized, non-secret CNJ lookup;
+- verify a secret-process control path performs no DataJud network call;
+- confirm normalized provenance/metadata only is persisted and raw DataJud payloads are not stored.
+
+A DataJud auth failure or service outage is supplementary-enrichment failure, not permission to weaken the authorization gate or substitute unreviewed data sources.
 
 ## 2. Anthropic generation
 
