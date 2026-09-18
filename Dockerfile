@@ -6,6 +6,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# Apply the current Debian security updates before Python dependencies are installed.
+# The resulting release identity is the immutable image digest produced and scanned
+# by trusted CI; deployment never rebuilds on the target host.
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY pyproject.toml ./
 COPY requirements ./requirements
 COPY app ./app
