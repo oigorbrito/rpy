@@ -585,6 +585,12 @@ async def _generate(
         settings=anthropic_settings(),
     )
     _record_generation_telemetry(context, message=message, model=model)
+    stop_reason = getattr(message, "stop_reason", None)
+    if stop_reason in {"refusal", "max_tokens"}:
+        raise PermanentTaskError(
+            f"provider structured summary stopped before a valid document: {stop_reason}"
+        )
+
     raw = _message_text(message)
     try:
         payload = parse_structured_summary(raw)
