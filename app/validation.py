@@ -5,6 +5,7 @@ import unicodedata
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 _CPF_CNPJ_RE = re.compile(
     r"(?<!\d)(?:\d{3}\.?\d{3}\.?\d{3}-?\d{2}|\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2})(?!\d)"
@@ -45,6 +46,11 @@ _DATE_RE = re.compile(
     r"(?<!\d)(?:\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])|"
     r"(?:0?[1-9]|[12]\d|3[01])/(?:0?[1-9]|1[0-2])/\d{4})(?!\d)"
 )
+_ISO_DATETIME_RE = re.compile(
+    r"(?<!\d)\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}"
+    r"(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})(?!\d)"
+)
+_SAO_PAULO = ZoneInfo("America/Sao_Paulo")
 _ATTENTION_HEADING_RE = re.compile(
     r"^#{1,6}\s+Pontos\s+de\s+aten(?:ç|c)(?:ão|ao)\s*$",
     re.IGNORECASE | re.MULTILINE,
@@ -230,6 +236,21 @@ def _dates(text: str) -> set[str]:
     return dates
 
 
+def _source_dates(text: str) -> set[str]:
+    """Accept literal source dates plus the correct São Paulo day for zoned timestamps."""
+    dates = _dates(text)
+    for match in _ISO_DATETIME_RE.finditer(text):
+        rendered = match.group(0)
+        try:
+            value = datetime.fromisoformat(rendered.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if value.tzinfo is None:
+            continue
+        dates.add(value.astimezone(_SAO_PAULO).date().isoformat())
+    return dates
+
+
 def _attention_body(text: str) -> str | None:
     heading = _ATTENTION_HEADING_RE.search(text)
     if heading is None:
@@ -295,7 +316,7 @@ def validar(
                 )
 
     if source_text is not None:
-        allowed_dates = _dates(source_text)
+        allowed_dates = _source_dates(source_text)
         for generated_date in sorted(_dates(text) - allowed_dates):
             errors.append(f"date not present in source context: {generated_date}")
         errors.extend(_source_backed_claim_errors(text, source_text))
