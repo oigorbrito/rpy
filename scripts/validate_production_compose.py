@@ -222,8 +222,8 @@ _RUNTIME_LIMITS = {
     "migrate": {"cpus": 1.0, "mem_limit": 512 * 1024 * 1024, "pids_limit": 128},
     "api": {"cpus": 1.0, "mem_limit": 512 * 1024 * 1024, "pids_limit": 128},
     "egress-proxy": {"cpus": 0.5, "mem_limit": 256 * 1024 * 1024, "pids_limit": 128},
-    "worker-1": {"cpus": 2.0, "mem_limit": 4 * 1024 * 1024 * 1024, "pids_limit": 256},
-    "worker-2": {"cpus": 2.0, "mem_limit": 4 * 1024 * 1024 * 1024, "pids_limit": 256},
+    "worker-1": {"cpus": 2.0, "mem_limit": 8 * 1024 * 1024 * 1024, "pids_limit": 256},
+    "worker-2": {"cpus": 2.0, "mem_limit": 8 * 1024 * 1024 * 1024, "pids_limit": 256},
     "scheduler": {"cpus": 0.5, "mem_limit": 256 * 1024 * 1024, "pids_limit": 64},
 }
 
