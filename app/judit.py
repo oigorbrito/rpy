@@ -36,6 +36,15 @@ _PUBLIC_HEADER_KEYS = (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class JuditAttachmentRef:
+    attachment_id: str
+    instance: int
+    status: str
+    extension: str | None = None
+    step_id: str | None = None
+
+
 @dataclass(slots=True)
 class JuditEvent:
     event_type: str
@@ -255,6 +264,45 @@ def _source_step_number(step: dict[str, Any]) -> int | None:
             if candidate.isdigit():
                 return int(candidate)
     return None
+
+
+def extract_attachment_references(process: dict[str, Any]) -> list[JuditAttachmentRef]:
+    secrecy_level = int(process.get("secrecy_level") or process.get("secrecyLevel") or 0)
+    if secrecy_level > 0:
+        return []
+    try:
+        instance = int(process.get("instance"))
+    except (TypeError, ValueError):
+        return []
+    if instance <= 0:
+        return []
+
+    raw_attachments = process.get("attachments")
+    if not isinstance(raw_attachments, list):
+        return []
+
+    refs: list[JuditAttachmentRef] = []
+    seen: set[str] = set()
+    for raw in raw_attachments:
+        if not isinstance(raw, dict):
+            continue
+        attachment_id = str(raw.get("attachment_id") or "").strip()
+        if not attachment_id or attachment_id in seen:
+            continue
+        seen.add(attachment_id)
+        status = str(raw.get("status") or "pending").strip().lower() or "pending"
+        extension = str(raw.get("extension") or "").strip() or None
+        step_id = str(raw.get("step_id") or "").strip() or None
+        refs.append(
+            JuditAttachmentRef(
+                attachment_id=attachment_id,
+                instance=instance,
+                status=status,
+                extension=extension,
+                step_id=step_id,
+            )
+        )
+    return refs
 
 
 def extract_promotable_fields(process: dict[str, Any]) -> dict[str, Any]:
