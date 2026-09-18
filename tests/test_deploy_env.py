@@ -271,3 +271,44 @@ def test_datajud_requires_positive_numeric_timeout() -> None:
     _enable_datajud(values)
     values["DATAJUD_TIMEOUT_SECONDS"] = "0"
     assert "DATAJUD_TIMEOUT_SECONDS must be greater than zero" in preflight.validate(values)
+
+
+def _enable_langfuse(values: dict[str, str]) -> None:
+    values["LANGFUSE_ENABLED"] = "true"
+    values["LANGFUSE_PUBLIC_KEY"] = "pk-lf-production"
+    values["LANGFUSE_SECRET_KEY"] = "sk-lf-production"
+    values["LANGFUSE_BASE_URL"] = "https://langfuse.example.internal"
+    values["LANGFUSE_TRACING_ENVIRONMENT"] = "production"
+
+
+def test_disabled_langfuse_requires_no_credentials() -> None:
+    values = _valid_values()
+    values["LANGFUSE_ENABLED"] = "false"
+    assert preflight.validate(values) == []
+
+
+def test_langfuse_requires_credentials_when_enabled() -> None:
+    values = _valid_values()
+    _enable_langfuse(values)
+    values.pop("LANGFUSE_SECRET_KEY")
+    assert (
+        "LANGFUSE_SECRET_KEY is required when Langfuse tracing is active"
+        in preflight.validate(values)
+    )
+
+
+def test_langfuse_requires_https_base_url() -> None:
+    values = _valid_values()
+    _enable_langfuse(values)
+    values["LANGFUSE_BASE_URL"] = "http://langfuse.internal"
+    assert "LANGFUSE_BASE_URL must use https in production" in preflight.validate(values)
+
+
+def test_langfuse_environment_must_match_sdk_contract() -> None:
+    values = _valid_values()
+    _enable_langfuse(values)
+    values["LANGFUSE_TRACING_ENVIRONMENT"] = "Langfuse Production"
+    assert any(
+        error.startswith("LANGFUSE_TRACING_ENVIRONMENT must be")
+        for error in preflight.validate(values)
+    )
