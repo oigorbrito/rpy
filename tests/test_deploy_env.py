@@ -187,6 +187,8 @@ def _enable_bge_reranker(values: dict[str, str]) -> None:
 
 def _enable_cohere_reranker(values: dict[str, str]) -> None:
     values["RERANKER_ENABLED"] = "true"
+    if "api.cohere.com" not in values["EGRESS_PROXY_ALLOWED_HOSTS"]:
+        values["EGRESS_PROXY_ALLOWED_HOSTS"] += ",api.cohere.com"
     values["RERANKER_PROVIDER"] = "cohere"
     values["ALLOW_EXTERNAL_RERANKER"] = "true"
     values["COHERE_RERANKER_MODEL"] = "rerank-v4.0-pro"
