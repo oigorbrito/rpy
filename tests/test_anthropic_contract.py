@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from typing import Any
 
 import pytest
@@ -17,10 +18,25 @@ from app.rag import (
 )
 
 
+_STRUCTURED = json.dumps(
+    {
+        "synthesis": "Síntese válida.",
+        "timeline": [],
+        "current_status": "Situação atual registrada.",
+        "attention": ["Nenhuma divergência objetiva identificada."],
+        "decisions": [],
+        "deadlines": [],
+        "related_processes": [],
+        "attachments": [],
+    },
+    ensure_ascii=False,
+)
+
+
 @dataclass
 class _TextBlock:
     type: str = "text"
-    text: str = "# Resumo válido"
+    text: str = _STRUCTURED
 
 
 @dataclass
@@ -73,17 +89,23 @@ async def test_sonnet_5_request_uses_cacheable_system_prompt_without_custom_samp
 
     text = await _generate(client, context)
 
-    assert text == "# Resumo válido"
+    assert text.startswith("# Resumo do processo")
+    assert "## Síntese\nSíntese válida." in text
     assert len(client.messages.calls) == 1
     request = client.messages.calls[0]
     assert request["model"] == MODEL == SONNET_MODEL == "claude-sonnet-5"
     assert request["max_tokens"] == MAX_TOKENS == 4000
-    assert PROMPT_VERSION == "process-summary-v3"
+    assert PROMPT_VERSION == "process-summary-v4"
     assert REQUESTED_TEMPERATURE == 0.2
     assert "temperature" not in request
     assert "top_p" not in request
     assert "top_k" not in request
     assert "stream" not in request
+    assert request["output_config"]["format"]["type"] == "json_schema"
+    schema = request["output_config"]["format"]["schema"]
+    assert schema["additionalProperties"] is False
+    assert "synthesis" in schema["required"]
+    assert "attention" in schema["required"]
 
     system = request["system"]
     assert len(system) == 1
