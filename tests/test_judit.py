@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from app.judit import extract_promotable_fields, parse_event
+from app.judit import extract_attachment_references, extract_promotable_fields, parse_event
 
 FIXTURES = Path(__file__).parent / "fixtures" / "judit"
 
@@ -270,3 +270,40 @@ def test_extracts_promotable_fields_from_tracking_fixture_without_documents() ->
         "masked_person_id": "***.***.***-00",
     }
     assert "00000000000" not in str(fields["parties"])
+
+
+
+def test_extract_attachment_references_uses_instance_and_deduplicates() -> None:
+    refs = extract_attachment_references(
+        {
+            "instance": 2,
+            "secrecy_level": 0,
+            "attachments": [
+                {
+                    "attachment_id": "att-1",
+                    "status": "done",
+                    "extension": "pdf",
+                    "step_id": "step-1",
+                },
+                {"attachment_id": "att-1", "status": "done"},
+                {"attachment_id": "att-2", "status": "processing"},
+                {"status": "done"},
+            ],
+        }
+    )
+
+    assert [(ref.attachment_id, ref.instance, ref.status) for ref in refs] == [
+        ("att-1", 2, "done"),
+        ("att-2", 2, "processing"),
+    ]
+    assert refs[0].extension == "pdf"
+    assert refs[0].step_id == "step-1"
+
+
+def test_extract_attachment_references_fails_closed_without_instance_or_under_secrecy() -> None:
+    attachments = [{"attachment_id": "att-1", "status": "done"}]
+
+    assert extract_attachment_references({"attachments": attachments}) == []
+    assert extract_attachment_references(
+        {"instance": 1, "secrecy_level": 1, "attachments": attachments}
+    ) == []
