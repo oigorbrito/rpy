@@ -151,7 +151,7 @@ async def _handle_client(
                 asyncio.open_connection(host, port),
                 timeout=timeout_seconds,
             )
-        except (OSError, TimeoutError, asyncio.TimeoutError):
+        except (OSError, TimeoutError):
             await _write_response(writer, "502 Bad Gateway")
             return
 
@@ -161,7 +161,7 @@ async def _handle_client(
             _relay(reader, upstream_writer),
             _relay(upstream_reader, writer),
         )
-    except (ValueError, asyncio.LimitOverrunError, TimeoutError, asyncio.TimeoutError):
+    except (ValueError, asyncio.LimitOverrunError, TimeoutError):
         try:
             await _write_response(writer, "400 Bad Request")
         except ConnectionError:
