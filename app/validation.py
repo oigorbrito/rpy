@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import re
 import unicodedata
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -59,6 +61,10 @@ _NEXT_HEADING_RE = re.compile(r"^#{1,6}\s+\S", re.MULTILINE)
 _HEADING_RE = re.compile(r"^#{1,6}\s+(?P<title>.+?)\s*$", re.MULTILINE)
 _SOURCE_BACKED_CLAIM_RE = re.compile(
     r"^(?:[-*]\s*)?(?P<label>Área|Assuntos?|Tags?|Comarca|Órgão julgador|Classe|Fase)\s*:\s*(?P<value>.+?)\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+_AMOUNT_CLAIM_RE = re.compile(
+    r"^(?:[-*]\s*)?(?P<label>Valor(?: da causa)?)\s*:\s*(?P<value>.+?)\s*$",
     re.IGNORECASE | re.MULTILINE,
 )
 _CORE_SECTION_ORDER = (
@@ -263,6 +269,70 @@ def _conditional_section_order_errors(text: str) -> list[str]:
     return []
 
 
+def _decimal_amount(value: Any) -> Decimal | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float, Decimal)):
+        try:
+            return Decimal(str(value))
+        except InvalidOperation:
+            return None
+
+    rendered = str(value).strip().replace("\u00a0", " ")
+    rendered = re.sub(r"^(?:R\$|BRL)\s*", "", rendered, flags=re.IGNORECASE)
+    rendered = re.sub(r"\s+", "", rendered)
+    if not rendered:
+        return None
+
+    if re.fullmatch(r"-?\d{1,3}(?:\.\d{3})+(?:,\d+)?", rendered):
+        rendered = rendered.replace(".", "").replace(",", ".")
+    elif re.fullmatch(r"-?\d+,\d+", rendered):
+        rendered = rendered.replace(",", ".")
+    elif not re.fullmatch(r"-?\d+(?:\.\d+)?", rendered):
+        return None
+
+    try:
+        return Decimal(rendered)
+    except InvalidOperation:
+        return None
+
+
+def _source_amounts(source_text: str) -> set[Decimal]:
+    try:
+        payload = json.loads(source_text)
+    except (json.JSONDecodeError, TypeError):
+        return set()
+
+    amounts: set[Decimal] = set()
+
+    def visit(value: Any) -> None:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if str(key).casefold() == "amount":
+                    parsed = _decimal_amount(child)
+                    if parsed is not None:
+                        amounts.add(parsed)
+                visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+
+    visit(payload)
+    return amounts
+
+
+def _amount_claim_errors(text: str, source_text: str) -> list[str]:
+    allowed = _source_amounts(source_text)
+    errors: list[str] = []
+    for match in _AMOUNT_CLAIM_RE.finditer(text):
+        label = match.group("label").strip()
+        raw_value = match.group("value").strip()
+        parsed = _decimal_amount(raw_value)
+        if parsed is None or parsed not in allowed:
+            errors.append(f"source-backed amount mismatch: {label}={raw_value}")
+    return errors
+
+
 def _source_backed_claim_errors(text: str, source_text: str) -> list[str]:
     normalized_source = f" {_normalize_party_name(source_text)} "
     errors: list[str] = []
@@ -384,6 +454,7 @@ def validar(
         for generated_date in sorted(_dates(text) - allowed_dates):
             errors.append(f"date not present in source context: {generated_date}")
         errors.extend(_source_backed_claim_errors(text, source_text))
+        errors.extend(_amount_claim_errors(text, source_text))
 
     attention_body = _attention_body(text)
     if require_attention_section:

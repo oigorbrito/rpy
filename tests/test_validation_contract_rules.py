@@ -384,3 +384,60 @@ def test_rejects_duplicate_document_title() -> None:
     )
     assert result.passed is False
     assert "duplicate document title: Resumo do processo" in result.errors
+
+
+@pytest.mark.parametrize(
+    "rendered",
+    ["Valor: R$ 1.234,56", "Valor da causa: 1234.56", "- Valor: BRL 1234,56"],
+)
+def test_accepts_amount_equivalent_to_structured_source(rendered: str) -> None:
+    source = '{"processo":{"header":{"amount":1234.56}},"movimentos":[]}'
+    result = validar(
+        text=rendered,
+        code=CODE,
+        parties=PARTIES,
+        source_text=source,
+    )
+    assert result.passed is True
+
+
+def test_rejects_amount_different_from_structured_source() -> None:
+    source = '{"processo":{"header":{"amount":"1234.56"}},"movimentos":[]}'
+    result = validar(
+        text="Valor: R$ 1.500,00",
+        code=CODE,
+        parties=PARTIES,
+        source_text=source,
+    )
+    assert result.passed is False
+    assert "source-backed amount mismatch: Valor=R$ 1.500,00" in result.errors
+
+
+def test_rejects_amount_claim_when_source_has_no_amount() -> None:
+    source = '{"processo":{"header":{}},"movimentos":[]}'
+    result = validar(
+        text="Valor da causa: R$ 1.234,56",
+        code=CODE,
+        parties=PARTIES,
+        source_text=source,
+    )
+    assert result.passed is False
+    assert (
+        "source-backed amount mismatch: Valor da causa=R$ 1.234,56"
+        in result.errors
+    )
+
+
+def test_rejects_unparseable_amount_claim() -> None:
+    source = '{"processo":{"header":{"amount":1234.56}},"movimentos":[]}'
+    result = validar(
+        text="Valor: aproximadamente mil reais",
+        code=CODE,
+        parties=PARTIES,
+        source_text=source,
+    )
+    assert result.passed is False
+    assert (
+        "source-backed amount mismatch: Valor=aproximadamente mil reais"
+        in result.errors
+    )
