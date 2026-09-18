@@ -19,6 +19,9 @@ External generation requests use:
 - prompt caching on the stable system prompt through `cache_control={"type": "ephemeral"}`;
 - no streaming, because the full result must pass post-generation validation before publication;
 - exactly one correction request after a first validation failure.
+- Anthropic Structured Outputs via `output_config.format` with a closed JSON Schema;
+- deterministic application-side rendering of the document title, process header, party list and Markdown section headings;
+- bounded structured fields and arrays; the model cannot add arbitrary top-level keys or document sections.
 
 The source document requested `temperature=0.2`. Current Claude models deprecate custom `temperature`, `top_p`, and `top_k` sampling parameters. Rpy therefore retains `REQUESTED_TEMPERATURE = 0.2` as documentary intent but does not send a custom temperature to Sonnet 5 or Opus 5. Sending an unsupported parameter would make the documented intent less reliable, not more reliable.
 
@@ -44,3 +47,12 @@ The `/v1` summary responses expose persisted generation telemetry inside `usage`
 ## Privacy
 
 The existing provider boundary remains authoritative. Secret processes use local deterministic generation, and internal generation telemetry keys are explicitly excluded from provider serialization. No prompt, movement text, parties, credentials, or raw provider response is persisted as telemetry.
+
+
+## Structured-output security boundary
+
+The provider no longer authors the final Markdown document structure. Claude returns only schema-constrained narrative fields: `synthesis`, `timeline`, `current_status`, `attention`, `decisions`, `deadlines`, `related_processes`, and `attachments`.
+
+`app.summary_output` owns the final renderer. Process identity and parties come from the normalized application context, not from generated values. Model strings are normalized to single logical lines before insertion, and leading Markdown/markup control characters are neutralized so a generated field cannot create a new heading or JSX control line.
+
+This follows Anthropic's Structured Outputs contract, which uses constrained decoding to guarantee JSON-schema conformance, while retaining Rpy's deterministic semantic validator because schema conformance does not prove factual grounding.

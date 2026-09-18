@@ -121,6 +121,7 @@ Reject or remove donor code that introduces any of the following without an expl
 - Provider payloads must exclude data outside the documented boundary; logs must never contain prompt/process payloads or secrets.
 - Process, movement, attachment and glossary text are untrusted data, never generation instructions; dynamic source/validation content must not be able to close prompt delimiters or redefine the system contract.
 - Summary generation is a bounded document-generation surface, not a general chat surface; do not add free-form user instructions, model tools or network access to the generation request without a separate threat model and explicit product decision.
+- Public summary generation uses a closed structured-output schema and deterministic application rendering for identity, parties and document structure; do not return final provider-authored Markdown without an explicit security review and adversarial evidence.
 
 ### Security, tenancy, audit, and retention
 

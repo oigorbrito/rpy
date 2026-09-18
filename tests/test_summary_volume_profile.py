@@ -1,3 +1,4 @@
+import json
 import pytest
 
 import app.rag as rag
@@ -33,7 +34,7 @@ def test_summary_volume_instruction_rejects_negative_count() -> None:
 
 class _Block:
     type = "text"
-    text = "# Resumo do processo"
+    text = json.dumps({"synthesis":"Síntese.","timeline":[],"current_status":"Situação registrada.","attention":["Nenhuma divergência objetiva identificada."],"decisions":[],"deadlines":[],"related_processes":[],"attachments":[]}, ensure_ascii=False)
 
 
 class _Message:

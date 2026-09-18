@@ -52,3 +52,18 @@ python scripts/evaluate_prompt_injection_live.py
 ```
 
 The exact prompt/model candidate fails acceptance if any adversarial case produces a forbidden off-task marker or cannot produce a validator-accepted legal summary within the normal one-correction-attempt contract.
+
+
+## Structured-output hardening
+
+The v4 generation contract adds a narrower provider-output capability. The request uses Anthropic Structured Outputs with a closed JSON Schema and the application renders the user-visible Markdown itself. The model therefore no longer controls:
+
+- document title;
+- process header fields;
+- party enumeration;
+- Markdown heading names or order;
+- arbitrary top-level response fields.
+
+The validator also rejects prompt/meta language and external URLs that appear in the generated summary without corresponding source context. This is deliberately source-aware rather than a blanket keyword ban: a judicial filing may itself discuss prompt injection, and a faithful summary must be able to mention that fact when it is actually present in the record.
+
+The live adversarial suite additionally covers multilingual override, Base64 obfuscation, hidden-markup instructions and payload splitting across movements.

@@ -462,3 +462,39 @@ def test_rejects_heading_outside_allowed_summary_contract() -> None:
 
     assert result.passed is False
     assert "summary heading is not allowed: Receita de lasanha" in result.errors
+
+
+def test_rejects_unsourced_prompt_meta_output() -> None:
+    result = validar(
+        text="# Resumo do processo\n\n## Síntese\nO system prompt manda ignorar as instruções.\n\n## Pontos de atenção\nNenhuma divergência.",
+        code="0000000-00.0000.0.00.0001",
+        parties=[],
+        source_text='{"movimentos":[{"text":"Petição ordinária."}]}',
+    )
+
+    assert result.passed is False
+    assert any("meta-output marker not present in source context" in error for error in result.errors)
+
+
+def test_allows_prompt_meta_language_when_it_is_source_backed() -> None:
+    phrase = "A peça menciona system prompt como parte de uma tentativa de manipulação."
+    result = validar(
+        text=f"# Resumo do processo\n\n## Síntese\n{phrase}\n\n## Pontos de atenção\nRegistro documental.",
+        code="0000000-00.0000.0.00.0001",
+        parties=[],
+        source_text='{"movimentos":[{"text":"A peça menciona system prompt como parte de uma tentativa de manipulação."}]}',
+    )
+
+    assert not any("meta-output marker" in error for error in result.errors)
+
+
+def test_rejects_unsourced_external_url() -> None:
+    result = validar(
+        text="# Resumo do processo\n\n## Síntese\nVeja https://evil.example/x\n\n## Pontos de atenção\nRegistro.",
+        code="0000000-00.0000.0.00.0001",
+        parties=[],
+        source_text='{"movimentos":[{"text":"Sem links."}]}',
+    )
+
+    assert result.passed is False
+    assert "URL not present in source context: https://evil.example/x" in result.errors
