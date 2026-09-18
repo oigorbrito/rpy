@@ -95,8 +95,8 @@ async def test_sonnet_5_request_uses_cacheable_system_prompt_without_custom_samp
     assert len(PROCESS_SUMMARY_SYSTEM_PROMPT.split()) >= 1100
 
     user_content = request["messages"][0]["content"]
-    assert "<processo>" in user_content
-    assert "<movimentos>" in user_content
+    assert "<processo_json>" in user_content
+    assert "<movimentos_json>" in user_content
     assert context["code"] in user_content
 
     telemetry = context["_generation_telemetry"]
@@ -193,7 +193,7 @@ async def test_secret_case_sends_only_class_and_allowed_header_to_provider() -> 
     assert '"instance": 1' in user_content
     assert '"area": "Cível"' in user_content
     assert '"state": "RS"' in user_content
-    assert "<movimentos>\n[]\n</movimentos>" in user_content
+    assert "<movimentos_json>\n[]\n</movimentos_json>" in user_content
 
     for forbidden in (
         context["code"],
