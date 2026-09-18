@@ -29,15 +29,17 @@ def selected_movement_sources(ranked: Sequence[RankedStep]) -> list[dict[str, An
     """Return text-free provenance for the exact movement context sent to models."""
     sources: list[dict[str, Any]] = []
     for source_order, item in enumerate(ranked):
-        view = model_view_text(str(item.step.text or ""))
+        text_view = model_view_text(str(item.step.text or ""))
+        title_view = model_view_text(str(item.step.title or ""))
+        flags = list(dict.fromkeys((*text_view.flags, *title_view.flags)))
         sources.append(
             {
                 "step_id": item.step.id,
                 "step_number": int(item.step.step_number),
                 "occurred_at": item.step.occurred_at,
                 "source_order": source_order,
-                "source_text_sha256": view.normalized_sha256,
-                "unicode_security_flags": list(view.flags),
+                "source_text_sha256": text_view.normalized_sha256,
+                "unicode_security_flags": flags,
             }
         )
     return sources
