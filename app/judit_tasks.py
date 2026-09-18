@@ -3,6 +3,9 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from app.datajud_client import lookup_datajud_metadata
+from app.datajud_enrichment import merge_datajud_metadata
+from app.datajud_provenance import replace_datajud_field_provenance
 from app.db import create_pool
 from app.json_utils import decode_json_object
 from app.judit import extract_promotable_fields, parse_event
@@ -57,9 +60,44 @@ async def finalize_judit_request_task(payload: dict[str, Any]) -> dict[str, Any]
     pool = await create_pool(database_url, min_size=1, max_size=3)
     try:
         async with pool.acquire() as conn:
-            # Promotion and summary enqueue are one durable unit. finalize_version()
-            # uses a nested transaction/savepoint, so an enqueue failure rolls the
-            # entire promotion back and lets the finalizer job retry safely.
+            # DataJud is supplementary and may require network I/O. Prepare it before
+            # the promotion transaction, then revalidate that the preferred Judit
+            # version is still the same before applying the result.
+            prepared_version_id = None
+            prepared_fields: dict[str, Any] | None = None
+            prepared_datajud_result = None
+            datajud_status = "not_attempted"
+
+            pre_staged = await preferred_judit_version(conn, request_id=request_id)
+            if pre_staged is not None:
+                pre_source_payload = decode_json_object(
+                    pre_staged["source_payload"],
+                    label="staged Judit source payload",
+                )
+                pre_event = parse_event(pre_source_payload)
+                if pre_event.response_data:
+                    prepared_version_id = pre_staged["version_id"]
+                    judit_fields = extract_promotable_fields(pre_event.response_data)
+                    prepared_fields = judit_fields
+                    if bool(pre_staged["finalized"]):
+                        datajud_status = "already_finalized"
+                    else:
+                        lookup = await lookup_datajud_metadata(
+                            code=str(pre_staged["code"]),
+                            secrecy_level=int(judit_fields.get("secrecy_level") or 0),
+                        )
+                        datajud_status = lookup.status
+                        if lookup.status == "ok" and lookup.metadata is not None:
+                            prepared_datajud_result = merge_datajud_metadata(
+                                judit_fields,
+                                lookup.metadata,
+                            )
+                            prepared_fields = prepared_datajud_result.process
+
+            # Promotion, DataJud provenance and summary enqueue are one durable unit.
+            # finalize_version()/provenance replacement use nested savepoints, so an
+            # enqueue failure rolls the entire promotion back and lets the finalizer
+            # job retry safely.
             async with conn.transaction():
                 await transition_requests_for_judit_request(
                     conn,
@@ -74,7 +112,11 @@ async def finalize_judit_request_task(payload: dict[str, Any]) -> dict[str, Any]
                         status="source_unavailable",
                         error_code="no_lawsuit_response",
                     )
-                    return {"request_id": request_id, "status": "no_lawsuit_response"}
+                    return {
+                        "request_id": request_id,
+                        "status": "no_lawsuit_response",
+                        "datajud_status": datajud_status,
+                    }
 
                 source_payload = decode_json_object(
                     staged["source_payload"], label="staged Judit source payload"
@@ -87,15 +129,41 @@ async def finalize_judit_request_task(payload: dict[str, Any]) -> dict[str, Any]
                         status="source_unavailable",
                         error_code="missing_response_data",
                     )
-                    return {"request_id": request_id, "status": "missing_response_data"}
+                    return {
+                        "request_id": request_id,
+                        "status": "missing_response_data",
+                        "datajud_status": datajud_status,
+                    }
 
-                fields = extract_promotable_fields(staged_event.response_data)
+                fresh_fields = extract_promotable_fields(staged_event.response_data)
+                datajud_result = None
+                if (
+                    prepared_version_id == staged["version_id"]
+                    and prepared_fields is not None
+                ):
+                    fields = prepared_fields
+                    datajud_result = prepared_datajud_result
+                else:
+                    fields = fresh_fields
+                    if (
+                        prepared_version_id is not None
+                        and prepared_version_id != staged["version_id"]
+                    ):
+                        datajud_status = "staged_changed"
+
                 promoted = await finalize_version(
                     conn,
                     process_id=staged["process_id"],
                     version_id=staged["version_id"],
                     **fields,
                 )
+                if datajud_result is not None:
+                    await replace_datajud_field_provenance(
+                        conn,
+                        process_id=staged["process_id"],
+                        version_id=staged["version_id"],
+                        result=datajud_result,
+                    )
 
                 equivalent_to_version_id = None
                 if not promoted:
@@ -174,6 +242,8 @@ async def finalize_judit_request_task(payload: dict[str, Any]) -> dict[str, Any]
                 if equivalent_to_version_id is not None
                 else None
             ),
+            "datajud_status": datajud_status,
         }
     finally:
         await pool.close()
+
