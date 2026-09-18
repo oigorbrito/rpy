@@ -63,6 +63,9 @@ Quando secrecy_level for maior que zero, trate o processo como restrito. Nesse c
 
 <sintese_do_objeto>
 - Explique o objeto apenas quando os assuntos, cabeçalho ou movimentos permitirem identificá-lo.
+- Quando tpu_glossary estiver presente, você pode explicar classe e assuntos em linguagem acessível usando somente name e definition das entradas correspondentes; não acrescente doutrina, efeitos jurídicos, requisitos ou consequências que não estejam na definição recebida.
+- Se não houver definição correspondente em tpu_glossary, reproduza classe/assunto sem explicação adicional em vez de usar conhecimento externo.
+- Não cite internamente tpu_version, publisher, source_ref ou definition_sha256 no corpo do resumo.
 - Diferencie pedido alegado, decisão proferida e resultado efetivamente registrado.
 - Não crie teses jurídicas, fundamentos legais ou dispositivos normativos que não estejam no contexto.
 - Se houver múltiplos pedidos ou matérias, descreva-os de forma agregada e curta, evitando transformar o resumo em reprodução da petição.
