@@ -287,7 +287,7 @@ def _validate_runtime_confinement(services: dict[str, Any]) -> None:
             _fail(f"{service_name} must preserve Docker seccomp confinement")
 
         tmpfs = [str(value) for value in (service.get("tmpfs") or [])]
-        tmp_entry = next((value for value in tmpfs if value.startswith("/tmp")), "")
+        tmp_entry = next((value for value in tmpfs if value.startswith("/tmp")), "")  # nosec B108
         if not tmp_entry:
             _fail(f"{service_name} must provide /tmp as tmpfs")
         for required_option in ("noexec", "nosuid", "nodev"):
@@ -336,7 +336,7 @@ def _validate_egress_topology(services: dict[str, Any], networks: dict[str, Any]
         "EGRESS_PROXY_CONNECT_TIMEOUT_SECONDS",
     }:
         _fail("egress-proxy must receive only its allowlist and timeout settings")
-    if proxy_env.get("EGRESS_PROXY_BIND_HOST") != "0.0.0.0":
+    if proxy_env.get("EGRESS_PROXY_BIND_HOST") != "0.0.0.0":  # nosec B104
         _fail("egress-proxy bind host must remain 0.0.0.0 inside the container network")
     if not str(proxy_env.get("EGRESS_PROXY_ALLOWED_HOSTS") or "").strip():
         _fail("egress-proxy allowlist must not be empty")
