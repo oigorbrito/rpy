@@ -42,6 +42,11 @@ WORKER_REQUIRED_ENV = {
     "DATAJUD_API_KEY",
     "DATAJUD_BASE_URL",
     "DATAJUD_TIMEOUT_SECONDS",
+    "LANGFUSE_ENABLED",
+    "LANGFUSE_PUBLIC_KEY",
+    "LANGFUSE_SECRET_KEY",
+    "LANGFUSE_BASE_URL",
+    "LANGFUSE_TRACING_ENVIRONMENT",
     "ANTHROPIC_API_KEY",
     "OPENAI_API_KEY",
     "EMBEDDING_MODEL",
@@ -94,6 +99,7 @@ PROVIDER_SECRETS = {
     "COHERE_API_KEY",
     "JUDIT_API_KEY",
     "DATAJUD_API_KEY",
+    "LANGFUSE_SECRET_KEY",
 }
 DB_ROLE_USERS = {
     "api": "rpy_api",
@@ -265,6 +271,11 @@ def _validate_worker_embedding_contract(services: dict[str, Any]) -> None:
         "DATAJUD_API_KEY",
         "DATAJUD_BASE_URL",
         "DATAJUD_TIMEOUT_SECONDS",
+        "LANGFUSE_ENABLED",
+        "LANGFUSE_PUBLIC_KEY",
+        "LANGFUSE_SECRET_KEY",
+        "LANGFUSE_BASE_URL",
+        "LANGFUSE_TRACING_ENVIRONMENT",
     )
     left = _environment(services, "worker-1")
     right = _environment(services, "worker-2")
