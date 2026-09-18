@@ -50,3 +50,9 @@ def test_frontend_summary_renderer_is_allowlisted_and_non_executable()->None:
  assert "<Party\\s+name=" in source
  assert ".summary-process-header" in stylesheet
  assert ".summary-party" in stylesheet
+
+
+def test_successful_lookup_has_programmatic_result_focus_target()->None:
+ html=(FRONTEND/"index.html").read_text(); source=(FRONTEND/"app.js").read_text()
+ assert 'id="result-code" tabindex="-1"' in html
+ assert "document.querySelector('#result-code').focus({preventScroll:true})" in source
