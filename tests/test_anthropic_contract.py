@@ -101,6 +101,7 @@ async def test_sonnet_5_request_uses_cacheable_system_prompt_without_custom_samp
     assert "top_p" not in request
     assert "top_k" not in request
     assert "stream" not in request
+    assert "tools" not in request
     assert request["output_config"]["format"]["type"] == "json_schema"
     schema = request["output_config"]["format"]["schema"]
     assert schema["additionalProperties"] is False
