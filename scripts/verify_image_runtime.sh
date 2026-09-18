@@ -17,6 +17,7 @@ from pathlib import Path
 import app.api
 import app.worker
 import app.scheduler
+import langfuse
 
 frontend = Path(app.api.__file__).with_name("frontend")
 required = [frontend / "index.html", frontend / "app.css", frontend / "app.js"]
