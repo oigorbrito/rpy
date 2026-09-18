@@ -189,3 +189,68 @@ async def test_image_ocr_empty_result_is_unreadable(monkeypatch):
             config=AttachmentOCRConfig(enabled=True),
         )
     assert exc_info.value.error_code == "ocr_no_text"
+
+
+
+def test_tesseract_runner_maps_missing_binary_and_timeout(monkeypatch):
+    import subprocess
+    from app import attachment_processing as processing
+
+    def missing(*args, **kwargs):
+        raise FileNotFoundError("missing")
+
+    monkeypatch.setattr(processing.subprocess, "run", missing)
+    with pytest.raises(AttachmentProcessingError) as exc_info:
+        processing._run_tesseract_ocr(
+            b"\x89PNG\r\n\x1a\nsynthetic",
+            suffix=".png",
+            config=AttachmentOCRConfig(enabled=True, binary="missing", timeout_seconds=1),
+        )
+    assert exc_info.value.error_code == "ocr_unavailable"
+
+    def timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd="tesseract", timeout=1)
+
+    monkeypatch.setattr(processing.subprocess, "run", timeout)
+    with pytest.raises(AttachmentProcessingError) as exc_info:
+        processing._run_tesseract_ocr(
+            b"\x89PNG\r\n\x1a\nsynthetic",
+            suffix=".png",
+            config=AttachmentOCRConfig(enabled=True, timeout_seconds=1),
+        )
+    assert exc_info.value.error_code == "ocr_timeout"
+
+
+def test_tesseract_runner_uses_private_temporary_file_and_deletes_it(monkeypatch):
+    from types import SimpleNamespace
+    from app import attachment_processing as processing
+
+    observed = {}
+
+    def fake_run(args, **kwargs):
+        image_path = args[1]
+        observed["path"] = image_path
+        observed["exists_during"] = processing.Path(image_path).exists()
+        observed["bytes"] = processing.Path(image_path).read_bytes()
+        observed["args"] = args
+        return SimpleNamespace(returncode=0, stdout="Texto OCR".encode("utf-8"))
+
+    monkeypatch.setattr(processing.subprocess, "run", fake_run)
+    data = b"\x89PNG\r\n\x1a\nsynthetic"
+    text = processing._run_tesseract_ocr(
+        data,
+        suffix=".png",
+        config=AttachmentOCRConfig(
+            enabled=True,
+            binary="tesseract",
+            language="por",
+            timeout_seconds=5,
+        ),
+    )
+
+    assert text == "Texto OCR"
+    assert observed["exists_during"] is True
+    assert observed["bytes"] == data
+    assert observed["args"][0] == "tesseract"
+    assert observed["args"][2] == "stdout"
+    assert not processing.Path(observed["path"]).exists()
