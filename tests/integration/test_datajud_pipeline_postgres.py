@@ -152,7 +152,7 @@ async def test_finalize_applies_datajud_merge_and_provenance_atomically(
         {"code": "5804", "name": "Investigação de Paternidade"}
     ]
     assert decode_json_list(process["parties"]) == [
-        {"name": "Parte Judit", "side": "active"}
+        {"name": "Parte Judit", "side": "active", "person_type": None}
     ]
     header = decode_json_object(process["header"])
     assert header["class_code"] == "7"
