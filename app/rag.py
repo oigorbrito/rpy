@@ -405,6 +405,7 @@ def _validate_provider_summary(text: str, context: dict[str, Any]) -> Validation
         source_text=_provider_source_text(context),
         require_attention_section=True,
         required_attention_phrases=list(context.get("source_warnings", [])),
+        require_document_title=True,
     )
 
 
@@ -700,6 +701,7 @@ async def generate_summary(
             code=context["code"],
             parties=context.get("validation_parties", []),
             forbid_party_names=True,
+            require_document_title=True,
         )
         model = SECRET_MODEL
         prompt_version = SECRET_PROMPT_VERSION
