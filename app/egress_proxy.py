@@ -7,7 +7,6 @@ import os
 import re
 from collections.abc import Iterable
 
-DEFAULT_BIND_HOST = "0.0.0.0"
 DEFAULT_PORT = 3128
 DEFAULT_CONNECT_TIMEOUT_SECONDS = 10.0
 MAX_HEADER_BYTES = 8192
@@ -191,10 +190,16 @@ async def _handle_client(
 
 async def serve(
     *,
-    host: str = DEFAULT_BIND_HOST,
+    host: str | None = None,
     port: int = DEFAULT_PORT,
     allowed_hosts: Iterable[str] | None = None,
 ) -> None:
+    bind_host = str(
+        host if host is not None else os.environ.get("EGRESS_PROXY_BIND_HOST", "")
+    ).strip()
+    if not bind_host:
+        raise RuntimeError("EGRESS_PROXY_BIND_HOST is required")
+
     configured = (
         frozenset(item.casefold().rstrip(".") for item in allowed_hosts)
         if allowed_hosts is not None
@@ -210,7 +215,7 @@ async def serve(
             allowed_hosts=configured,
             timeout_seconds=timeout_seconds,
         ),
-        host,
+        bind_host,
         port,
         limit=MAX_HEADER_BYTES,
     )
