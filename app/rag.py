@@ -33,7 +33,7 @@ from app.provenance import (
     replace_summary_sources,
     selected_movement_sources,
 )
-from app.reranker_bge import BGERerankerScorer, bge_reranker_enabled
+from app.reranker_provider import configured_reranker_scorer
 from app.reranking import RERANK_CANDIDATE_LIMIT, select_context_steps
 from app.retrieval import lexical_search, load_steps, vector_search
 from app.tasks import PermanentTaskError, task
@@ -277,9 +277,7 @@ async def _load_context(
     if source_warnings:
         base["source_warnings"] = source_warnings
 
-    reranker_scorer = None
-    if len(steps) > 40 and bge_reranker_enabled():
-        reranker_scorer = BGERerankerScorer()
+    reranker_scorer = configured_reranker_scorer() if len(steps) > 40 else None
     retrieval_limit = RERANK_CANDIDATE_LIMIT if reranker_scorer is not None else 40
 
     lexical_scores: dict[UUID, float] | None = None
