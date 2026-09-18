@@ -12,6 +12,22 @@ def test_sanitize_error_message_redacts_configured_secret(monkeypatch) -> None:
     assert REDACTED in rendered
 
 
+def test_sanitize_error_message_redacts_all_provider_api_keys(monkeypatch) -> None:
+    secrets = {
+        "JUDIT_API_KEY": "judit-provider-secret",
+        "DATAJUD_API_KEY": "datajud-provider-secret",
+        "COHERE_API_KEY": "cohere-provider-secret",
+    }
+    for name, value in secrets.items():
+        monkeypatch.setenv(name, value)
+
+    rendered = sanitize_error_message(" ".join(secrets.values()))
+
+    for value in secrets.values():
+        assert value not in rendered
+    assert rendered.count(REDACTED) == len(secrets)
+
+
 def test_sanitize_error_message_redacts_uri_password_and_bearer() -> None:
     rendered = sanitize_error_message(
         "failed postgresql://rpy_worker:db-super-secret@postgres:5432/rpy "
