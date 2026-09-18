@@ -7,37 +7,37 @@ from typing import Any
 SUMMARY_OUTPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "synthesis": {"type": "string", "minLength": 1},
+        "synthesis": {"type": "string", "minLength": 1, "maxLength": 6000},
         "timeline": {
             "type": "array",
-            "items": {"type": "string", "minLength": 1},
+            "items": {"type": "string", "minLength": 1, "maxLength": 2000},
             "maxItems": 24,
         },
-        "current_status": {"type": "string", "minLength": 1},
+        "current_status": {"type": "string", "minLength": 1, "maxLength": 4000},
         "attention": {
             "type": "array",
-            "items": {"type": "string", "minLength": 1},
+            "items": {"type": "string", "minLength": 1, "maxLength": 2000},
             "minItems": 1,
             "maxItems": 12,
         },
         "decisions": {
             "type": "array",
-            "items": {"type": "string", "minLength": 1},
+            "items": {"type": "string", "minLength": 1, "maxLength": 2000},
             "maxItems": 16,
         },
         "deadlines": {
             "type": "array",
-            "items": {"type": "string", "minLength": 1},
+            "items": {"type": "string", "minLength": 1, "maxLength": 2000},
             "maxItems": 12,
         },
         "related_processes": {
             "type": "array",
-            "items": {"type": "string", "minLength": 1},
+            "items": {"type": "string", "minLength": 1, "maxLength": 2000},
             "maxItems": 12,
         },
         "attachments": {
             "type": "array",
-            "items": {"type": "string", "minLength": 1},
+            "items": {"type": "string", "minLength": 1, "maxLength": 2000},
             "maxItems": 12,
         },
     },
