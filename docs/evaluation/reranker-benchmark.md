@@ -10,10 +10,15 @@ For deployment evidence, install the optional reranker extra and provide `BAAI/b
 
 ```bash
 export BGE_RERANKER_PATH=/absolute/path/to/bge-reranker-v2-m3
+export PIP_NO_INDEX=1
+export HF_HUB_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
+export HF_DATASETS_OFFLINE=1
+python scripts/verify_bge_reranker_artifact.py --model-dir "$BGE_RERANKER_PATH"
 python scripts/benchmark_reranker.py --scorer bge
 ```
 
-`BGE_RERANKER_PATH` must exist and be a directory. The runtime keeps the semantic/model identity pinned to `BAAI/bge-reranker-v2-m3` while loading model bytes from that local path. This avoids treating a model-hub download during benchmark execution as production evidence.
+`BGE_RERANKER_PATH` must exist and be a directory. The verifier also requires `FlagEmbedding`, a parseable local `config.json`, and offline Hugging Face/Transformers/Datasets settings before the real benchmark runs. The runtime keeps the semantic/model identity pinned to `BAAI/bge-reranker-v2-m3` while loading model bytes from that local path. This avoids treating a model-hub download during benchmark execution as production evidence.
 
 If `BGE_RERANKER_PATH` is unset, the scorer can still resolve the configured model identifier through FlagEmbedding for local development. Such a run is not sufficient evidence that the production artifact is prepared and reproducible.
 
