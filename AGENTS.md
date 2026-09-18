@@ -137,6 +137,8 @@ Reject or remove donor code that introduces any of the following without an expl
 
 - Production API, workers, scheduler, and migration job run the same application image digest; mutable application tags/builds are rejected.
 - Production base/runtime images are pinned by digest and dependency resolution is version-locked.
+- Application-image services use a read-only root filesystem, run as UID/GID 10001, drop all Linux capabilities, enable no-new-privileges, retain Docker seccomp confinement, and have explicit CPU/memory/PID ceilings plus hardened tmpfs for writable temporary state.
+- API, scheduler and migration services have no external Docker route; provider-capable workers have no direct egress and may reach external HTTPS destinations only through the credential-free allowlisted egress proxy on the internal provider-gateway network.
 - There is exactly one scheduler and at least two workers in the production topology contract.
 - Backup is not considered recovery until a restore drill verifies checksum, archive readability, schema migrations, sentinel data, and pgvector in a separate database.
 - RPO/RTO are measured operational properties, not promises inferred from configuration.
