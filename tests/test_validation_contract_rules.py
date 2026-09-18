@@ -285,3 +285,53 @@ def test_secret_mode_accepts_text_without_source_party_name() -> None:
         forbid_party_names=True,
     )
     assert result.passed is True
+
+
+def test_accepts_observed_core_sections_in_contract_order_with_omissions() -> None:
+    result = validar(
+        text=(
+            "## Partes\nMaria da Silva\n\n"
+            "## Linha do tempo relevante\n- 13/09/2026: distribuição.\n\n"
+            "## Pontos de atenção\nNenhuma divergência factual identificada."
+        ),
+        code=CODE,
+        parties=PARTIES,
+        source_text=SOURCE,
+    )
+    assert result.passed is True
+
+
+def test_rejects_core_sections_out_of_contract_order() -> None:
+    result = validar(
+        text=(
+            "## Situação atual\nProcesso em andamento.\n\n"
+            "## Síntese\nResumo factual."
+        ),
+        code=CODE,
+        parties=PARTIES,
+    )
+    assert result.passed is False
+    assert any(error.startswith("core sections must follow order:") for error in result.errors)
+
+
+def test_rejects_nonexact_core_section_title() -> None:
+    result = validar(
+        text="## Sintese\nResumo factual.",
+        code=CODE,
+        parties=PARTIES,
+    )
+    assert result.passed is False
+    assert "core section title must be exactly: Síntese; got: Sintese" in result.errors
+
+
+def test_rejects_duplicate_core_section() -> None:
+    result = validar(
+        text=(
+            "## Síntese\nPrimeira síntese.\n\n"
+            "## Síntese\nSegunda síntese."
+        ),
+        code=CODE,
+        parties=PARTIES,
+    )
+    assert result.passed is False
+    assert "duplicate core section: Síntese" in result.errors

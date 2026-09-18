@@ -61,6 +61,13 @@ _SOURCE_BACKED_CLAIM_RE = re.compile(
     r"^(?:[-*]\s*)?(?P<label>Área|Assuntos?|Tags?|Comarca|Órgão julgador|Classe|Fase)\s*:\s*(?P<value>.+?)\s*$",
     re.IGNORECASE | re.MULTILINE,
 )
+_CORE_SECTION_ORDER = (
+    "Partes",
+    "Síntese",
+    "Linha do tempo relevante",
+    "Situação atual",
+    "Pontos de atenção",
+)
 _CONDITIONAL_SECTION_ORDER = (
     "Decisões",
     "Prazos em curso",
@@ -177,6 +184,41 @@ def _jsx_errors(text: str) -> list[str]:
     for tag in sorted(disallowed):
         errors.append(f"JSX component is not allowed: {tag}")
     return errors
+
+
+def _core_section_order_errors(text: str) -> list[str]:
+    canonical = {
+        _normalize_party_name(title): (index, title)
+        for index, title in enumerate(_CORE_SECTION_ORDER)
+    }
+    observed: list[tuple[int, int, str]] = []
+    seen: set[str] = set()
+
+    for match in _HEADING_RE.finditer(text):
+        title = match.group("title").strip()
+        normalized = _normalize_party_name(title)
+        if normalized not in canonical:
+            continue
+        order, exact_title = canonical[normalized]
+        if title != exact_title:
+            return [
+                f"core section title must be exactly: {exact_title}; got: {title}"
+            ]
+        if normalized in seen:
+            return [f"duplicate core section: {exact_title}"]
+        seen.add(normalized)
+        observed.append((match.start(), order, exact_title))
+
+    previous_order = -1
+    for _, order, title in observed:
+        if order < previous_order:
+            return [
+                "core sections must follow order: "
+                + " → ".join(_CORE_SECTION_ORDER)
+                + f"; out-of-order section: {title}"
+            ]
+        previous_order = order
+    return []
 
 
 def _conditional_section_order_errors(text: str) -> list[str]:
@@ -340,5 +382,6 @@ def validar(
                     errors.append(f"required attention fact missing: {phrase}")
 
     errors.extend(_jsx_errors(text))
+    errors.extend(_core_section_order_errors(text))
     errors.extend(_conditional_section_order_errors(text))
     return ValidationResult(passed=not errors, errors=errors)
