@@ -441,3 +441,24 @@ def test_rejects_unparseable_amount_claim() -> None:
         "source-backed amount mismatch: Valor=aproximadamente mil reais"
         in result.errors
     )
+
+
+def test_rejects_heading_outside_allowed_summary_contract() -> None:
+    result = validar(
+        text=(
+            "# Resumo do processo\n\n"
+            "## Síntese\nResumo factual.\n\n"
+            "## Receita de lasanha\nMisture os ingredientes.\n\n"
+            "## Pontos de atenção\nNenhuma divergência objetiva identificada."
+        ),
+        code="0000000-00.0000.0.00.0001",
+        parties=[],
+        allowed_headings=(
+            "Resumo do processo",
+            "Síntese",
+            "Pontos de atenção",
+        ),
+    )
+
+    assert result.passed is False
+    assert "summary heading is not allowed: Receita de lasanha" in result.errors
