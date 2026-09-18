@@ -26,6 +26,7 @@ def _lawsuit_event(
     code: str,
     class_name: str = "Procedimento Comum",
     extra_step: bool = False,
+    attachments: list[dict] | None = None,
 ) -> dict:
     steps = [
         {
@@ -66,6 +67,7 @@ def _lawsuit_event(
                 "parties": [],
                 "subjects": [{"code": "1", "name": "Obrigação"}],
                 "steps": steps,
+                "attachments": attachments or [],
             },
             "tags": {"cached_response": False},
         },
@@ -180,7 +182,7 @@ async def test_semantically_equal_response_reuses_current_version_and_summary(
     assert current_version == first_version
     assert duplicate["finalized"] is True
     assert duplicate["semantic_fingerprint"]
-    assert duplicate["semantic_schema_version"] == 1
+    assert duplicate["semantic_schema_version"] == 2
     assert duplicate["equivalent_to_version_id"] == first_version
     assert duplicate_response in json.dumps(duplicate["source_payload"], ensure_ascii=False)
     assert duplicate_steps == 0
@@ -271,5 +273,94 @@ async def test_new_movement_or_relevant_metadata_creates_new_generation(
     assert current_version == version_3
     assert generation_jobs == 3
     assert step_counts == [1, 2, 2]
+
+    await pool.close()
+
+
+
+@pytest.mark.asyncio
+async def test_new_attachment_manifest_promotes_version_and_persists_pending_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert TEST_DATABASE_URL is not None
+    await migrate(TEST_DATABASE_URL)
+    monkeypatch.setenv("DATABASE_URL", TEST_DATABASE_URL)
+    pool = await create_pool(TEST_DATABASE_URL, min_size=1, max_size=4)
+
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            TRUNCATE jobs, process_summary_attachment_sources, attachment_chunks,
+                     process_attachments, process_summaries, process_steps,
+                     tenant_processes, access_log, process_versions, processes, tenants
+            RESTART IDENTITY CASCADE
+            """
+        )
+
+    code = "0000000-00.2026.8.21.0138"
+    request_1 = f"req-1-{uuid4()}"
+    _, version_1 = await _stage(
+        pool,
+        _lawsuit_event(
+            request_id=request_1,
+            response_id=f"resp-1-{uuid4()}",
+            callback_id=f"cb-1-{uuid4()}",
+            code=code,
+        ),
+    )
+    assert (await finalize_judit_request_task({"request_id": request_1}))["promoted"] is True
+
+    request_2 = f"req-2-{uuid4()}"
+    _, version_2 = await _stage(
+        pool,
+        _lawsuit_event(
+            request_id=request_2,
+            response_id=f"resp-2-{uuid4()}",
+            callback_id=f"cb-2-{uuid4()}",
+            code=code,
+            attachments=[
+                {
+                    "attachment_id": "att-decisao-1",
+                    "attachment_date": "2026-09-17T12:00:00Z",
+                    "attachment_name": "DECISAO 1.pdf",
+                    "status": "done",
+                    "signed_url": "https://must-not-persist.invalid/attachment",
+                }
+            ],
+        ),
+    )
+    result_2 = await finalize_judit_request_task({"request_id": request_2})
+
+    assert result_2["status"] == "finalized"
+    assert result_2["promoted"] is True
+    assert result_2["summary_enqueued"] is True
+
+    async with pool.acquire() as conn:
+        current_version = await conn.fetchval(
+            "SELECT current_version_id FROM processes WHERE code=$1", code
+        )
+        attachment = await conn.fetchrow(
+            """
+            SELECT source_attachment_id, source_name, source_date, provider_status,
+                   status, content_sha256
+            FROM process_attachments
+            WHERE version_id=$1
+            """,
+            version_2,
+        )
+        schema_version = await conn.fetchval(
+            "SELECT semantic_schema_version FROM process_versions WHERE id=$1",
+            version_2,
+        )
+
+    assert current_version == version_2
+    assert current_version != version_1
+    assert attachment["source_attachment_id"] == "att-decisao-1"
+    assert attachment["source_name"] == "DECISAO 1.pdf"
+    assert attachment["source_date"].isoformat() == "2026-09-17T09:00:00-03:00"
+    assert attachment["provider_status"] == "done"
+    assert attachment["status"] == "pending"
+    assert attachment["content_sha256"] is None
+    assert schema_version == 2
 
     await pool.close()
