@@ -161,6 +161,7 @@ services:
     image: *rpy-image
     command: ["python", "-m", "app.egress_proxy"]
     environment:
+      EGRESS_PROXY_BIND_HOST: 0.0.0.0
       EGRESS_PROXY_ALLOWED_HOSTS: ${EGRESS_PROXY_ALLOWED_HOSTS:?EGRESS_PROXY_ALLOWED_HOSTS is required}
       EGRESS_PROXY_CONNECT_TIMEOUT_SECONDS: ${EGRESS_PROXY_CONNECT_TIMEOUT_SECONDS:-10}
     cpus: 0.5
