@@ -23,8 +23,7 @@ python -m pip install --constraint requirements/constraints.txt -e '.[dev]'
 Run the fast local checks:
 
 ```bash
-python scripts/migration_harness.py
-python scripts/release_harness.py
+python scripts/project_harness.py
 pytest -q tests --ignore=tests/integration
 node tests/frontend_behavior_test.mjs
 ```
@@ -67,7 +66,7 @@ Before requesting review:
 - confirm that no secrets, process payloads or provider credentials were added to code, fixtures, logs or PR text;
 - wait for the exact PR head to pass CI before calling the change green.
 
-The GitHub Actions workflow is the source of truth for repository gates. A local pass does not replace a failed or missing CI run.
+The GitHub Actions workflow is the source of truth for repository gates. A local pass does not replace a failed or missing CI run. `scripts/project_harness.py` is the repository-level guardrail: it runs the cheap migration/release checks and verifies that behavioral and operational evidence remains wired into CI; it does not replace those stronger gates.
 
 For frontend behavior changes, use `docs/frontend/behavior-harness.md` as the test-design contract: prefer named scenarios and observable effects (requests, rendered state, focus, ARIA state, clipboard and bounded timers) over assertions coupled to implementation structure.
 
