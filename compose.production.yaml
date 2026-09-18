@@ -1,5 +1,14 @@
 x-rpy-image: &rpy-image ${RPY_IMAGE:?RPY_IMAGE immutable digest is required}
 
+x-app-runtime: &app-runtime
+  read_only: true
+  user: "10001:10001"
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev,size=64m
+
 x-api-env: &api-env
   DATABASE_URL: ${API_DATABASE_URL:?API_DATABASE_URL is required}
   JUDIT_WEBHOOK_TOKEN: ${JUDIT_WEBHOOK_TOKEN:?JUDIT_WEBHOOK_TOKEN is required}
@@ -62,6 +71,12 @@ x-worker-env: &worker-env
   PROVIDER_STEPS_TEXT_MAX_CHARS: ${PROVIDER_STEPS_TEXT_MAX_CHARS:-80000}
   WORKER_TASK_TIMEOUT_SECONDS: ${WORKER_TASK_TIMEOUT_SECONDS:-120}
   WORKER_SHUTDOWN_GRACE_SECONDS: ${WORKER_SHUTDOWN_GRACE_SECONDS:-30}
+  HTTPS_PROXY: http://egress-proxy:3128
+  https_proxy: http://egress-proxy:3128
+  NO_PROXY: postgres,localhost,127.0.0.1
+  no_proxy: postgres,localhost,127.0.0.1
+  HF_HOME: /tmp/huggingface
+  XDG_CACHE_HOME: /tmp/.cache
 
 x-scheduler-env: &scheduler-env
   DATABASE_URL: ${SCHEDULER_DATABASE_URL:?SCHEDULER_DATABASE_URL is required}
@@ -90,7 +105,11 @@ services:
     restart: unless-stopped
 
   migrate:
+    <<: *app-runtime
     image: *rpy-image
+    cpus: 1.0
+    mem_limit: 512m
+    pids_limit: 128
     command:
       - sh
       - -c
@@ -111,7 +130,11 @@ services:
     restart: "no"
 
   api:
+    <<: *app-runtime
     image: *rpy-image
+    cpus: 1.0
+    mem_limit: 512m
+    pids_limit: 128
     command: ["uvicorn", "app.api:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
     environment: *api-env
     ports:
@@ -131,37 +154,78 @@ services:
       start_period: 5s
     networks:
       - backend
+    restart: unless-stopped
+
+  egress-proxy:
+    <<: *app-runtime
+    image: *rpy-image
+    command: ["python", "-m", "app.egress_proxy"]
+    environment:
+      EGRESS_PROXY_BIND_HOST: 0.0.0.0
+      EGRESS_PROXY_ALLOWED_HOSTS: ${EGRESS_PROXY_ALLOWED_HOSTS:?EGRESS_PROXY_ALLOWED_HOSTS is required}
+      EGRESS_PROXY_CONNECT_TIMEOUT_SECONDS: ${EGRESS_PROXY_CONNECT_TIMEOUT_SECONDS:-10}
+    cpus: 0.5
+    mem_limit: 256m
+    pids_limit: 128
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import socket; s=socket.create_connection(('127.0.0.1',3128),2); s.close()"
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 3s
+    networks:
+      - provider-gateway
       - egress
     restart: unless-stopped
 
   worker-1:
+    <<: *app-runtime
     image: *rpy-image
+    cpus: 2.0
+    mem_limit: 8g
+    pids_limit: 256
     command: ["python", "-m", "app.worker"]
     environment: *worker-env
     stop_grace_period: ${WORKER_STOP_GRACE_PERIOD:-40s}
     depends_on:
       migrate:
         condition: service_completed_successfully
+      egress-proxy:
+        condition: service_healthy
     networks:
       - backend
-      - egress
+      - provider-gateway
     restart: unless-stopped
 
   worker-2:
+    <<: *app-runtime
     image: *rpy-image
+    cpus: 2.0
+    mem_limit: 8g
+    pids_limit: 256
     command: ["python", "-m", "app.worker"]
     environment: *worker-env
     stop_grace_period: ${WORKER_STOP_GRACE_PERIOD:-40s}
     depends_on:
       migrate:
         condition: service_completed_successfully
+      egress-proxy:
+        condition: service_healthy
     networks:
       - backend
-      - egress
+      - provider-gateway
     restart: unless-stopped
 
   scheduler:
+    <<: *app-runtime
     image: *rpy-image
+    cpus: 0.5
+    mem_limit: 256m
+    pids_limit: 64
     command: ["python", "-m", "app.scheduler"]
     environment: *scheduler-env
     depends_on:
@@ -173,6 +237,8 @@ services:
 
 networks:
   backend:
+    internal: true
+  provider-gateway:
     internal: true
   egress: {}
 

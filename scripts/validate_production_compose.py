@@ -11,11 +11,19 @@ EXPECTED_SERVICES = {
     "postgres",
     "migrate",
     "api",
+    "egress-proxy",
     "worker-1",
     "worker-2",
     "scheduler",
 }
-APPLICATION_SERVICES = ("migrate", "api", "worker-1", "worker-2", "scheduler")
+APPLICATION_SERVICES = (
+    "migrate",
+    "api",
+    "egress-proxy",
+    "worker-1",
+    "worker-2",
+    "scheduler",
+)
 IMMUTABLE_IMAGE_RE = re.compile(r"^.+@sha256:[0-9a-fA-F]{64}$")
 DURATION_RE = re.compile(r"^(?P<value>[0-9]+(?:\.[0-9]+)?)(?P<unit>ms|s|m|h)$")
 API_REQUIRED_ENV = {
@@ -76,6 +84,12 @@ WORKER_REQUIRED_ENV = {
     "PROVIDER_STEPS_TEXT_MAX_CHARS",
     "WORKER_TASK_TIMEOUT_SECONDS",
     "WORKER_SHUTDOWN_GRACE_SECONDS",
+    "HTTPS_PROXY",
+    "https_proxy",
+    "NO_PROXY",
+    "no_proxy",
+    "HF_HOME",
+    "XDG_CACHE_HOME",
 }
 SCHEDULER_REQUIRED_ENV = {
     "DATABASE_URL",
@@ -203,6 +217,142 @@ def _validate_database_isolation(services: dict[str, Any]) -> None:
             _fail(f"migrate {env_name} must use role {expected_user!r}")
 
 
+
+_RUNTIME_LIMITS = {
+    "migrate": {"cpus": 1.0, "mem_limit": 512 * 1024 * 1024, "pids_limit": 128},
+    "api": {"cpus": 1.0, "mem_limit": 512 * 1024 * 1024, "pids_limit": 128},
+    "egress-proxy": {"cpus": 0.5, "mem_limit": 256 * 1024 * 1024, "pids_limit": 128},
+    "worker-1": {"cpus": 2.0, "mem_limit": 8 * 1024 * 1024 * 1024, "pids_limit": 256},
+    "worker-2": {"cpus": 2.0, "mem_limit": 8 * 1024 * 1024 * 1024, "pids_limit": 256},
+    "scheduler": {"cpus": 0.5, "mem_limit": 256 * 1024 * 1024, "pids_limit": 64},
+}
+
+
+def _numeric(value: Any, *, field: str, service_name: str) -> float:
+    try:
+        rendered = float(value)
+    except (TypeError, ValueError):
+        _fail(f"{service_name} {field} must be numeric")
+    if rendered <= 0:
+        _fail(f"{service_name} {field} must be positive")
+    return rendered
+
+
+def _memory_bytes(value: Any, *, service_name: str) -> int:
+    if isinstance(value, int) and not isinstance(value, bool):
+        if value <= 0:
+            _fail(f"{service_name} mem_limit must be positive")
+        return value
+    rendered = str(value or "").strip().casefold()
+    match = re.fullmatch(r"([0-9]+(?:\.[0-9]+)?)([kmgt]?)(?:i?b)?", rendered)
+    if match is None:
+        _fail(f"{service_name} mem_limit has unsupported format")
+    amount = float(match.group(1))
+    unit = match.group(2)
+    multiplier = {
+        "": 1,
+        "k": 1024,
+        "m": 1024**2,
+        "g": 1024**3,
+        "t": 1024**4,
+    }[unit]
+    result = int(amount * multiplier)
+    if result <= 0:
+        _fail(f"{service_name} mem_limit must be positive")
+    return result
+
+
+def _validate_runtime_confinement(services: dict[str, Any]) -> None:
+    for service_name, expected in _RUNTIME_LIMITS.items():
+        service = services[service_name]
+        if service.get("read_only") is not True:
+            _fail(f"{service_name} root filesystem must be read-only")
+        if str(service.get("user") or "") != "10001:10001":
+            _fail(f"{service_name} must run as uid/gid 10001")
+        if service.get("privileged") is True:
+            _fail(f"{service_name} must not run privileged")
+        if str(service.get("network_mode") or "") == "host":
+            _fail(f"{service_name} must not use host networking")
+
+        cap_drop = {str(value).upper() for value in (service.get("cap_drop") or [])}
+        if cap_drop != {"ALL"}:
+            _fail(f"{service_name} must drop all Linux capabilities")
+        if service.get("cap_add"):
+            _fail(f"{service_name} must not add Linux capabilities")
+
+        security_opt = {str(value).casefold() for value in (service.get("security_opt") or [])}
+        if "no-new-privileges:true" not in security_opt:
+            _fail(f"{service_name} must enable no-new-privileges")
+        if any("seccomp=unconfined" in value for value in security_opt):
+            _fail(f"{service_name} must preserve Docker seccomp confinement")
+
+        tmpfs = [str(value) for value in (service.get("tmpfs") or [])]
+        tmp_entry = next((value for value in tmpfs if value.startswith("/tmp")), "")  # nosec B108
+        if not tmp_entry:
+            _fail(f"{service_name} must provide /tmp as tmpfs")
+        for required_option in ("noexec", "nosuid", "nodev"):
+            if required_option not in tmp_entry:
+                _fail(f"{service_name} /tmp tmpfs must include {required_option}")
+
+        cpus = _numeric(service.get("cpus"), field="cpus", service_name=service_name)
+        if abs(cpus - expected["cpus"]) > 1e-9:
+            _fail(f"{service_name} cpus must equal {expected['cpus']}")
+        memory = _memory_bytes(service.get("mem_limit"), service_name=service_name)
+        if memory != expected["mem_limit"]:
+            _fail(f"{service_name} mem_limit does not match the production budget")
+        pids = int(_numeric(service.get("pids_limit"), field="pids_limit", service_name=service_name))
+        if pids != expected["pids_limit"]:
+            _fail(f"{service_name} pids_limit does not match the production budget")
+
+
+def _validate_egress_topology(services: dict[str, Any], networks: dict[str, Any]) -> None:
+    backend = networks.get("backend") or {}
+    provider_gateway = networks.get("provider-gateway") or {}
+    if backend.get("internal") is not True:
+        _fail("backend network must be internal")
+    if provider_gateway.get("internal") is not True:
+        _fail("provider-gateway network must be internal")
+    if (networks.get("egress") or {}).get("internal") is True:
+        _fail("egress network must provide external connectivity for the gateway only")
+
+    expected_networks = {
+        "postgres": {"backend"},
+        "migrate": {"backend"},
+        "api": {"backend"},
+        "worker-1": {"backend", "provider-gateway"},
+        "worker-2": {"backend", "provider-gateway"},
+        "scheduler": {"backend"},
+        "egress-proxy": {"provider-gateway", "egress"},
+    }
+    for service_name, expected in expected_networks.items():
+        actual = set((services[service_name].get("networks") or {}).keys())
+        if actual != expected:
+            _fail(f"{service_name} network set must be {sorted(expected)}, got {sorted(actual)}")
+
+    proxy_env = _environment(services, "egress-proxy")
+    if set(proxy_env) != {
+        "EGRESS_PROXY_BIND_HOST",
+        "EGRESS_PROXY_ALLOWED_HOSTS",
+        "EGRESS_PROXY_CONNECT_TIMEOUT_SECONDS",
+    }:
+        _fail("egress-proxy must receive only its allowlist and timeout settings")
+    if proxy_env.get("EGRESS_PROXY_BIND_HOST") != "0.0.0.0":  # nosec B104
+        _fail("egress-proxy bind host must remain 0.0.0.0 inside the container network")
+    if not str(proxy_env.get("EGRESS_PROXY_ALLOWED_HOSTS") or "").strip():
+        _fail("egress-proxy allowlist must not be empty")
+
+    for service_name in ("worker-1", "worker-2"):
+        env = _environment(services, service_name)
+        if env.get("HTTPS_PROXY") != "http://egress-proxy:3128":
+            _fail(f"{service_name} HTTPS_PROXY must target the egress proxy")
+        if env.get("https_proxy") != "http://egress-proxy:3128":
+            _fail(f"{service_name} https_proxy must target the egress proxy")
+        if env.get("NO_PROXY") != "postgres,localhost,127.0.0.1":
+            _fail(f"{service_name} NO_PROXY must remain limited to local/backend names")
+        if env.get("no_proxy") != "postgres,localhost,127.0.0.1":
+            _fail(f"{service_name} no_proxy must remain limited to local/backend names")
+
+
 def _duration_seconds(value: Any) -> float:
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         seconds = float(value)
@@ -322,22 +472,10 @@ def validate(config: dict[str, Any]) -> None:
         _fail("exactly one scheduler service is required")
 
     networks = config.get("networks") or {}
-    backend = networks.get("backend") or {}
-    if backend.get("internal") is not True:
-        _fail("backend network must be internal")
-
-    postgres_networks = set((services["postgres"].get("networks") or {}).keys())
-    if postgres_networks != {"backend"}:
-        _fail("postgres must only join the backend network")
-
-    for service_name in ("api", "worker-1", "worker-2"):
-        service_networks = set((services[service_name].get("networks") or {}).keys())
-        if not {"backend", "egress"}.issubset(service_networks):
-            _fail(f"{service_name} must join backend and egress networks")
-
-    scheduler_networks = set((services["scheduler"].get("networks") or {}).keys())
-    if scheduler_networks != {"backend"}:
-        _fail("scheduler must remain backend-only")
+    if not isinstance(networks, dict):
+        _fail("networks must be an object")
+    _validate_egress_topology(services, networks)
+    _validate_runtime_confinement(services)
 
     _require_env(services, "api", API_REQUIRED_ENV)
     for service_name in ("worker-1", "worker-2"):
@@ -355,6 +493,11 @@ def validate(config: dict[str, Any]) -> None:
         HTTP_SECRETS | PROVIDER_SECRETS | MIGRATE_REQUIRED_ENV,
     )
     _forbid_env(services, "migrate", HTTP_SECRETS | PROVIDER_SECRETS)
+    _forbid_env(
+        services,
+        "egress-proxy",
+        HTTP_SECRETS | PROVIDER_SECRETS | MIGRATE_REQUIRED_ENV | {"DATABASE_URL"},
+    )
 
 
 def main() -> None:

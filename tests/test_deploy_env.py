@@ -25,6 +25,14 @@ def _valid_values() -> dict[str, str]:
         "JUDIT_WEBHOOK_TOKEN": "judit-token",
         "RPY_BEARER_TOKENS": '{"tenant-token":"00000000-0000-0000-0000-000000000001"}',
         "RPY_OPS_TOKEN": "ops-token",
+        "EGRESS_PROXY_ALLOWED_HOSTS": ",".join(
+            [
+                "api.anthropic.com",
+                "api.openai.com",
+                "requests.production.judit.io",
+                "tracking.production.judit.io",
+            ]
+        ),
     }
 
 
@@ -38,6 +46,7 @@ def _enable_bge(values: dict[str, str]) -> None:
 
 def _enable_cohere(values: dict[str, str]) -> None:
     values.pop("OPENAI_API_KEY", None)
+    values["EGRESS_PROXY_ALLOWED_HOSTS"] += ",api.cohere.com"
     values["EMBEDDING_SPACE_RUNTIME_ENABLED"] = "true"
     values["EMBEDDING_PROVIDER"] = "cohere"
     values["ALLOW_EXTERNAL_EMBEDDINGS"] = "true"
@@ -178,6 +187,8 @@ def _enable_bge_reranker(values: dict[str, str]) -> None:
 
 def _enable_cohere_reranker(values: dict[str, str]) -> None:
     values["RERANKER_ENABLED"] = "true"
+    if "api.cohere.com" not in values["EGRESS_PROXY_ALLOWED_HOSTS"]:
+        values["EGRESS_PROXY_ALLOWED_HOSTS"] += ",api.cohere.com"
     values["RERANKER_PROVIDER"] = "cohere"
     values["ALLOW_EXTERNAL_RERANKER"] = "true"
     values["COHERE_RERANKER_MODEL"] = "rerank-v4.0-pro"
@@ -230,6 +241,7 @@ def test_cohere_reranker_rejects_wrong_model() -> None:
 
 def _enable_datajud(values: dict[str, str]) -> None:
     values["DATAJUD_ENABLED"] = "true"
+    values["EGRESS_PROXY_ALLOWED_HOSTS"] += ",api-publica.datajud.cnj.jus.br"
     values["DATAJUD_AUTHORIZED_USE"] = "true"
     values["DATAJUD_API_KEY"] = "datajud-public-key"
     values["DATAJUD_BASE_URL"] = "https://api-publica.datajud.cnj.jus.br"
@@ -275,6 +287,7 @@ def test_datajud_requires_positive_numeric_timeout() -> None:
 
 def _enable_langfuse(values: dict[str, str]) -> None:
     values["LANGFUSE_ENABLED"] = "true"
+    values["EGRESS_PROXY_ALLOWED_HOSTS"] += ",langfuse.example.internal"
     values["LANGFUSE_PUBLIC_KEY"] = "pk-lf-production"
     values["LANGFUSE_SECRET_KEY"] = "sk-lf-production"
     values["LANGFUSE_BASE_URL"] = "https://langfuse.example.internal"
@@ -311,4 +324,69 @@ def test_langfuse_environment_must_match_sdk_contract() -> None:
     assert any(
         error.startswith("LANGFUSE_TRACING_ENVIRONMENT must be")
         for error in preflight.validate(values)
+    )
+
+
+
+def test_egress_allowlist_requires_core_provider_hosts() -> None:
+    values = _valid_values()
+    values["EGRESS_PROXY_ALLOWED_HOSTS"] = "api.anthropic.com"
+    errors = preflight.validate(values)
+    assert any(
+        error.startswith("EGRESS_PROXY_ALLOWED_HOSTS is missing required provider hosts:")
+        for error in errors
+    )
+    assert (
+        "EGRESS_PROXY_ALLOWED_HOSTS is missing required provider hosts: "
+        "api.openai.com, requests.production.judit.io, tracking.production.judit.io"
+        in errors
+    )
+
+
+def test_egress_allowlist_rejects_wildcards_and_ip_literals() -> None:
+    values = _valid_values()
+    values["EGRESS_PROXY_ALLOWED_HOSTS"] = "*.example.com"
+    assert (
+        "EGRESS_PROXY_ALLOWED_HOSTS contains an invalid hostname"
+        in preflight.validate(values)
+    )
+
+    values["EGRESS_PROXY_ALLOWED_HOSTS"] = "127.0.0.1"
+    assert (
+        "EGRESS_PROXY_ALLOWED_HOSTS must contain DNS hostnames, not IP addresses"
+        in preflight.validate(values)
+    )
+
+
+def test_legacy_embedding_requires_openai_host_in_egress_allowlist() -> None:
+    values = _valid_values()
+    values["EGRESS_PROXY_ALLOWED_HOSTS"] = (
+        "api.anthropic.com,requests.production.judit.io,tracking.production.judit.io"
+    )
+    assert (
+        "EGRESS_PROXY_ALLOWED_HOSTS is missing required provider hosts: api.openai.com"
+        in preflight.validate(values)
+    )
+
+
+def test_local_bge_does_not_require_openai_egress() -> None:
+    values = _valid_values()
+    _enable_bge(values)
+    values["EGRESS_PROXY_ALLOWED_HOSTS"] = (
+        "api.anthropic.com,requests.production.judit.io,tracking.production.judit.io"
+    )
+    assert preflight.validate(values) == []
+
+
+def test_enabled_langfuse_host_must_be_explicitly_allowlisted() -> None:
+    values = _valid_values()
+    _enable_langfuse(values)
+    values["EGRESS_PROXY_ALLOWED_HOSTS"] = (
+        "api.anthropic.com,api.openai.com,"
+        "requests.production.judit.io,tracking.production.judit.io"
+    )
+    assert (
+        "EGRESS_PROXY_ALLOWED_HOSTS is missing required provider hosts: "
+        "langfuse.example.internal"
+        in preflight.validate(values)
     )

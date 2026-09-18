@@ -268,6 +268,21 @@ def deployment_invariant_violations() -> list[str]:
         errors.append("Docker build must install Python dependencies under the constraints lock")
     if "IMMUTABLE_IMAGE_RE" not in validator_text:
         errors.append("production compose validator must enforce immutable image references")
+    for required in (
+        "read_only: true",
+        "cap_drop: [ALL]",
+        "no-new-privileges:true",
+        "provider-gateway:",
+        "EGRESS_PROXY_ALLOWED_HOSTS",
+    ):
+        if required not in compose_text:
+            errors.append(f"production compose missing runtime/egress invariant: {required}")
+    if "_validate_runtime_confinement" not in validator_text:
+        errors.append("production compose validator must enforce runtime confinement")
+    if "_validate_egress_topology" not in validator_text:
+        errors.append("production compose validator must enforce egress topology")
+    if "seccomp=unconfined" not in validator_text:
+        errors.append("production compose validator must reject seccomp opt-out")
     return errors
 
 

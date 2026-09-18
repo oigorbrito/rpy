@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import os
 import re
@@ -25,6 +26,7 @@ REQUIRED_KEYS = (
     "JUDIT_WEBHOOK_TOKEN",
     "RPY_BEARER_TOKENS",
     "RPY_OPS_TOKEN",
+    "EGRESS_PROXY_ALLOWED_HOSTS",
 )
 PLACEHOLDER_MARKERS = ("replace-with", "<64-hex-digest>", "example")
 BGE_MODEL = "BAAI/bge-m3"
@@ -32,6 +34,12 @@ COHERE_MODEL = "embed-v4.0"
 BGE_RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
 COHERE_RERANKER_MODEL = "rerank-v4.0-pro"
 LANGFUSE_ENVIRONMENT_RE = re.compile(r"^(?!langfuse)[a-z0-9_-]{1,40}$")
+EGRESS_HOST_RE = re.compile(r"^[a-z0-9.-]{1,253}$")
+_BASE_EGRESS_HOSTS = {
+    "api.anthropic.com",
+    "requests.production.judit.io",
+    "tracking.production.judit.io",
+}
 
 
 def _load_env_file(path: Path) -> dict[str, str]:
@@ -51,6 +59,88 @@ def _load_env_file(path: Path) -> dict[str, str]:
             value = value[1:-1]
         values[key] = value
     return values
+
+
+
+def _url_hostname(value: str, key: str) -> str:
+    parsed = urlsplit(value)
+    if parsed.scheme != "https" or not parsed.hostname:
+        raise ValueError(f"{key} must be an HTTPS URL with a hostname")
+    return parsed.hostname.rstrip(".").casefold()
+
+
+def _parse_egress_hosts(value: str) -> set[str]:
+    hosts: set[str] = set()
+    for raw in value.split(","):
+        host = raw.strip().rstrip(".").casefold()
+        if not host:
+            continue
+        try:
+            canonical = host.encode("idna").decode("ascii")
+        except UnicodeError as exc:
+            raise ValueError("EGRESS_PROXY_ALLOWED_HOSTS contains an invalid hostname") from exc
+        if not EGRESS_HOST_RE.fullmatch(canonical) or ".." in canonical or "*" in canonical:
+            raise ValueError("EGRESS_PROXY_ALLOWED_HOSTS contains an invalid hostname")
+        try:
+            ipaddress.ip_address(canonical)
+        except ValueError:
+            pass
+        else:
+            raise ValueError("EGRESS_PROXY_ALLOWED_HOSTS must contain DNS hostnames, not IP addresses")
+        hosts.add(canonical)
+    if not hosts:
+        raise ValueError("EGRESS_PROXY_ALLOWED_HOSTS must contain at least one hostname")
+    return hosts
+
+
+def _required_egress_hosts(values: dict[str, str]) -> set[str]:
+    required = set(_BASE_EGRESS_HOSTS)
+
+    runtime_enabled = _bool_value(values, "EMBEDDING_SPACE_RUNTIME_ENABLED", False)
+    if not runtime_enabled:
+        required.add("api.openai.com")
+    elif str(values.get("EMBEDDING_PROVIDER") or "bge").strip().casefold() == "cohere":
+        required.add("api.cohere.com")
+
+    if (
+        _bool_value(values, "RERANKER_ENABLED", False)
+        and str(values.get("RERANKER_PROVIDER") or "bge").strip().casefold() == "cohere"
+    ):
+        required.add("api.cohere.com")
+
+    if _bool_value(values, "JUDIT_ATTACHMENTS_ENABLED", False):
+        required.add("lawsuits.production.judit.io")
+
+    if _bool_value(values, "DATAJUD_ENABLED", False):
+        required.add(
+            _url_hostname(
+                str(values.get("DATAJUD_BASE_URL") or "https://api-publica.datajud.cnj.jus.br"),
+                "DATAJUD_BASE_URL",
+            )
+        )
+
+    if _bool_value(values, "LANGFUSE_ENABLED", False):
+        required.add(_url_hostname(str(values.get("LANGFUSE_BASE_URL") or ""), "LANGFUSE_BASE_URL"))
+
+    return required
+
+
+def _validate_egress_allowlist(values: dict[str, str], errors: list[str]) -> None:
+    raw = str(values.get("EGRESS_PROXY_ALLOWED_HOSTS") or "").strip()
+    if not raw:
+        return
+    try:
+        allowed = _parse_egress_hosts(raw)
+        required = _required_egress_hosts(values)
+    except ValueError as exc:
+        errors.append(str(exc))
+        return
+    missing = sorted(required - allowed)
+    if missing:
+        errors.append(
+            "EGRESS_PROXY_ALLOWED_HOSTS is missing required provider hosts: "
+            + ", ".join(missing)
+        )
 
 
 def _database_identity(value: str, key: str) -> tuple[str, str, int | None, str]:
@@ -261,6 +351,7 @@ def validate(values: dict[str, str]) -> list[str]:
     _validate_reranker(values, errors)
     _validate_datajud(values, errors)
     _validate_langfuse(values, errors)
+    _validate_egress_allowlist(values, errors)
 
     image = values.get("RPY_IMAGE", "").strip()
     if image and not DIGEST_RE.fullmatch(image):
