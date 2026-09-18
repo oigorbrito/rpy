@@ -9,7 +9,7 @@ WORKDIR /app
 COPY pyproject.toml ./
 COPY requirements ./requirements
 COPY app ./app
-RUN python -m pip install pip==26.2.1 \
+RUN python -m pip install pip==26.2.1 setuptools==80.9.0 \
     && python -m pip install --constraint requirements/constraints.txt '.[observability]'
 
 COPY data ./data
