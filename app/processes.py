@@ -169,6 +169,7 @@ async def preferred_judit_version(
                pv.process_id,
                pv.source_cached_response,
                pv.source_payload,
+               pv.finalized,
                p.code
         FROM process_versions pv
         JOIN processes p ON p.id = pv.process_id
