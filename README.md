@@ -91,8 +91,7 @@ python -m pip install --constraint requirements/constraints.txt -e '.[dev]'
 Checks rápidos:
 
 ```bash
-python scripts/migration_harness.py
-python scripts/release_harness.py
+python scripts/project_harness.py
 pytest -q tests --ignore=tests/integration
 node tests/frontend_behavior_test.mjs
 ```
@@ -194,8 +193,7 @@ Não publique vulnerabilidades, credenciais ou dados processuais sensíveis em i
 O GitHub Actions executa:
 
 - validação do contrato de Compose de produção;
-- migration harness;
-- release metadata/entrypoint harness;
+- project harness (que agrega os guardrails de migration/release e verifica o wiring das demais evidências);
 - testes unitários;
 - harness comportamental do frontend;
 - smoke da imagem;
@@ -216,7 +214,8 @@ Documentação operacional:
 - `docs/deployment/backup-restore.md` — backup e restore drill;
 - `docs/release/offline-release-candidate.md` — Definition of Done/evidências;
 - `docs/release/v0.1.0.md` — release notes;
-- `docs/engineering/empirical-engineering.md` — política de evidência técnica.
+- `docs/engineering/empirical-engineering.md` — política de evidência técnica;
+- `docs/engineering/project-harness.md` — contrato executável do harness do projeto.
 
 ## Estrutura do repositório
 
