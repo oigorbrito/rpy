@@ -6,11 +6,24 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# Apply the current Debian security updates before Python dependencies are installed.
+# The resulting release identity is the immutable image digest produced and scanned
+# by trusted CI; deployment never rebuilds on the target host.
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY pyproject.toml ./
 COPY requirements ./requirements
 COPY app ./app
-RUN python -m pip install pip==26.2.1 \
-    && python -m pip install --constraint requirements/constraints.txt '.[observability]'
+RUN python -m pip install pip==26.2.1 setuptools==80.9.0 \
+    && python -m pip install --constraint requirements/constraints.txt '.[observability]' \
+    && rm -rf /usr/local/lib/python3.12/site-packages/pip \
+              /usr/local/lib/python3.12/site-packages/pip-*.dist-info \
+              /usr/local/lib/python3.12/site-packages/setuptools \
+              /usr/local/lib/python3.12/site-packages/setuptools-*.dist-info \
+              /usr/local/lib/python3.12/site-packages/_distutils_hack \
+    && rm -f /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.12
 
 COPY data ./data
 COPY sql ./sql

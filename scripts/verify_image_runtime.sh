@@ -11,6 +11,7 @@ image=$1
 # Exercise the exact runtime artifact, not the checkout. This catches missing
 # packaged/static files and accidental root execution before publication.
 docker run --rm --entrypoint python "$image" - <<'PY'
+import importlib.util
 import os
 from pathlib import Path
 
@@ -27,6 +28,10 @@ if missing:
 
 if os.getuid() == 0:
     raise SystemExit("image runtime user must not be root")
+
+for package_manager in ("pip", "setuptools"):
+    if importlib.util.find_spec(package_manager) is not None:
+        raise SystemExit(f"{package_manager} must not ship in the production runtime image")
 PY
 
 echo "image runtime contract: ok"
