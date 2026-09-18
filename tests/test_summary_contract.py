@@ -68,3 +68,13 @@ def test_iasummary_panorama_is_evidence_bound() -> None:
     assert "Informe o volume total de movimentos usando step_count" in prompt
     assert "não trate o primeiro movimento como distribuição" in prompt
     assert "nem deduza um próximo evento por expectativa jurídica" in prompt
+
+
+def test_iasummary_plain_language_explanations_are_glossary_bound() -> None:
+    prompt = PROCESS_SUMMARY_SYSTEM_PROMPT
+
+    assert "Quando tpu_glossary estiver presente" in prompt
+    assert "usando somente name e definition" in prompt
+    assert "Se não houver definição correspondente em tpu_glossary" in prompt
+    assert "em vez de usar conhecimento externo" in prompt
+    assert "Não cite internamente tpu_version, publisher, source_ref ou definition_sha256" in prompt
