@@ -67,7 +67,7 @@ _AMOUNT_CLAIM_RE = re.compile(
     r"^(?:[-*]\s*)?(?P<label>Valor(?: da causa)?)\s*:\s*(?P<value>.+?)\s*$",
     re.IGNORECASE | re.MULTILINE,
 )
-_URL_RE = re.compile(r"https?://[^\\s)>\\]]+", re.IGNORECASE)
+_URL_RE = re.compile(r"https?://[^\s)>\]]+", re.IGNORECASE)
 _META_OUTPUT_MARKERS = (
     "system prompt",
     "prompt do sistema",
