@@ -1,6 +1,6 @@
 # Rpy
 
-Rpy é um serviço de RAG para consulta e resumo processual em Python/FastAPI, PostgreSQL 16 e pgvector. O foco do `v0.1.0` é um caminho operacional pequeno, auditável e reproduzível, com fila PostgreSQL, multitenancy, sigilo provider-free e validação offline sem credenciais pagas.
+Rpy é um serviço de RAG para consulta e resumo processual em Python/FastAPI, PostgreSQL 16 e pgvector. O release histórico `v0.1.0` estabeleceu o primeiro caminho offline qualificado; o `main` atual contém trabalho posterior e está sendo refinado para o próximo release, cujo identificador permanece `TBD`.
 
 ## Estado do projeto
 
@@ -212,9 +212,11 @@ Documentação operacional:
 - `docs/deployment/local-offline.md` — validação local provider-free;
 - `docs/deployment/production.md` — topologia e deployment;
 - `docs/deployment/backup-restore.md` — backup e restore drill;
-- `docs/release/offline-release-candidate.md` — Definition of Done/evidências;
+- `docs/release/next-release.md` — readiness do próximo release;
+- `docs/release/versioning.md` — política de identidade/versionamento;
+- `docs/release/offline-release-candidate.md` — evidência histórica do `v0.1.0`;
 - `docs/release/provider-acceptance.md` — aceitação controlada de providers/artifacts reais;
-- `docs/release/v0.1.0.md` — release notes;
+- `docs/release/v0.1.0.md` — release notes históricas;
 - `docs/engineering/empirical-engineering.md` — política de evidência técnica;
 - `docs/engineering/project-harness.md` — contrato executável do harness do projeto.
 

@@ -25,6 +25,8 @@ def main() -> int:
     release_notes = ROOT / "docs" / "release" / f"{tag}.md"
     candidate = ROOT / "docs" / "release" / "offline-release-candidate.md"
     provider_acceptance = ROOT / "docs" / "release" / "provider-acceptance.md"
+    versioning = ROOT / "docs" / "release" / "versioning.md"
+    next_release = ROOT / "docs" / "release" / "next-release.md"
     readme = ROOT / "README.md"
     license_file = ROOT / "LICENSE"
     notice_file = ROOT / "NOTICE"
@@ -35,6 +37,8 @@ def main() -> int:
         release_notes,
         candidate,
         provider_acceptance,
+        versioning,
+        next_release,
         readme,
         license_file,
         notice_file,
@@ -51,6 +55,8 @@ def main() -> int:
         release_text = read(release_notes)
         candidate_text = read(candidate)
         provider_acceptance_text = read(provider_acceptance)
+        versioning_text = read(versioning)
+        next_release_text = read(next_release)
         readme_text = read(readme)
         license_text = read(license_file)
         notice_text = read(notice_file)
@@ -73,6 +79,21 @@ def main() -> int:
         ):
             if marker not in provider_acceptance_text:
                 errors.append(f"provider acceptance runbook missing required section: {marker}")
+
+        for marker in (
+            "The historical first release is:",
+            "Do not move, recreate or retarget `v0.1.0`.",
+            "the next release identifier is `TBD`",
+        ):
+            if marker not in versioning_text:
+                errors.append(f"release versioning policy missing required marker: {marker}")
+        for marker in (
+            "**Release version: TBD**",
+            "## Release blockers vs activation blockers",
+            "create a **new** tag; never retarget `v0.1.0`.",
+        ):
+            if marker not in next_release_text:
+                errors.append(f"next release readiness missing required marker: {marker}")
 
         for command in ("./scripts/smoke_offline.sh", ".\\scripts\\smoke_offline.ps1"):
             if command not in readme_text:
@@ -105,7 +126,7 @@ def main() -> int:
         return 1
 
     print(
-        f"Release harness: OK (version={version}, tag={tag}, license=MIT, canonical smoke entrypoints verified)"
+        f"Release harness: OK (historical_version={version}, historical_tag={tag}, license=MIT, next_release=TBD, canonical smoke entrypoints verified)"
     )
     return 0
 
