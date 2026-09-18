@@ -260,7 +260,7 @@ Nenhuma divergência objetiva identificada.
             validation = decode_json_object(summary["validation"], label="summary validation")
             assert validation["passed"] is True
             assert summary["model"] == "claude-sonnet-5"
-            assert summary["prompt_version"] == "process-summary-v3"
+            assert summary["prompt_version"] == "process-summary-v4"
 
             job_states = await conn.fetch(
                 """
