@@ -21,8 +21,8 @@ async def test_bge_scorer_uses_query_passage_pairs_and_normalized_scores(monkeyp
     fake = _FakeReranker([0.2, 0.9])
     loads = []
 
-    def fake_load(*, model, use_fp16):
-        loads.append((model, use_fp16))
+    def fake_load(*, model_source, use_fp16):
+        loads.append((model_source, use_fp16))
         return fake
 
     monkeypatch.setattr(bge, "_load_flag_reranker", fake_load)
@@ -85,4 +85,33 @@ def test_missing_optional_dependency_has_actionable_error(monkeypatch) -> None:
 
     monkeypatch.setattr("builtins.__import__", fake_import)
     with pytest.raises(RuntimeError, match=r"rpy\[reranker\]"):
-        bge._load_flag_reranker(model="BAAI/bge-reranker-v2-m3", use_fp16=False)
+        bge._load_flag_reranker(model_source="BAAI/bge-reranker-v2-m3", use_fp16=False)
+
+
+def test_local_artifact_path_is_used_without_changing_model_identity(tmp_path) -> None:
+    artifact = tmp_path / "reranker"
+    artifact.mkdir()
+
+    scorer = bge.BGERerankerScorer(
+        model="BAAI/bge-reranker-v2-m3",
+        artifact_path=str(artifact),
+    )
+
+    assert scorer.model == "BAAI/bge-reranker-v2-m3"
+    assert scorer.artifact_path == str(artifact)
+    assert scorer.model_source == str(artifact)
+
+
+def test_missing_local_artifact_path_is_rejected(tmp_path) -> None:
+    missing = tmp_path / "missing"
+
+    with pytest.raises(RuntimeError, match="BGE_RERANKER_PATH does not exist"):
+        bge.BGERerankerScorer(artifact_path=str(missing))
+
+
+def test_non_directory_local_artifact_path_is_rejected(tmp_path) -> None:
+    artifact = tmp_path / "model.bin"
+    artifact.write_text("x", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="BGE_RERANKER_PATH must be a directory"):
+        bge.BGERerankerScorer(artifact_path=str(artifact))
