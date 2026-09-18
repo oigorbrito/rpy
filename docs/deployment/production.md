@@ -8,7 +8,7 @@ Production does not build application source on the deployment host. `RPY_IMAGE`
 
 `ghcr.io/oigorbrito/rpy@sha256:<64-hex-digest>`
 
-The same exact digest is used by `migrate`, `api`, both workers and `scheduler`. Tags such as `latest`, `main`, semantic-version tags and commit-SHA tags are useful aliases for humans and release automation, but are not accepted as the production deployment identity because a tag can be moved.
+The same exact digest is used by `migrate`, `api`, the egress proxy, both workers and `scheduler`. Tags such as `latest`, `main`, semantic-version tags and commit-SHA tags are useful aliases for humans and release automation, but are not accepted as the production deployment identity because a tag can be moved.
 
 Build and publish the image once in trusted CI. Record the resulting registry digest as release metadata. Promote that digest unchanged through environments; do not rebuild for staging or production. This keeps migration code and runtime code on the same artifact revision.
 
@@ -31,17 +31,57 @@ The minimum supported topology is:
 - two worker processes consuming the PostgreSQL queue;
 - exactly one scheduler process;
 - one migration job per deploy;
+- one allowlisted egress proxy for provider-bound HTTPS traffic;
 - PostgreSQL 16 with pgvector.
 
 The API is intentionally configured with one Uvicorn worker. Horizontal API scaling, when needed, should happen by adding API replicas behind the ingress rather than by increasing the in-container Uvicorn worker count. Workers may scale horizontally because queue claims are fenced through PostgreSQL. The scheduler must remain singleton.
 
 ## Network boundary
 
-PostgreSQL does not publish a host port in the production compose file and only joins the internal `backend` network. API and workers join both `backend` and `egress` so they can reach PostgreSQL and external services. The scheduler remains backend-only.
+PostgreSQL does not publish a host port and only joins the internal `backend` network. `migrate`, `api` and `scheduler` are also backend-only and therefore have no Docker route to the external network.
+
+Workers join `backend` plus a second internal network named `provider-gateway`. They do **not** join `egress`. HTTPS provider clients receive `HTTPS_PROXY=http://egress-proxy:3128`; the `egress-proxy` service is the only application service attached to both `provider-gateway` and the externally routed `egress` network. The proxy accepts only HTTP `CONNECT` to port 443 and only for exact DNS names in `EGRESS_PROXY_ALLOWED_HOSTS`; IP literals, wildcard hostnames, plain HTTP forwarding and non-443 ports are rejected.
+
+This topology makes the network route itself a control: a compromised worker cannot bypass the proxy by opening a direct internet socket because neither of its networks has an external gateway. The proxy has no database connection and receives no provider/API credentials. It is a transport gateway, not an application credential broker.
+
+The minimum allowlist depends on activated features. Anthropic plus Judit request/tracking hosts are always required. The legacy OpenAI embedding path additionally requires `api.openai.com`. Cohere requires `api.cohere.com` only when external embedding or reranking is explicitly enabled. Judit attachment download additionally requires `lawsuits.production.judit.io`. Enabled DataJud and Langfuse require the exact hostnames from their configured HTTPS base URLs. `scripts/validate_deploy_env.py` checks these relationships before deployment.
+
+Adding a new provider hostname is an explicit security change:
+
+1. verify the provider integration and legal/product authorization;
+2. add only the exact DNS hostname to `EGRESS_PROXY_ALLOWED_HOSTS` in the environment-specific secret/config source;
+3. update preflight logic/tests when the hostname is required by a repository-supported feature;
+4. run deploy preflight and production Compose validation;
+5. do not use wildcards or IP-address allowlists to avoid DNS-name review.
 
 The API publishes port 8000 on `127.0.0.1` by default. Put a TLS-terminating reverse proxy or ingress in front of it. If the ingress runs on a different host/network, change `RPY_API_BIND_ADDRESS` deliberately and apply an equivalent network policy/firewall rule instead of exposing PostgreSQL.
 
 The ingress should enforce a request-body limit no greater than `JUDIT_WEBHOOK_MAX_BODY_BYTES` and should preserve the application's `/health` and `/ready` behavior. `/health` is liveness-only; `/ready` verifies PostgreSQL reachability.
+
+This follows Docker Compose's documented `internal: true` network isolation model and OWASP SSRF guidance to enforce allowed outbound routes at the network layer in addition to application validation:
+- https://docs.docker.com/reference/compose-file/networks/
+- https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html
+
+## Runtime confinement
+
+All application-image services (`migrate`, `api`, `egress-proxy`, both workers and `scheduler`) run as UID/GID `10001:10001` with a read-only root filesystem, `cap_drop: [ALL]`, `no-new-privileges:true`, and an explicit `/tmp` tmpfs mounted with `noexec,nosuid,nodev`. No application service may add Linux capabilities, use privileged mode, use host networking, or opt out of Docker's default seccomp policy.
+
+Docker documents the default seccomp profile as a moderately protective allowlist and recommends not changing it without a concrete compatibility requirement. Rpy therefore relies on Docker's built-in/default seccomp profile and mechanically rejects `seccomp=unconfined` rather than carrying a custom profile without measured need:
+- https://docs.docker.com/engine/security/seccomp/
+
+The Compose contract also sets CPU, memory and PID ceilings. These are safety ceilings rather than performance SLOs:
+
+| Service | CPU | Memory | PIDs |
+|---|---:|---:|---:|
+| `migrate` | 1.0 | 512 MiB | 128 |
+| `api` | 1.0 | 512 MiB | 128 |
+| `egress-proxy` | 0.5 | 256 MiB | 128 |
+| each worker | 2.0 | 8 GiB | 256 |
+| `scheduler` | 0.5 | 256 MiB | 64 |
+
+The worker memory ceiling is intentionally conservative because one worker can load local embedding and reranker models in the same process. The repository does not claim that 8 GiB is an empirically optimal production allocation. Before reducing the ceiling—or increasing it in response to real model/runtime observations—capture RSS/CPU/PID measurements under the selected BGE/reranker configuration and change the Compose contract together with its validator/tests.
+
+Writable model caches are redirected to tmpfs (`HF_HOME=/tmp/huggingface`, `XDG_CACHE_HOME=/tmp/.cache`). Production BGE artifacts themselves remain pre-provisioned at the configured read-only path; runtime model downloads are not part of the production contract.
 
 ## Browser security headers
 
@@ -177,7 +217,7 @@ Langfuse remains fail-open: tracing failures do not decide whether a summary is 
 6. Start PostgreSQL or verify the managed PostgreSQL endpoint is healthy.
 7. Run the one-shot `migrate` service to completion using the same `RPY_IMAGE` digest. This applies migrations and provisions/rotates the runtime roles.
 8. Reindex into the selected isolated embedding space before switching production retrieval to it.
-9. Start API, both workers, and the singleton scheduler using that digest.
+9. Start the egress proxy, API, both workers, and the singleton scheduler using that digest.
 10. Route traffic only after `/ready` succeeds through the TLS-terminating reverse proxy or ingress.
 
 A deploy must stop if preflight, compose validation or migrations fail. Do not start a second scheduler to compensate for scheduler failure; restart or replace the singleton instance instead.
@@ -198,6 +238,7 @@ The deploy-environment preflight rejects configuration that:
 - selects Cohere reranking without separate `ALLOW_EXTERNAL_RERANKER=true` authorization and `COHERE_API_KEY`;
 - enables DataJud without `DATAJUD_AUTHORIZED_USE=true`, `DATAJUD_API_KEY`, HTTPS base URL and a valid timeout;
 - enables Langfuse without credentials, an HTTPS base URL or a valid tracing environment;
+- omits a required provider hostname from `EGRESS_PROXY_ALLOWED_HOSTS`, or uses wildcard/IP-literal entries;
 - reuses a PostgreSQL login identity across migration/API/worker/scheduler/backup responsibilities;
 - points the role-specific URLs at different PostgreSQL databases;
 - supplies an invalid bearer-token-to-tenant mapping.
@@ -208,7 +249,10 @@ The compose validator rejects changes that:
 - use a mutable application image tag instead of a SHA-256 registry digest;
 - use different application digests for migration/API/workers/scheduler;
 - expose PostgreSQL on a host port;
-- remove the internal backend network;
+- remove the internal backend/provider-gateway network isolation or give workers/API a direct egress route;
+- remove read-only rootfs, capability dropping, no-new-privileges, hardened tmpfs or CPU/memory/PID ceilings;
+- disable Docker seccomp confinement or add privileged/capability escalation;
+- give the egress proxy provider/database secrets or allow workers to bypass it;
 - change the default API bind away from loopback;
 - change the explicit API worker count;
 - alter the two-worker / one-scheduler topology;
