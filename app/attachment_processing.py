@@ -22,6 +22,8 @@ DEFAULT_ATTACHMENT_CHUNK_CHARS = 4_000
 MIN_ATTACHMENT_CHUNK_CHARS = 256
 DEFAULT_ATTACHMENT_OCR_TIMEOUT_SECONDS = 30
 DEFAULT_ATTACHMENT_OCR_LANGUAGE = "por"
+DEFAULT_ATTACHMENT_PDF_OCR_SCALE = 2.0
+DEFAULT_ATTACHMENT_PDF_OCR_MAX_PAGES = 100
 OCR_IMAGE_CONTENT_TYPES = ("image/png", "image/jpeg")
 
 FailureStatus = Literal["corrupt", "unreadable"]
@@ -46,6 +48,8 @@ class AttachmentOCRConfig:
     binary: str = "tesseract"
     language: str = DEFAULT_ATTACHMENT_OCR_LANGUAGE
     timeout_seconds: int = DEFAULT_ATTACHMENT_OCR_TIMEOUT_SECONDS
+    pdf_scale: float = DEFAULT_ATTACHMENT_PDF_OCR_SCALE
+    pdf_max_pages: int = DEFAULT_ATTACHMENT_PDF_OCR_MAX_PAGES
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -60,6 +64,19 @@ def _env_bool(name: str, default: bool = False) -> bool:
     raise RuntimeError(f"{name} must be a boolean")
 
 
+def _positive_env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be numeric") from exc
+    if value <= 0:
+        raise RuntimeError(f"{name} must be greater than zero")
+    return value
+
+
 def attachment_ocr_config() -> AttachmentOCRConfig:
     enabled = _env_bool("ATTACHMENT_OCR_ENABLED", False)
     binary = str(os.getenv("ATTACHMENT_OCR_BINARY") or "tesseract").strip()
@@ -70,6 +87,14 @@ def attachment_ocr_config() -> AttachmentOCRConfig:
         "ATTACHMENT_OCR_TIMEOUT_SECONDS",
         DEFAULT_ATTACHMENT_OCR_TIMEOUT_SECONDS,
     )
+    pdf_scale = _positive_env_float(
+        "ATTACHMENT_PDF_OCR_SCALE",
+        DEFAULT_ATTACHMENT_PDF_OCR_SCALE,
+    )
+    pdf_max_pages = _positive_env_int(
+        "ATTACHMENT_PDF_OCR_MAX_PAGES",
+        DEFAULT_ATTACHMENT_PDF_OCR_MAX_PAGES,
+    )
     if enabled and not binary:
         raise RuntimeError("ATTACHMENT_OCR_BINARY is required when OCR is enabled")
     if enabled and not language:
@@ -79,6 +104,8 @@ def attachment_ocr_config() -> AttachmentOCRConfig:
         binary=binary,
         language=language,
         timeout_seconds=timeout_seconds,
+        pdf_scale=pdf_scale,
+        pdf_max_pages=pdf_max_pages,
     )
 
 
@@ -409,6 +436,124 @@ async def parse_image_attachment_ocr(
     )
 
 
+def _render_pdf_pages_for_ocr(
+    data: bytes,
+    *,
+    scale: float,
+    max_pages: int,
+) -> list[tuple[int, bytes]]:
+    try:
+        import pypdfium2 as pdfium
+    except ImportError as exc:
+        raise AttachmentProcessingError(
+            status="unreadable",
+            error_code="pdf_ocr_rasterizer_unavailable",
+        ) from exc
+
+    document = None
+    try:
+        document = pdfium.PdfDocument(data)
+        page_count = len(document)
+        if page_count > max_pages:
+            raise AttachmentProcessingError(
+                status="unreadable",
+                error_code="pdf_ocr_too_many_pages",
+            )
+        rendered: list[tuple[int, bytes]] = []
+        for page_index in range(page_count):
+            page = document[page_index]
+            bitmap = None
+            image = None
+            try:
+                bitmap = page.render(scale=scale)
+                image = bitmap.to_pil()
+                buffer = io.BytesIO()
+                image.save(buffer, format="PNG")
+                rendered.append((page_index + 1, buffer.getvalue()))
+            finally:
+                if image is not None and hasattr(image, "close"):
+                    image.close()
+                if bitmap is not None and hasattr(bitmap, "close"):
+                    bitmap.close()
+                if hasattr(page, "close"):
+                    page.close()
+        return rendered
+    except AttachmentProcessingError:
+        raise
+    except Exception as exc:
+        raise AttachmentProcessingError(
+            status="unreadable",
+            error_code="pdf_ocr_rasterize_failed",
+        ) from exc
+    finally:
+        if document is not None and hasattr(document, "close"):
+            document.close()
+
+
+async def parse_pdf_attachment_ocr(
+    data: bytes,
+    *,
+    content_type: str,
+    limits: AttachmentProcessingLimits | None = None,
+    config: AttachmentOCRConfig | None = None,
+) -> list[AttachmentChunkInput]:
+    effective_limits = limits or attachment_processing_limits()
+    effective_config = config or attachment_ocr_config()
+    _validate_common_payload(
+        data,
+        content_type=content_type,
+        expected_content_type="application/pdf",
+        limits=effective_limits,
+    )
+    if not data.lstrip().startswith(b"%PDF-"):
+        raise AttachmentProcessingError(
+            status="corrupt",
+            error_code="invalid_pdf_header",
+        )
+    if not effective_config.enabled:
+        raise AttachmentProcessingError(
+            status="unreadable",
+            error_code="ocr_disabled",
+        )
+
+    pages = await asyncio.to_thread(
+        _render_pdf_pages_for_ocr,
+        data,
+        scale=effective_config.pdf_scale,
+        max_pages=effective_config.pdf_max_pages,
+    )
+    chunks: list[AttachmentChunkInput] = []
+    for page_number, png_bytes in pages:
+        text = await asyncio.to_thread(
+            _run_tesseract_ocr,
+            png_bytes,
+            suffix=".png",
+            config=effective_config,
+        )
+        normalized = text.replace("\r\n", "\n").replace("\r", "\n").strip()
+        if not normalized:
+            continue
+        for chunk in chunk_attachment_text(
+            normalized,
+            chunk_chars=effective_limits.chunk_chars,
+        ):
+            chunks.append(
+                AttachmentChunkInput(
+                    text=chunk.text,
+                    page_start=page_number,
+                    page_end=page_number,
+                    char_start=chunk.char_start,
+                    char_end=chunk.char_end,
+                )
+            )
+    if not chunks:
+        raise AttachmentProcessingError(
+            status="unreadable",
+            error_code="ocr_no_text",
+        )
+    return chunks
+
+
 def parse_attachment(
     data: bytes,
     *,
@@ -440,12 +585,32 @@ async def process_attachment_bytes(
     effective_limits = limits or attachment_processing_limits()
     digest = hashlib.sha256(data).hexdigest()
     try:
-        if normalize_content_type(content_type) in OCR_IMAGE_CONTENT_TYPES:
+        normalized_type = normalize_content_type(content_type)
+        if normalized_type in OCR_IMAGE_CONTENT_TYPES:
             chunks = await parse_image_attachment_ocr(
                 data,
                 content_type=content_type,
                 limits=effective_limits,
             )
+        elif normalized_type == "application/pdf":
+            try:
+                chunks = parse_pdf_attachment(
+                    data,
+                    content_type=content_type,
+                    limits=effective_limits,
+                )
+            except AttachmentProcessingError as exc:
+                if exc.error_code != "pdf_text_unavailable":
+                    raise
+                ocr_config = attachment_ocr_config()
+                if not ocr_config.enabled:
+                    raise
+                chunks = await parse_pdf_attachment_ocr(
+                    data,
+                    content_type=content_type,
+                    limits=effective_limits,
+                    config=ocr_config,
+                )
         else:
             chunks = parse_attachment(
                 data,

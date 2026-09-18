@@ -6,10 +6,13 @@ import pytest
 from pypdf import PdfWriter
 
 from app.attachment_processing import (
+    AttachmentOCRConfig,
     AttachmentProcessingError,
     AttachmentProcessingLimits,
     parse_attachment,
     parse_pdf_attachment,
+    parse_pdf_attachment_ocr,
+    process_attachment_bytes,
 )
 
 
@@ -109,3 +112,119 @@ def test_pdf_size_limit_is_checked_before_parse():
         )
     assert exc_info.value.error_code == "attachment_too_large"
     assert exc_info.value.status == "unreadable"
+
+
+
+@pytest.mark.asyncio
+async def test_textless_pdf_can_be_rasterized_for_local_ocr(monkeypatch):
+    from app import attachment_processing as processing
+
+    observed = []
+
+    def fake_ocr(data, *, suffix, config):
+        observed.append((suffix, data[:8], config.language))
+        return "Texto reconhecido da página"
+
+    monkeypatch.setattr(processing, "_run_tesseract_ocr", fake_ocr)
+    chunks = await parse_pdf_attachment_ocr(
+        _blank_pdf(),
+        content_type="application/pdf",
+        limits=AttachmentProcessingLimits(max_bytes=50_000, chunk_chars=256),
+        config=AttachmentOCRConfig(
+            enabled=True,
+            language="por",
+            pdf_scale=1.0,
+            pdf_max_pages=10,
+        ),
+    )
+
+    assert len(chunks) == 1
+    assert chunks[0].text == "Texto reconhecido da página"
+    assert chunks[0].page_start == chunks[0].page_end == 1
+    assert chunks[0].char_start == 0
+    assert chunks[0].char_end == len(chunks[0].text)
+    assert observed and observed[0][0] == ".png"
+    assert observed[0][1] == b"\x89PNG\r\n\x1a\n"
+    assert observed[0][2] == "por"
+
+
+@pytest.mark.asyncio
+async def test_pdf_ocr_page_limit_is_enforced_before_tesseract(monkeypatch):
+    from app import attachment_processing as processing
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=612, height=792)
+    writer.add_blank_page(width=612, height=792)
+    buffer = io.BytesIO()
+    writer.write(buffer)
+
+    monkeypatch.setattr(
+        processing,
+        "_run_tesseract_ocr",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not run")),
+    )
+    with pytest.raises(AttachmentProcessingError) as exc_info:
+        await parse_pdf_attachment_ocr(
+            buffer.getvalue(),
+            content_type="application/pdf",
+            limits=AttachmentProcessingLimits(max_bytes=50_000, chunk_chars=256),
+            config=AttachmentOCRConfig(
+                enabled=True,
+                pdf_scale=1.0,
+                pdf_max_pages=1,
+            ),
+        )
+
+    assert exc_info.value.status == "unreadable"
+    assert exc_info.value.error_code == "pdf_ocr_too_many_pages"
+
+
+@pytest.mark.asyncio
+async def test_pdf_ocr_empty_pages_are_unreadable(monkeypatch):
+    from app import attachment_processing as processing
+
+    monkeypatch.setattr(
+        processing,
+        "_run_tesseract_ocr",
+        lambda data, *, suffix, config: "  \n ",
+    )
+    with pytest.raises(AttachmentProcessingError) as exc_info:
+        await parse_pdf_attachment_ocr(
+            _blank_pdf(),
+            content_type="application/pdf",
+            limits=AttachmentProcessingLimits(max_bytes=50_000, chunk_chars=256),
+            config=AttachmentOCRConfig(enabled=True, pdf_scale=1.0),
+        )
+
+    assert exc_info.value.error_code == "ocr_no_text"
+
+
+
+@pytest.mark.asyncio
+async def test_textless_pdf_preserves_historical_status_when_ocr_disabled(monkeypatch):
+    from app import attachment_processing as processing
+
+    monkeypatch.delenv("ATTACHMENT_OCR_ENABLED", raising=False)
+
+    async def fake_upsert(conn, **kwargs):
+        assert kwargs["status"] == "unreadable"
+        assert kwargs["error_code"] == "pdf_text_unavailable"
+        return "synthetic-attachment-id"
+
+    monkeypatch.setattr(processing, "upsert_attachment_state", fake_upsert)
+    result = await process_attachment_bytes(
+        object(),
+        process_id=__import__("uuid").uuid4(),
+        version_id=__import__("uuid").uuid4(),
+        source_attachment_id="pdf-no-text",
+        content_type="application/pdf",
+        data=_blank_pdf(),
+        limits=AttachmentProcessingLimits(max_bytes=50_000, chunk_chars=256),
+    )
+
+    assert result == {
+        "attachment_id": "synthetic-attachment-id",
+        "status": "unreadable",
+        "error_code": "pdf_text_unavailable",
+        "chunk_count": 0,
+    }

@@ -27,6 +27,12 @@ dev = [
   "pytest-asyncio>=1.1,<2",
   "httpx>=0.28,<1",
   "ruff>=0.16,<0.17",
+  "pypdfium2>=5.13,<6",
+  "Pillow>=12.3,<13",
+]
+ocr = [
+  "pypdfium2>=5.13,<6",
+  "Pillow>=12.3,<13",
 ]
 reranker = [
   "FlagEmbedding>=1.4.2,<1.5",
