@@ -119,6 +119,8 @@ Reject or remove donor code that introduces any of the following without an expl
 - A second validation failure is persisted explicitly rather than silently accepted.
 - Secret proceedings use the deterministic local summary path and do not instantiate/call an external LLM provider.
 - Provider payloads must exclude data outside the documented boundary; logs must never contain prompt/process payloads or secrets.
+- Process, movement, attachment and glossary text are untrusted data, never generation instructions; dynamic source/validation content must not be able to close prompt delimiters or redefine the system contract.
+- Summary generation is a bounded document-generation surface, not a general chat surface; do not add free-form user instructions, model tools or network access to the generation request without a separate threat model and explicit product decision.
 
 ### Security, tenancy, audit, and retention
 

@@ -269,6 +269,19 @@ def _conditional_section_order_errors(text: str) -> list[str]:
     return []
 
 
+def _unexpected_heading_errors(
+    text: str,
+    allowed_headings: list[str] | tuple[str, ...],
+) -> list[str]:
+    allowed = {_normalize_party_name(title) for title in allowed_headings}
+    errors: list[str] = []
+    for match in _HEADING_RE.finditer(text):
+        title = match.group("title").strip()
+        if _normalize_party_name(title) not in allowed:
+            errors.append(f"summary heading is not allowed: {title}")
+    return errors
+
+
 def _decimal_amount(value: Any) -> Decimal | None:
     if value is None or isinstance(value, bool):
         return None
@@ -403,6 +416,7 @@ def validar(
     required_attention_phrases: list[str] | None = None,
     forbid_party_names: bool = False,
     require_document_title: bool = False,
+    allowed_headings: list[str] | tuple[str, ...] | None = None,
 ) -> ValidationResult:
     errors: list[str] = []
 
@@ -477,4 +491,6 @@ def validar(
     errors.extend(_jsx_errors(text))
     errors.extend(_core_section_order_errors(text))
     errors.extend(_conditional_section_order_errors(text))
+    if allowed_headings is not None:
+        errors.extend(_unexpected_heading_errors(text, allowed_headings))
     return ValidationResult(passed=not errors, errors=errors)
