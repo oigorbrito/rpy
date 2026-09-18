@@ -4,12 +4,13 @@ import vm from "node:vm";
 
 const ids = ["search-form","process-code","process-code-error","bearer-token","token-error","toggle-token","access-trigger","access-label","auth-panel","status","status-title","status-detail","retry-search","request-process","result","search-submit","copy-summary","new-search","action-feedback","result-code","result-class","result-court","result-updated","result-context","parties-list","subjects-list","header-data","movements-list","summary-body","summary-provenance"];
 class Element {
-  constructor(id) { this.id=id; this.hidden=false; this.disabled=false; this.value=""; this.textContent=""; this.children=[]; this.firstChild=null; this.listeners={}; this.classList={toggle(){}}; }
+  constructor(id) { this.id=id; this.hidden=false; this.disabled=false; this.value=""; this.textContent=""; this.children=[]; this.firstChild=null; this.listeners={}; this.focused=false; this.classList={toggle(){}}; }
   append(...nodes) { this.children.push(...nodes); this.firstChild=this.children[0] ?? null; }
   appendChild(node) { this.append(node); return node; }
   removeChild(node) { this.children=this.children.filter(n=>n!==node); this.firstChild=this.children[0] ?? null; }
   setAttribute() {}
   addEventListener(type, fn) { this.listeners[type]=fn; }
+  focus() { this.focused=true; }
   scrollIntoView() {}
   get renderedText() { return this.textContent + this.children.map(n=>n.renderedText ?? n.textContent ?? "").join(""); }
 }
@@ -24,7 +25,7 @@ function run(fetchResponses) {
 const ready = {ok:true,status:200,json:async()=>({code:"0000000-00.2026.8.21.0001",class_name:"Classe",court:"TJRS",summary_status:"available",summary:{markdown:"Resumo pronto"},parties:[],subjects:[],header:{},recent_steps:[{title:"Sentença",text:"Movimento público"}]})};
 const notFound = {ok:false,status:404,json:async()=>({detail:"not found"})};
 const serverError = {ok:false,status:500,json:async()=>({})};
-let ui=run([ready]); ui.elements["process-code"].value="0000000-00.2026.8.21.0001"; ui.elements["bearer-token"].value="token"; await ui.search(); assert.ok(ui.elements["summary-body"].renderedText.includes("Resumo pronto")); assert.ok(ui.elements["movements-list"].renderedText.includes("Movimento público"));
+let ui=run([ready]); ui.elements["process-code"].value="0000000-00.2026.8.21.0001"; ui.elements["bearer-token"].value="token"; await ui.search(); assert.ok(ui.elements["summary-body"].renderedText.includes("Resumo pronto")); assert.ok(ui.elements["movements-list"].renderedText.includes("Movimento público")); assert.equal(ui.elements["result-code"].focused,true);
 ui=run([{...ready,json:async()=>({...(await ready.json()),summary_status:"processing",summary:null})},ready]); ui.elements["process-code"].value="0000000-00.2026.8.21.0001"; ui.elements["bearer-token"].value="token"; await ui.search(); assert.ok(ui.elements["summary-body"].renderedText.includes("sendo preparado")); assert(ui.hasTimer()); await ui.tick(); assert.ok(ui.elements["summary-body"].renderedText.includes("Resumo pronto")); assert.equal(ui.hasTimer(),false);
 ui=run([ready,notFound]); ui.elements["process-code"].value="0000000-00.2026.8.21.0001"; ui.elements["bearer-token"].value="token"; await ui.search(); ui.elements["process-code"].value="0000000-00.2026.8.21.0002"; await ui.search(); assert.equal(ui.elements["result"].hidden,true); assert(!ui.elements["status-title"].textContent.includes("Resumo pronto"));
 ui=run([ready,serverError]); ui.elements["process-code"].value="0000000-00.2026.8.21.0001"; ui.elements["bearer-token"].value="token"; await ui.search(); await ui.search(); assert.ok(ui.elements["status-title"].textContent.includes("não pôde ser concluída")); assert.equal(ui.elements["result"].hidden,true);
