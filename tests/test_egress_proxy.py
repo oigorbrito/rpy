@@ -24,11 +24,11 @@ def test_allowlist_requires_dns_names(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.parametrize(
     ("target", "expected"),
     [
-        ("api.anthropic.com:443", ("api.anthropic.com", 443)),
-        ("API.ANTHROPIC.COM.:443", ("api.anthropic.com", 443)),
+        ("api.anthropic.com:443", "api.anthropic.com"),
+        ("API.ANTHROPIC.COM.:443", "api.anthropic.com"),
     ],
 )
-def test_connect_target_is_exact_tls_hostname(target: str, expected: tuple[str, int]) -> None:
+def test_connect_target_is_exact_tls_hostname(target: str, expected: str) -> None:
     assert egress_proxy._parse_connect_target(target) == expected
 
 
@@ -133,3 +133,42 @@ async def test_idle_handshake_times_out_and_closes_connection(
 
     assert b"400 Bad Request" in bytes(writer.data)
     assert writer.closed is True
+
+
+
+@pytest.mark.asyncio
+async def test_upstream_socket_uses_authorized_allowlist_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = (
+        b"CONNECT API.ANTHROPIC.COM.:443 HTTP/1.1\r\n"
+        b"Host: API.ANTHROPIC.COM.:443\r\n\r\n"
+    )
+    reader = asyncio.StreamReader()
+    reader.feed_data(request)
+    reader.feed_eof()
+    writer = _Writer()
+    observed: list[tuple[str, int]] = []
+
+    class _UpstreamWriter(_Writer):
+        def write_eof(self) -> None:
+            return None
+
+    upstream_reader = asyncio.StreamReader()
+    upstream_reader.feed_eof()
+    upstream_writer = _UpstreamWriter()
+
+    async def fake_connect(host: str, port: int):
+        observed.append((host, port))
+        return upstream_reader, upstream_writer
+
+    monkeypatch.setattr(asyncio, "open_connection", fake_connect)
+    await egress_proxy._handle_client(
+        reader,
+        writer,  # type: ignore[arg-type]
+        allowed_hosts=frozenset({"api.anthropic.com"}),
+        timeout_seconds=1.0,
+    )
+
+    assert observed == [("api.anthropic.com", 443)]
+    assert b"200 Connection Established" in bytes(writer.data)
