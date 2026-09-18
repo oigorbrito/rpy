@@ -186,6 +186,24 @@ def _jsx_errors(text: str) -> list[str]:
     return errors
 
 
+def _document_title_errors(text: str) -> list[str]:
+    canonical = "# Resumo do processo"
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    errors: list[str] = []
+    if not lines or lines[0] != canonical:
+        errors.append(f"summary must start with exact document title: {canonical}")
+
+    normalized_title = _normalize_party_name("Resumo do processo")
+    occurrences = 0
+    for line in lines:
+        match = re.match(r"^#{1,6}\s+(.+?)\s*$", line)
+        if match and _normalize_party_name(match.group(1)) == normalized_title:
+            occurrences += 1
+    if occurrences > 1:
+        errors.append("duplicate document title: Resumo do processo")
+    return errors
+
+
 def _core_section_order_errors(text: str) -> list[str]:
     canonical = {
         _normalize_party_name(title): (index, title)
@@ -314,8 +332,12 @@ def validar(
     require_attention_section: bool = False,
     required_attention_phrases: list[str] | None = None,
     forbid_party_names: bool = False,
+    require_document_title: bool = False,
 ) -> ValidationResult:
     errors: list[str] = []
+
+    if require_document_title:
+        errors.extend(_document_title_errors(text))
 
     if _CPF_CNPJ_RE.search(text):
         errors.append("possible unmasked CPF/CNPJ")
