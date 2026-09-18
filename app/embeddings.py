@@ -18,6 +18,7 @@ from app.providers import (
     openai_client,
 )
 from app.retrieval import ELIGIBLE_PROCESS_STEP_SQL
+from app.unicode_security import model_view_text
 
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
 # Legacy rollback contract: sql/002_process_data.sql defines process_steps.embedding
@@ -112,7 +113,7 @@ async def _legacy_embed_texts(texts: Sequence[str]) -> list[list[float]]:
 async def embed_texts(texts: Sequence[str]) -> list[list[float]]:
     if not texts:
         return []
-    values = [str(text) for text in texts]
+    values = [model_view_text(str(text)).text for text in texts]
     if any(not value.strip() for value in values):
         raise ValueError("embedding inputs must be non-empty text")
 
@@ -123,7 +124,7 @@ async def embed_texts(texts: Sequence[str]) -> list[list[float]]:
 
 
 async def embed_query(text: str) -> list[float]:
-    value = str(text)
+    value = model_view_text(str(text)).text
     if not value.strip():
         raise ValueError("embedding query must be non-empty text")
     if embedding_space_runtime_enabled():
