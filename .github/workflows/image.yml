@@ -43,8 +43,8 @@ jobs:
           python -m pip install pip==26.2.1
           python -m pip install --constraint requirements/constraints.txt -e '.[dev]'
 
-      - name: Migration harness
-        run: python scripts/migration_harness.py
+      - name: Project harness
+        run: python scripts/project_harness.py
 
       - name: Unit tests
         run: pytest -q tests --ignore=tests/integration
