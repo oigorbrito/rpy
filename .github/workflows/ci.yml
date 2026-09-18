@@ -70,11 +70,8 @@ jobs:
           docker compose -f compose.production.yaml config --format json > /tmp/rpy-production-compose.json
           python scripts/validate_production_compose.py /tmp/rpy-production-compose.json
 
-      - name: Migration harness
-        run: python scripts/migration_harness.py
-
-      - name: Release harness
-        run: python scripts/release_harness.py
+      - name: Project harness
+        run: python scripts/project_harness.py
 
       - name: Static Python quality
         run: ruff check app scripts tests
