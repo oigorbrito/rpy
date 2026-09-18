@@ -62,6 +62,40 @@ def test_rejects_date_absent_from_source_context() -> None:
     assert "date not present in source context: 2026-09-17" in result.errors
 
 
+def test_accepts_sao_paulo_day_converted_from_utc_timestamp() -> None:
+    source = '{"steps":[{"occurred_at":"2026-09-18T01:30:00+00:00"}]}'
+    result = validar(
+        text="O ato ocorreu em 17/09/2026.",
+        code=CODE,
+        parties=PARTIES,
+        source_text=source,
+    )
+    assert result.passed is True
+
+
+def test_accepts_literal_utc_day_alongside_local_conversion() -> None:
+    source = '{"steps":[{"occurred_at":"2026-09-18T01:30:00Z"}]}'
+    result = validar(
+        text="A fonte registra 18/09/2026.",
+        code=CODE,
+        parties=PARTIES,
+        source_text=source,
+    )
+    assert result.passed is True
+
+
+def test_rejects_day_not_literal_or_valid_timezone_conversion() -> None:
+    source = '{"steps":[{"occurred_at":"2026-09-18T01:30:00+00:00"}]}'
+    result = validar(
+        text="O ato ocorreu em 16/09/2026.",
+        code=CODE,
+        parties=PARTIES,
+        source_text=source,
+    )
+    assert result.passed is False
+    assert "date not present in source context: 2026-09-16" in result.errors
+
+
 def test_accepts_source_backed_structured_fields() -> None:
     result = validar(
         text=(
