@@ -33,8 +33,8 @@ _MILESTONE_TEXT = {
     "transito_em_julgado": "TRÂNSITO EM JULGADO certificado",
     "arquivamento": "ARQUIVAMENTO registrado",
 }
-_PROCESS_RE = re.compile(r"<processo_json>\\n(?P<json>.*?)\\n</processo_json>", re.DOTALL)
-_STEPS_RE = re.compile(r"<movimentos_json>\\n(?P<json>.*?)\\n</movimentos_json>", re.DOTALL)
+_PROCESS_RE = re.compile(r"<processo_json>\n(?P<json>.*?)\n</processo_json>", re.DOTALL)
+_STEPS_RE = re.compile(r"<movimentos_json>\n(?P<json>.*?)\n</movimentos_json>", re.DOTALL)
 
 
 def load_dataset(path: Path = DEFAULT_DATASET) -> list[dict[str, Any]]:
