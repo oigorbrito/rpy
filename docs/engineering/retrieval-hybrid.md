@@ -20,11 +20,16 @@ The existing Python BM25 implementation is intentionally retained, but it is not
 
 Combining BM25 and PostgreSQL lexical as two simultaneous lexical signals would overweight correlated lexical evidence and violate the intended 0.5 lexical / 0.5 vector split.
 
-## Vector-disabled mode
+## Vector runtime selection and disabled mode
 
-With the current embedding adapter, vector retrieval is considered configured only when `OPENAI_API_KEY` is present. When it is absent, long-process retrieval remains operational using PostgreSQL lexical scores only; no embedding creation or query-embedding provider call is attempted.
+Vector retrieval has two explicit rollout modes:
 
-This is an intentional deployment mode, not an outage fallback. If vector retrieval is configured and its provider fails, the error remains explicit instead of silently changing ranking semantics. Future embedding-provider work can replace the configuration predicate without changing the lexical contract.
+- the historical OpenAI `vector(1536)` path is configured when the isolated runtime is disabled and `OPENAI_API_KEY` is present;
+- the provider/model-isolated runtime is configured when `EMBEDDING_SPACE_RUNTIME_ENABLED=true` and resolves exactly one approved semantic space (local BGE by default or Cohere only with explicit external authorization).
+
+If neither selected mode is actually configured, long-process retrieval remains operational using the PostgreSQL lexical signal only and no embedding/query-vector provider call is attempted.
+
+This is an intentional deployment mode, not an outage fallback. If the selected vector provider is configured and then fails, the error remains explicit instead of silently changing ranking semantics or crossing into another semantic space. BGE, Cohere and legacy OpenAI vectors are never mixed.
 
 ## Isolation
 
@@ -39,6 +44,6 @@ Both lexical and vector queries are scoped to the exact `version_id`. Cross-proc
 - pgvector identifies the same target from the synthetic embedding;
 - a matching movement from another process/version is excluded from both score maps;
 - the 0.5/0.5 hybrid still preserves forced milestones, the first/last movement, and the five most recent movements;
-- a long process still produces a filtered RAG context with `OPENAI_API_KEY` absent, while embedding functions are guarded to fail the test if called.
+- a long process still produces a filtered RAG context with the legacy vector path unconfigured, while embedding functions are guarded to fail the test if called.
 
-No external provider is required for this evidence.
+Provider/model-isolated runtime tests separately verify BGE/Cohere selection, dimensions, secrecy boundaries and no cross-provider fallback. No external provider is required for this evidence.
