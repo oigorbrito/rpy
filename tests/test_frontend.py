@@ -56,3 +56,32 @@ def test_successful_lookup_has_programmatic_result_focus_target()->None:
  html=(FRONTEND/"index.html").read_text(); source=(FRONTEND/"app.js").read_text()
  assert 'id="result-code" tabindex="-1"' in html
  assert "document.querySelector('#result-code').focus({preventScroll:true})" in source
+
+
+def test_browser_security_headers_apply_to_frontend_api_and_errors()->None:
+ client=TestClient(app)
+ expected={
+  "content-security-policy":"default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; frame-src 'none'; form-action 'self'",
+  "x-content-type-options":"nosniff",
+  "x-frame-options":"DENY",
+  "referrer-policy":"no-referrer",
+  "permissions-policy":"camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+ }
+ for path in ("/","/app.js","/health","/missing-route"):
+  response=client.get(path)
+  for name,value in expected.items():
+   assert response.headers[name]==value
+
+
+def test_csp_matches_self_hosted_frontend_without_inline_exceptions()->None:
+ html=(FRONTEND/"index.html").read_text()
+ assert '<script src="/app.js" defer></script>' in html
+ assert '<link rel="stylesheet" href="/app.css">' in html
+ assert "<script>" not in html
+ assert "style=" not in html
+ client=TestClient(app)
+ csp=client.get("/").headers["content-security-policy"]
+ assert "'unsafe-inline'" not in csp
+ assert "'unsafe-eval'" not in csp
+ assert "frame-ancestors 'none'" in csp
+ assert "object-src 'none'" in csp
