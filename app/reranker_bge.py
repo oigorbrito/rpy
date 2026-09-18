@@ -82,7 +82,7 @@ class BGERerankerScorer:
     Model loading is deferred until the first long-process rerank so normal API
     startup and offline tests do not download or initialize the model. In
     production the model artifact should be pre-cached or provided through a
-    local RERANKER_MODEL path.
+    local BGE_RERANKER_PATH.
     """
 
     def __init__(
