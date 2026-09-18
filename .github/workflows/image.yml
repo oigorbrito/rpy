@@ -103,6 +103,17 @@ jobs:
           docker pull "$IMAGE_REF"
           sh scripts/verify_image_runtime.sh "$IMAGE_REF"
 
+      - name: Scan published digest for HIGH/CRITICAL vulnerabilities
+        uses: aquasecurity/trivy-action@d2a0b60797ff03db6132bd4e2b293f9b37081297
+        with:
+          image-ref: ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}
+          version: v0.74.0
+          format: table
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          exit-code: "1"
+
       - name: Attest published image provenance
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:
