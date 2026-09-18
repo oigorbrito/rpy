@@ -135,7 +135,10 @@ async def _handle_client(
 ) -> None:
     upstream_writer: asyncio.StreamWriter | None = None
     try:
-        method, target = await _read_request(reader)
+        method, target = await asyncio.wait_for(
+            _read_request(reader),
+            timeout=timeout_seconds,
+        )
         if method != "CONNECT":
             await _write_response(writer, "405 Method Not Allowed")
             return
@@ -158,7 +161,7 @@ async def _handle_client(
             _relay(reader, upstream_writer),
             _relay(upstream_reader, writer),
         )
-    except (ValueError, asyncio.LimitOverrunError):
+    except (ValueError, asyncio.LimitOverrunError, TimeoutError, asyncio.TimeoutError):
         try:
             await _write_response(writer, "400 Bad Request")
         except ConnectionError:
