@@ -12,6 +12,7 @@ from app.attachment_processing import (
     parse_attachment,
     parse_pdf_attachment,
     parse_pdf_attachment_ocr,
+    process_attachment_bytes,
 )
 
 
@@ -196,3 +197,34 @@ async def test_pdf_ocr_empty_pages_are_unreadable(monkeypatch):
         )
 
     assert exc_info.value.error_code == "ocr_no_text"
+
+
+
+@pytest.mark.asyncio
+async def test_textless_pdf_preserves_historical_status_when_ocr_disabled(monkeypatch):
+    from app import attachment_processing as processing
+
+    monkeypatch.delenv("ATTACHMENT_OCR_ENABLED", raising=False)
+
+    async def fake_upsert(conn, **kwargs):
+        assert kwargs["status"] == "unreadable"
+        assert kwargs["error_code"] == "pdf_text_unavailable"
+        return "synthetic-attachment-id"
+
+    monkeypatch.setattr(processing, "upsert_attachment_state", fake_upsert)
+    result = await process_attachment_bytes(
+        object(),
+        process_id=__import__("uuid").uuid4(),
+        version_id=__import__("uuid").uuid4(),
+        source_attachment_id="pdf-no-text",
+        content_type="application/pdf",
+        data=_blank_pdf(),
+        limits=AttachmentProcessingLimits(max_bytes=50_000, chunk_chars=256),
+    )
+
+    assert result == {
+        "attachment_id": "synthetic-attachment-id",
+        "status": "unreadable",
+        "error_code": "pdf_text_unavailable",
+        "chunk_count": 0,
+    }
