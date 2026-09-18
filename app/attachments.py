@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from typing import Literal, Sequence
+from datetime import datetime
+from typing import Any, Literal, Sequence
 from uuid import UUID
 
 import asyncpg
@@ -46,6 +47,62 @@ def _validate_chunk(chunk: AttachmentChunkInput) -> None:
         chunk.char_start < 0 or chunk.char_end is None or chunk.char_end < chunk.char_start
     ):
         raise ValueError("invalid attachment chunk character bounds")
+
+
+def _manifest_item(
+    item: dict[str, Any],
+) -> tuple[str, str | None, datetime | None, str | None]:
+    source_id = str(item.get("attachment_id") or "").strip()
+    if not source_id:
+        raise ValueError("attachment manifest item missing attachment_id")
+    raw_name = item.get("attachment_name")
+    source_name = str(raw_name).strip() if raw_name is not None else None
+    source_date = item.get("attachment_date")
+    if source_date is not None and not isinstance(source_date, datetime):
+        raise ValueError("attachment manifest attachment_date must be datetime or null")
+    raw_status = item.get("provider_status")
+    provider_status = str(raw_status).strip().lower() if raw_status is not None else None
+    return source_id, source_name or None, source_date, provider_status or None
+
+
+async def sync_attachment_manifest(
+    conn: asyncpg.Connection,
+    *,
+    process_id: UUID,
+    version_id: UUID,
+    attachments: Sequence[dict[str, Any]],
+) -> int:
+    """Persist source attachment metadata without resetting local processing state."""
+    normalized: list[tuple[str, str | None, datetime | None, str | None]] = []
+    seen: set[str] = set()
+    for item in attachments:
+        source_id, source_name, source_date, provider_status = _manifest_item(item)
+        if source_id in seen:
+            continue
+        seen.add(source_id)
+        normalized.append((source_id, source_name, source_date, provider_status))
+
+    if normalized:
+        await conn.executemany(
+            """
+            INSERT INTO process_attachments (
+                process_id, version_id, source_attachment_id, status,
+                source_name, source_date, provider_status
+            ) VALUES ($1, $2, $3, 'pending', $4, $5, $6)
+            ON CONFLICT (version_id, source_attachment_id)
+            DO UPDATE SET
+                source_name = EXCLUDED.source_name,
+                source_date = EXCLUDED.source_date,
+                provider_status = EXCLUDED.provider_status,
+                updated_at = NOW()
+            WHERE process_attachments.process_id = EXCLUDED.process_id
+            """,
+            [
+                (process_id, version_id, source_id, source_name, source_date, provider_status)
+                for source_id, source_name, source_date, provider_status in normalized
+            ],
+        )
+    return len(normalized)
 
 
 async def upsert_attachment_state(
