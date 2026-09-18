@@ -173,3 +173,17 @@ async def test_datajud_http_failures_are_best_effort(
 
     assert result.status == status
     assert result.error_code == f"http_{status_code}"
+
+
+@pytest.mark.asyncio
+async def test_secret_lookup_skips_before_invalid_runtime_config(monkeypatch) -> None:
+    monkeypatch.setenv("DATAJUD_ENABLED", "true")
+    monkeypatch.delenv("DATAJUD_AUTHORIZED_USE", raising=False)
+    monkeypatch.delenv("DATAJUD_API_KEY", raising=False)
+
+    result = await lookup_datajud_metadata(
+        code="0000000-00.2026.8.21.0001",
+        secrecy_level=1,
+    )
+
+    assert result.status == "skipped_secrecy"
