@@ -8,7 +8,7 @@ The product brief intentionally leaves audience, brand references and several fe
 
 Primary user: legal professional (lawyer, paralegal or internal legal team member) who already knows the CNJ number and needs to understand the latest available process state quickly.
 
-Primary job: find an already-ingested, tenant-authorized process by CNJ, verify its basic identity and read the latest published AI summary without traversing every movement manually.
+Primary job: find a tenant-authorized process by CNJ, request provider-backed acquisition when an authorized CNJ is not yet available, verify its identity/current state and read the latest validated AI summary without traversing every movement manually.
 
 This is deliberately narrower than case management. Rpy is an intelligence/read surface in this phase, not a docketing, deadline or document-management system.
 
@@ -17,10 +17,11 @@ This is deliberately narrower than case management. Rpy is an intelligence/read 
 1. Enter the environment credential.
 2. Search by canonical CNJ or 20 digits.
 3. See explicit loading/error/permission/not-found feedback.
-4. Confirm CNJ, class and court.
-5. Read the latest published summary, or a clear no-summary state.
-6. Copy the summary when needed.
-7. Run another lookup without losing orientation.
+4. If the CNJ is not yet available, explicitly request acquisition and follow the bounded availability check.
+5. Confirm CNJ, class, court and available structured process context.
+6. Distinguish summary processing from a legitimate no-summary/unavailable state.
+7. Read and copy the validated published summary when available.
+8. Run another lookup without losing orientation.
 
 ### Information architecture
 
@@ -41,45 +42,41 @@ A normal login, dashboard, recents, favorites, alerts, profile, administration a
 
 - `GET /health`: process liveness.
 - `GET /ready`: database-backed readiness.
-- `GET /processes/{code}`: bearer-authenticated tenant-scoped process read. Accepts canonical CNJ or 20 digits. Returns `code`, `class_name`, `court` and either the current-version summary or `null`.
-- `POST /webhooks/judit/{token}`: provider webhook ingestion. It is not a user-facing process-request endpoint.
+- `GET /processes/{code}`: bearer-authenticated tenant-scoped process read. Accepts canonical CNJ or 20 digits and returns structured process context, recent movements and the public summary lifecycle.
+- `POST /processes/{code}/request`: explicit tenant-scoped acquisition request for an unavailable CNJ; returns only public state and never exposes provider credentials/internal request identifiers.
+- `POST /webhooks/judit/{token}`: provider webhook ingestion used by the asynchronous acquisition lifecycle.
 - `GET /ops/metrics`: operations-only endpoint protected by a separate ops token; it does not belong in the end-user UI.
 
-### Data already stored but not exposed by the product endpoint
+### Structured product data
 
-The current process model persists structured `parties`, `subjects`, `header`, `secrecy_level`, `updated_at` and current-version `process_steps`. Judit normalization also preserves selected header fields such as instance, area, county/state/city and amount. These fields require an explicit, tenant-safe API contract before the frontend may use them.
+The tenant-safe product response now exposes the structured fields needed by the current interface, including parties, subjects, selected header/context fields, update time, recent movements and the public summary state. The frontend must still treat the API contract—not raw provider payloads or database columns—as its source of truth.
 
 ### Summary data already exposed
 
-The current summary object exposes `markdown`, `validation`, `model`, `prompt_version`, `generation_ms` and `created_at`. The UI should prioritize the legal content and use provenance as secondary information rather than exposing implementation noise by default.
+The current response exposes validated summary Markdown plus public lifecycle/provenance metadata. Internal queue/provider details remain outside the browser contract. The UI should prioritize legal content and use provenance/status as secondary information rather than exposing implementation noise by default.
 
 ## Capability classification
 
-### Implementable now
+### Implemented now
 
-- CNJ-only lookup;
-- process identity (CNJ/class/court);
-- published summary reading;
-- no-summary state;
-- explicit auth/validation/not-found/network/error states;
-- copy summary client-side;
-- accessible loading feedback and retry/new-search actions;
+- CNJ lookup with tenant authorization;
+- explicit request of an unavailable CNJ through the durable Judit acquisition flow;
+- bounded frontend availability polling after explicit user action;
+- process identity, parties/subjects/header context and recent movements;
+- explicit summary lifecycle (`available`, `processing`, `not_generated`, `unavailable`);
+- published validated summary reading/copying;
+- explicit auth/validation/not-found/network/server states;
+- safe Markdown/allowlisted-JSX rendering;
+- accessible focus/loading feedback and retry/new-search actions;
 - responsive desktop/mobile layout;
 - technical bearer-token access without browser persistence.
 
-### Small backend extension, justified later
-
-- parties/subjects/header/last-updated fields;
-- relevant or recent movement timeline;
-- explicit generation state distinct from a legitimate `summary: null`;
-- process-request/refresh state only after a real Judit outbound request contract exists.
-
-Any extension must remain tenant-scoped and must not leak secret-case data.
-
 ### External dependency
 
-- requesting or refreshing a missing CNJ through Judit, because the repository currently implements inbound Judit webhook semantics but no verified outbound request contract;
+- live Judit/provider behavior requires environment-specific credentials, budget and provider acceptance;
 - production identity provider if normal user login is required.
+
+Any future extension must remain tenant-scoped and must not leak secret-case data.
 
 ### Explicitly deferred
 
@@ -148,7 +145,8 @@ Every interactive element has a visible `:focus-visible` outline with sufficient
 - Missing credential: identifies/focuses credential input.
 - Unauthorized: says the credential is invalid/expired; does not imply whether a process exists.
 - Not found/no access: backend currently conflates these through 404, so the UI must preserve that ambiguity rather than leaking authorization information.
-- Existing process/no summary: explains that process data exists but no published summary is available; do not label it "processing" because the API cannot prove that state yet.
+- Existing process/summary processing: shows the explicit `processing` lifecycle state and follows it with bounded polling.
+- Existing process/no generated summary: distinguishes `not_generated`/`unavailable` from active processing.
 - Network unavailable: distinct from an HTTP application error; offers retry.
 - Server error: concise recovery action, no stack trace.
 - Long summary: readable document flow; do not truncate legal content by default.
@@ -170,4 +168,4 @@ Every interactive element has a visible `:focus-visible` outline with sufficient
 
 ## MVP success criterion
 
-A legal professional who has a valid environment credential and an authorized, already-ingested CNJ can understand whether the lookup succeeded, identify the process and read/copy the current published summary quickly on desktop or mobile, using keyboard alone if necessary, without credential persistence, tenant leakage or executable model output.
+A legal professional who has a valid environment credential and an authorized CNJ can understand whether the lookup succeeded, explicitly request acquisition when needed, identify the process/current summary state and read/copy the validated published summary quickly on desktop or mobile, using keyboard alone if necessary, without credential persistence, tenant leakage or executable model output.

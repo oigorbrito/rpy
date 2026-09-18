@@ -28,12 +28,14 @@ The PostgreSQL integration/E2E suite proves the central requested-CNJ path with 
 
 A candidate is repository-ready only when CI is green for its exact head and covers:
 
-- migration harness;
-- unit tests;
-- production compose contract;
+- Project harness, including migration/release guardrails and evidence-wiring checks;
+- unit tests and offline evaluation gates;
+- production compose/deploy preflight contract;
+- frontend behavioral harness;
 - local application image runtime smoke;
-- relocated backup/restore drill;
-- PostgreSQL integration and E2E tests.
+- backup/restore drill;
+- PostgreSQL integration and E2E tests;
+- offline provider-free release smoke.
 
 The production contract additionally requires an immutable image digest, split database roles, a singleton scheduler, two queue workers, readiness before traffic, and no provider/HTTP credentials distributed to unrelated services.
 
@@ -43,12 +45,12 @@ Repository readiness does not prove that a provider accepted a real request, tha
 
 These cannot be proven by repository CI alone and must be completed in the target environment:
 
-1. Publish the exact candidate image and record its registry SHA-256 digest.
+1. Publish the exact candidate image, record its registry SHA-256 digest, smoke-test that digest and verify its GitHub artifact attestation.
 2. Provision PostgreSQL 16 + pgvector and distinct migration/API/worker/scheduler/backup credentials.
 3. Provision at least one tenant and bearer token through the deployment configuration.
-4. Configure a valid Judit API key and webhook destination/token; verify one real CNJ request reaches the webhook and is associated with the requesting tenant.
-5. Exercise one intentionally rejected/invalid provider request if the provider/environment safely permits it, confirming the public failure/recovery behavior without exposing provider internals.
-6. Configure valid AI provider credentials; verify one non-secret fresh process reaches a validated summary.
+4. Follow `docs/release/provider-acceptance.md` for any real provider boundary: provision a valid Judit API key/webhook and verify one explicitly authorized CNJ acquisition end to end.
+5. Exercise one intentionally rejected/invalid provider request only if the provider/environment safely permits it, confirming public failure/recovery behavior without exposing provider internals.
+6. Configure only the AI/embedding/reranker providers explicitly selected and authorized for that environment; verify one non-secret fresh process reaches a validated summary and the selected retrieval path behaves as documented.
 7. Put TLS ingress/reverse proxy in front of the API, preserve `/health` and `/ready`, and keep the configured webhook body limit.
 8. Execute the production deploy sequence using the immutable digest and wait for `/ready` before traffic.
 9. Run one target-environment smoke: browser → CNJ request/read → Judit callback → process details → summary publication.
@@ -72,4 +74,4 @@ The following are useful later but are not required for the first provisioned-us
 
 The repository may be classified **repository-ready, external-validation-pending** only when the exact candidate head is green. This means the implemented code paths and repository-operational contracts have passed their automated evidence; it is deliberately narrower than declaring the product production-ready.
 
-A real-user release remains blocked until every applicable external gate above has evidence from the target environment. In particular, registry publication, real Judit and AI-provider behavior, TLS/ingress, target database roles, target-environment browser smoke and off-host restore are not inferred from CI.
+A real-user activation remains blocked until every applicable external gate above has evidence from the target environment. In particular, registry publication/attestation verification, real selected-provider behavior, TLS/ingress, target database roles, target-environment browser smoke and off-host restore are not inferred from CI. Legal/governance approval remains a separate prerequisite wherever the selected data boundary requires it.
