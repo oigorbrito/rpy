@@ -91,11 +91,21 @@ Failure classification is attachment-local:
 - invalid image magic: `corrupt/invalid_image_header`;
 - no recognized text: `unreadable/ocr_no_text`.
 
-Image-only/raster PDF is **not** routed through this image adapter. Tesseract is not
-the PDF parser, and Rpy has not yet selected a local PDF rasterization dependency.
-A PDF without an extractable text layer therefore remains
-`unreadable/pdf_text_unavailable` until that separate rasterization benchmark is
-completed.
+Image-only/raster PDF uses a separate optional local rasterization layer when OCR
+is enabled. Rpy uses `pypdfium2`/PDFium to render each page to PNG in memory and
+passes that PNG to the same local Tesseract adapter. `pypdfium2` is installed
+only by the `ocr` extra (and development tests); the standard runtime image does
+not include PDFium or Pillow.
+
+PDF OCR controls:
+
+- `ATTACHMENT_PDF_OCR_SCALE`, default 2.0 (144 DPI relative to PDF's 72 DPI base);
+- `ATTACHMENT_PDF_OCR_MAX_PAGES`, default 100.
+
+When OCR is disabled, PDFs without a text layer keep the historical
+`unreadable/pdf_text_unavailable` result. When OCR is enabled, a page-count limit
+is checked before Tesseract runs. Rasterizer absence/failure remains attachment-local
+and cannot invalidate process movements.
 
 Official implementation references reviewed for this phase:
 - Tesseract 5.x command-line documentation;
@@ -107,11 +117,15 @@ The implemented parsing targets are:
 
 1. PDF documents with an extractable text layer — Phase 3;
 2. UTF-8 plain text — Phase 2;
-3. PNG/JPEG images through optional local Tesseract OCR — Phase 6.
+3. PNG/JPEG images through optional local Tesseract OCR — Phase 6;
+4. raster/image-only PDF through optional local PDFium rendering followed by the
+   same Tesseract OCR path.
 
-Raster/image-only PDF remains the only local parsing target still pending an OCR
-rasterization implementation. No network-dependent model download may be added to
-CI or the standard offline image.
+The OCR extra currently pins `pypdfium2 5.13.x` and Pillow 12.3.x. pypdfium2 is
+Apache-2.0/BSD-3-Clause and bundles/uses PDFium under a BSD-style license plus
+dependency licenses; deployments that redistribute the OCR extra must retain the
+license notices shipped by its wheel. No network-dependent model download may be
+added to CI or the standard offline image.
 
 ## Chunking contract
 
