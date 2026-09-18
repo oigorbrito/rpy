@@ -178,6 +178,42 @@ def _validate_reranker(values: dict[str, str], errors: list[str]) -> None:
     errors.append("RERANKER_PROVIDER must be 'bge' or 'cohere'")
 
 
+
+def _validate_datajud(values: dict[str, str], errors: list[str]) -> None:
+    try:
+        enabled = _bool_value(values, "DATAJUD_ENABLED", False)
+        authorized = _bool_value(values, "DATAJUD_AUTHORIZED_USE", False)
+    except ValueError as exc:
+        errors.append(str(exc))
+        return
+
+    if not enabled:
+        return
+    if not authorized:
+        errors.append("DATAJUD_ENABLED requires DATAJUD_AUTHORIZED_USE=true")
+
+    api_key = str(values.get("DATAJUD_API_KEY") or "").strip()
+    if not api_key:
+        errors.append("DATAJUD_API_KEY is required when DataJud enrichment is active")
+    elif any(marker in api_key.lower() for marker in PLACEHOLDER_MARKERS):
+        errors.append("DATAJUD_API_KEY still contains a placeholder value")
+
+    base_url = str(
+        values.get("DATAJUD_BASE_URL") or "https://api-publica.datajud.cnj.jus.br"
+    ).strip().rstrip("/")
+    if not base_url.startswith("https://"):
+        errors.append("DATAJUD_BASE_URL must use https")
+
+    raw_timeout = str(values.get("DATAJUD_TIMEOUT_SECONDS") or "20").strip()
+    try:
+        timeout = float(raw_timeout)
+    except ValueError:
+        errors.append("DATAJUD_TIMEOUT_SECONDS must be numeric")
+        return
+    if timeout <= 0:
+        errors.append("DATAJUD_TIMEOUT_SECONDS must be greater than zero")
+
+
 def validate(values: dict[str, str]) -> list[str]:
     errors: list[str] = []
     for key in REQUIRED_KEYS:
@@ -190,6 +226,7 @@ def validate(values: dict[str, str]) -> list[str]:
 
     _validate_embedding_runtime(values, errors)
     _validate_reranker(values, errors)
+    _validate_datajud(values, errors)
 
     image = values.get("RPY_IMAGE", "").strip()
     if image and not DIGEST_RE.fullmatch(image):
