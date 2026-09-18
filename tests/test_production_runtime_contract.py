@@ -94,6 +94,7 @@ def _networked_services() -> dict:
         "egress-proxy": {
             "networks": {"provider-gateway": None, "egress": None},
             "environment": {
+                "EGRESS_PROXY_BIND_HOST": "0.0.0.0",
                 "EGRESS_PROXY_ALLOWED_HOSTS": "api.anthropic.com",
                 "EGRESS_PROXY_CONNECT_TIMEOUT_SECONDS": "10",
             },
