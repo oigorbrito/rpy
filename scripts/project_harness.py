@@ -110,6 +110,8 @@ def _release_workflow_observations() -> list[Observation]:
         "published-image-smoke": "sh scripts/verify_image_runtime.sh",
         "published-image-attestation": "actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6",
         "published-image-attestation-digest": "subject-digest: ${{ steps.build.outputs.digest }}",
+        "attestation-id-token-permission": "id-token: write",
+        "attestation-write-permission": "attestations: write",
     }
     observations: list[Observation] = []
     for name, command_fragment in expected.items():
