@@ -176,6 +176,7 @@ def test_create_tracking_uses_lawsuit_cnj_and_recurrence(monkeypatch: pytest.Mon
             "search_key": "0000000-00.0000.0.00.0001",
             "response_type": "lawsuit",
         },
+        "with_attachments": False,
     }
 
 
@@ -267,3 +268,36 @@ def test_attachment_max_bytes_is_positive(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setenv("ATTACHMENT_MAX_BYTES", "0")
     with pytest.raises(RuntimeError, match="greater than zero"):
         judit_client._attachment_max_bytes()
+
+
+
+def test_attachments_require_explicit_enabled_direct_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("JUDIT_ATTACHMENTS_ENABLED", "true")
+    monkeypatch.delenv("JUDIT_ATTACHMENT_DOWNLOAD_MODE", raising=False)
+    with pytest.raises(RuntimeError, match="direct_api_key"):
+        judit_client.judit_attachments_enabled()
+
+    monkeypatch.setenv("JUDIT_ATTACHMENT_DOWNLOAD_MODE", "direct_api_key")
+    assert judit_client.judit_attachments_enabled() is True
+
+
+def test_create_request_enables_attachments_only_after_explicit_opt_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = {}
+    monkeypatch.setenv("JUDIT_API_KEY", "attachment-key")
+    monkeypatch.setenv("JUDIT_ATTACHMENTS_ENABLED", "true")
+    monkeypatch.setenv("JUDIT_ATTACHMENT_DOWNLOAD_MODE", "direct_api_key")
+    monkeypatch.setattr(
+        judit_client.urllib.request,
+        "urlopen",
+        lambda request, timeout: captured.update(request=request, timeout=timeout)
+        or _Response(b'{"request_id":"req-att"}'),
+    )
+
+    result = judit_client._create_request_sync("0000000-00.0000.0.00.0001")
+
+    assert result.request_id == "req-att"
+    assert json.loads(captured["request"].data)["with_attachments"] is True
