@@ -331,10 +331,13 @@ def _validate_egress_topology(services: dict[str, Any], networks: dict[str, Any]
 
     proxy_env = _environment(services, "egress-proxy")
     if set(proxy_env) != {
+        "EGRESS_PROXY_BIND_HOST",
         "EGRESS_PROXY_ALLOWED_HOSTS",
         "EGRESS_PROXY_CONNECT_TIMEOUT_SECONDS",
     }:
         _fail("egress-proxy must receive only its allowlist and timeout settings")
+    if proxy_env.get("EGRESS_PROXY_BIND_HOST") != "0.0.0.0":
+        _fail("egress-proxy bind host must remain 0.0.0.0 inside the container network")
     if not str(proxy_env.get("EGRESS_PROXY_ALLOWED_HOSTS") or "").strip():
         _fail("egress-proxy allowlist must not be empty")
 
