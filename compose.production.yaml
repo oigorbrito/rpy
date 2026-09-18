@@ -185,7 +185,7 @@ services:
     <<: *app-runtime
     image: *rpy-image
     cpus: 2.0
-    mem_limit: 4g
+    mem_limit: 8g
     pids_limit: 256
     command: ["python", "-m", "app.worker"]
     environment: *worker-env
@@ -204,7 +204,7 @@ services:
     <<: *app-runtime
     image: *rpy-image
     cpus: 2.0
-    mem_limit: 4g
+    mem_limit: 8g
     pids_limit: 256
     command: ["python", "-m", "app.worker"]
     environment: *worker-env
