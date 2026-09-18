@@ -54,6 +54,7 @@ Production has no fallback values for:
 - `SCHEDULER_DATABASE_URL`;
 - `BACKUP_DATABASE_URL`;
 - `ANTHROPIC_API_KEY`;
+- `JUDIT_API_KEY`;
 - `JUDIT_WEBHOOK_TOKEN`;
 - `RPY_BEARER_TOKENS`;
 - `RPY_OPS_TOKEN`.
@@ -73,7 +74,7 @@ Database credentials are split by responsibility. The five URLs must use distinc
 Secrets are scoped by service instead of being copied to the whole stack:
 
 - `api` receives `API_DATABASE_URL` plus Judit, bearer-token and ops credentials;
-- `worker-*` receives `WORKER_DATABASE_URL`, Anthropic and embedding-provider settings; external embedding credentials stay worker-only;
+- `worker-*` receives `WORKER_DATABASE_URL`, Judit/DataJud, Anthropic and embedding/reranker settings; provider credentials stay worker-only;
 - `scheduler` receives only `SCHEDULER_DATABASE_URL` and retention/scheduling settings;
 - `migrate` receives the migration URL plus the four runtime/backup URLs needed to provision and rotate their roles;
 - provider keys must not be present in API, scheduler or migration environments;
@@ -121,6 +122,22 @@ Authorization for external reranking is independent from authorization for exter
 
 Both workers must receive identical reranker enablement, provider, model, artifact and authorization settings. Production preflight rejects an enabled BGE reranker without an absolute artifact path and rejects Cohere without explicit authorization/key. Before enabling BGE in production, run `scripts/verify_bge_reranker_artifact.py` against the mounted artifact. The real benchmark in `docs/evaluation/reranker-benchmark.md` remains a separate release-quality evidence requirement for #121.
 
+## Optional DataJud enrichment
+
+DataJud is supplementary metadata enrichment and is disabled by default. Production workers carry the complete activation contract so an approved environment does not require a code/Compose edit:
+
+- `DATAJUD_ENABLED=false` by default;
+- `DATAJUD_AUTHORIZED_USE=false` is a separate deployment/legal gate;
+- `DATAJUD_API_KEY` is worker-only and required only when enrichment is enabled;
+- `DATAJUD_BASE_URL` defaults to `https://api-publica.datajud.cnj.jus.br`;
+- `DATAJUD_TIMEOUT_SECONDS` defaults to 20 seconds.
+
+Enabling DataJud requires both `DATAJUD_ENABLED=true` and `DATAJUD_AUTHORIZED_USE=true`. Preflight rejects an enabled configuration without explicit authorization, a key, an HTTPS base URL, or a positive numeric timeout. Both workers must receive identical DataJud settings.
+
+This gate is intentional. The current CNJ rules for the public DataJud API require legal, non-commercial and authorized use and attribution to CNJ/DataJud. The technical presence of the adapter or public API key does not itself authorize a deployment. See `docs/engineering/datajud-enrichment.md` and `docs/release/provider-acceptance.md`.
+
+Secret processes are skipped before the DataJud transport call; enrichment failures do not invalidate an otherwise valid Judit version.
+
 ## Deploy sequence
 
 1. Build and publish the application image in trusted CI, then record its immutable registry digest.
@@ -150,6 +167,7 @@ The deploy-environment preflight rejects configuration that:
 - selects an unsupported embedding or reranker provider/model pair;
 - enables BGE reranking without an absolute `BGE_RERANKER_PATH`;
 - selects Cohere reranking without separate `ALLOW_EXTERNAL_RERANKER=true` authorization and `COHERE_API_KEY`;
+- enables DataJud without `DATAJUD_AUTHORIZED_USE=true`, `DATAJUD_API_KEY`, HTTPS base URL and a valid timeout;
 - reuses a PostgreSQL login identity across migration/API/worker/scheduler/backup responsibilities;
 - points the role-specific URLs at different PostgreSQL databases;
 - supplies an invalid bearer-token-to-tenant mapping.
@@ -165,7 +183,7 @@ The compose validator rejects changes that:
 - change the explicit API worker count;
 - alter the two-worker / one-scheduler topology;
 - remove required service-specific configuration;
-- allow the two workers to disagree on embedding or reranker rollout/provider/model/artifact settings;
+- allow the two workers to disagree on embedding, reranker or DataJud activation/provider settings;
 - distribute provider or HTTP-facing secrets to unrelated services.
 
 This contract is intentionally small. Platform-specific manifests (Kubernetes, ECS, Nomad, Fly.io, Render, etc.) should reproduce these invariants rather than introduce a second application architecture.
