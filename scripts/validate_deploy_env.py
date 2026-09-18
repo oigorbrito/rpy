@@ -29,6 +29,8 @@ REQUIRED_KEYS = (
 PLACEHOLDER_MARKERS = ("replace-with", "<64-hex-digest>", "example")
 BGE_MODEL = "BAAI/bge-m3"
 COHERE_MODEL = "embed-v4.0"
+BGE_RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
+COHERE_RERANKER_MODEL = "rerank-v4.0-pro"
 
 
 def _load_env_file(path: Path) -> dict[str, str]:
@@ -131,6 +133,51 @@ def _validate_embedding_runtime(values: dict[str, str], errors: list[str]) -> No
     errors.append("EMBEDDING_PROVIDER must be 'bge' or 'cohere'")
 
 
+
+def _validate_reranker(values: dict[str, str], errors: list[str]) -> None:
+    try:
+        enabled = _bool_value(values, "RERANKER_ENABLED", False)
+    except ValueError as exc:
+        errors.append(str(exc))
+        return
+    if not enabled:
+        return
+
+    provider = str(values.get("RERANKER_PROVIDER") or "bge").strip().casefold()
+    if provider == "bge":
+        model = str(values.get("RERANKER_MODEL") or BGE_RERANKER_MODEL).strip()
+        if model != BGE_RERANKER_MODEL:
+            errors.append(f"RERANKER_MODEL must be {BGE_RERANKER_MODEL!r}")
+        artifact_path = str(values.get("BGE_RERANKER_PATH") or "").strip()
+        if not artifact_path:
+            errors.append("BGE_RERANKER_PATH is required when BGE reranking is active")
+        elif any(marker in artifact_path.lower() for marker in PLACEHOLDER_MARKERS):
+            errors.append("BGE_RERANKER_PATH still contains a placeholder value")
+        elif not Path(artifact_path).is_absolute():
+            errors.append("BGE_RERANKER_PATH must be an absolute path inside the worker container")
+        return
+
+    if provider == "cohere":
+        try:
+            allowed = _bool_value(values, "ALLOW_EXTERNAL_RERANKER", False)
+        except ValueError as exc:
+            errors.append(str(exc))
+            return
+        if not allowed:
+            errors.append("Cohere reranking requires ALLOW_EXTERNAL_RERANKER=true")
+        model = str(values.get("COHERE_RERANKER_MODEL") or COHERE_RERANKER_MODEL).strip()
+        if model != COHERE_RERANKER_MODEL:
+            errors.append(f"COHERE_RERANKER_MODEL must be {COHERE_RERANKER_MODEL!r}")
+        key = str(values.get("COHERE_API_KEY") or "").strip()
+        if not key:
+            errors.append("COHERE_API_KEY is required when Cohere reranking is active")
+        elif any(marker in key.lower() for marker in PLACEHOLDER_MARKERS):
+            errors.append("COHERE_API_KEY still contains a placeholder value")
+        return
+
+    errors.append("RERANKER_PROVIDER must be 'bge' or 'cohere'")
+
+
 def validate(values: dict[str, str]) -> list[str]:
     errors: list[str] = []
     for key in REQUIRED_KEYS:
@@ -142,6 +189,7 @@ def validate(values: dict[str, str]) -> list[str]:
             errors.append(f"{key} still contains a placeholder value")
 
     _validate_embedding_runtime(values, errors)
+    _validate_reranker(values, errors)
 
     image = values.get("RPY_IMAGE", "").strip()
     if image and not DIGEST_RE.fullmatch(image):

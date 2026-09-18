@@ -167,3 +167,62 @@ def test_env_file_parser_accepts_export_and_quotes(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     assert preflight._load_env_file(env_file)["RPY_IMAGE"].endswith("a" * 64)
+
+
+def _enable_bge_reranker(values: dict[str, str]) -> None:
+    values["RERANKER_ENABLED"] = "true"
+    values["RERANKER_PROVIDER"] = "bge"
+    values["RERANKER_MODEL"] = "BAAI/bge-reranker-v2-m3"
+    values["BGE_RERANKER_PATH"] = "/opt/rpy/models/bge-reranker-v2-m3"
+
+
+def _enable_cohere_reranker(values: dict[str, str]) -> None:
+    values["RERANKER_ENABLED"] = "true"
+    values["RERANKER_PROVIDER"] = "cohere"
+    values["ALLOW_EXTERNAL_RERANKER"] = "true"
+    values["COHERE_RERANKER_MODEL"] = "rerank-v4.0-pro"
+    values["COHERE_API_KEY"] = "cohere-key"
+
+
+def test_disabled_reranker_needs_no_extra_credentials() -> None:
+    values = _valid_values()
+    values["RERANKER_ENABLED"] = "false"
+    assert preflight.validate(values) == []
+
+
+def test_bge_reranker_requires_local_artifact_path() -> None:
+    values = _valid_values()
+    _enable_bge_reranker(values)
+    values.pop("BGE_RERANKER_PATH")
+    assert "BGE_RERANKER_PATH is required when BGE reranking is active" in preflight.validate(values)
+
+
+def test_bge_reranker_requires_absolute_artifact_path() -> None:
+    values = _valid_values()
+    _enable_bge_reranker(values)
+    values["BGE_RERANKER_PATH"] = "models/bge-reranker-v2-m3"
+    assert (
+        "BGE_RERANKER_PATH must be an absolute path inside the worker container"
+        in preflight.validate(values)
+    )
+
+
+def test_cohere_reranker_requires_separate_authorization() -> None:
+    values = _valid_values()
+    _enable_cohere_reranker(values)
+    values["ALLOW_EXTERNAL_RERANKER"] = "false"
+    assert "Cohere reranking requires ALLOW_EXTERNAL_RERANKER=true" in preflight.validate(values)
+
+
+def test_cohere_reranker_requires_key() -> None:
+    values = _valid_values()
+    _enable_cohere_reranker(values)
+    values.pop("COHERE_API_KEY")
+    assert "COHERE_API_KEY is required when Cohere reranking is active" in preflight.validate(values)
+
+
+def test_cohere_reranker_rejects_wrong_model() -> None:
+    values = _valid_values()
+    _enable_cohere_reranker(values)
+    values["COHERE_RERANKER_MODEL"] = "rerank-v3.5"
+    assert "COHERE_RERANKER_MODEL must be 'rerank-v4.0-pro'" in preflight.validate(values)

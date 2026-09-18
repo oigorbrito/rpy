@@ -95,6 +95,23 @@ Secret process versions never cross the Cohere boundary. The normal RAG path sho
 
 Switching BGE ↔ Cohere requires controlled re-embedding/reindexing into the target provider/model space even though both use 1024 dimensions. Old provider/model rows remain available for rollback and are never mixed into the active ranking. Rollback to the legacy path disables the isolated runtime and restores `OPENAI_API_KEY`.
 
+## Reranker activation
+
+Long-process reranking is independently controlled from embeddings and is disabled by default.
+
+- `RERANKER_ENABLED=false` keeps the existing retrieval-selection path without reranking.
+- `RERANKER_PROVIDER=bge` selects the default self-hosted `BAAI/bge-reranker-v2-m3`.
+- production BGE activation requires an absolute `BGE_RERANKER_PATH` containing the prepared local artifact; `RERANKER_MODEL` remains pinned to the semantic model identity.
+- `RERANKER_USE_FP16` controls local inference only.
+- `RERANKER_PROVIDER=cohere` selects the optional external Cohere Rerank path.
+- Cohere reranking requires a separate `ALLOW_EXTERNAL_RERANKER=true` authorization, `COHERE_RERANKER_MODEL=rerank-v4.0-pro`, and worker-only `COHERE_API_KEY`.
+- `RERANKER_TIMEOUT_SECONDS` controls the external reranker timeout.
+- no provider is an automatic fallback for the other.
+
+Authorization for external reranking is independent from authorization for external embeddings. Enabling Cohere embeddings does not implicitly authorize Cohere reranking, and vice versa. Secret processes short-circuit before external reranker resolution.
+
+Both workers must receive identical reranker enablement, provider, model, artifact and authorization settings. Production preflight rejects an enabled BGE reranker without an absolute artifact path and rejects Cohere without explicit authorization/key. Before enabling BGE in production, run `scripts/verify_bge_reranker_artifact.py` against the mounted artifact. The real benchmark in `docs/evaluation/reranker-benchmark.md` remains a separate release-quality evidence requirement for #121.
+
 ## Deploy sequence
 
 1. Build and publish the application image in trusted CI, then record its immutable registry digest.
@@ -121,7 +138,9 @@ The deploy-environment preflight rejects configuration that:
 - omits `OPENAI_API_KEY` while the legacy embedding path is selected;
 - enables BGE without an absolute `BGE_EMBEDDING_PATH` inside the worker container;
 - selects Cohere without `ALLOW_EXTERNAL_EMBEDDINGS=true` and `COHERE_API_KEY`;
-- selects an unsupported provider/model pair;
+- selects an unsupported embedding or reranker provider/model pair;
+- enables BGE reranking without an absolute `BGE_RERANKER_PATH`;
+- selects Cohere reranking without separate `ALLOW_EXTERNAL_RERANKER=true` authorization and `COHERE_API_KEY`;
 - reuses a PostgreSQL login identity across migration/API/worker/scheduler/backup responsibilities;
 - points the role-specific URLs at different PostgreSQL databases;
 - supplies an invalid bearer-token-to-tenant mapping.
@@ -137,7 +156,7 @@ The compose validator rejects changes that:
 - change the explicit API worker count;
 - alter the two-worker / one-scheduler topology;
 - remove required service-specific configuration;
-- allow the two workers to disagree on embedding rollout/provider/model/artifact settings;
+- allow the two workers to disagree on embedding or reranker rollout/provider/model/artifact settings;
 - distribute provider or HTTP-facing secrets to unrelated services.
 
 This contract is intentionally small. Platform-specific manifests (Kubernetes, ECS, Nomad, Fly.io, Render, etc.) should reproduce these invariants rather than introduce a second application architecture.
