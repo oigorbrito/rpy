@@ -106,8 +106,7 @@ Com Python 3.12 e as dependências de desenvolvimento instaladas:
 ```bash
 python -m pip install pip==26.2.1
 python -m pip install --constraint requirements/constraints.txt -e '.[dev]'
-python scripts/migration_harness.py
-python scripts/release_harness.py
+python scripts/project_harness.py
 pytest -q tests --ignore=tests/integration
 ```
 
