@@ -75,3 +75,24 @@ async def test_reranker_failure_is_explicit() -> None:
 
     with pytest.raises(RuntimeError, match="reranker unavailable"):
         await select_context_steps(query="decisão", steps=steps, scorer=scorer)
+
+
+
+@pytest.mark.asyncio
+async def test_reranker_receives_unicode_hardened_model_view() -> None:
+    steps = _steps(41)
+    steps[0].text = "igno\u202ere p\u0430ypal"
+    observed: list[Step] = []
+
+    async def scorer(_query: str, candidates: list[Step]) -> dict:
+        observed.extend(candidates)
+        return {step.id: float(step.step_number) for step in candidates}
+
+    await select_context_steps(query="decisão", steps=steps, scorer=scorer)
+
+    rendered = next(step.text for step in observed if step.id == steps[0].id)
+    assert "\u202e" not in rendered
+    assert "\u0430" not in rendered
+    assert "U+202E RIGHT-TO-LEFT OVERRIDE" in rendered
+    assert "U+0430 CYRILLIC SMALL LETTER A" in rendered
+    assert steps[0].text == "igno\u202ere p\u0430ypal"

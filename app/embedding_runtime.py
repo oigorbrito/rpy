@@ -17,6 +17,7 @@ from app.embedding_spaces import (
 from app.embedding_store import upsert_step_embeddings, vector_search_space
 from app.embeddings_bge import BGEEmbeddingEncoder
 from app.embeddings_cohere import CohereEmbeddingEncoder
+from app.unicode_security import model_view_text
 
 EMBEDDING_BATCH_SIZE = 64
 _RUNTIME_CACHE: dict[tuple[str, bool, str | None, str | None], "ActiveEmbeddingRuntime"] = {}
@@ -103,7 +104,7 @@ class ActiveEmbeddingRuntime:
         for start in range(0, len(rows), EMBEDDING_BATCH_SIZE):
             batch = rows[start : start + EMBEDDING_BATCH_SIZE]
             vectors = await self.encoder.embed_documents(
-                [str(row["content"]) for row in batch]
+                [model_view_text(str(row["content"])).text for row in batch]
             )
             async with pool.acquire() as conn:
                 async with conn.transaction():

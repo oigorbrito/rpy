@@ -4,6 +4,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from uuid import UUID
 
 from app.retrieval import RankedStep, Step, rank_steps, rerank_steps
+from app.unicode_security import model_view_text
 
 RERANK_CANDIDATE_LIMIT = 50
 RERANK_OUTPUT_LIMIT = 15
@@ -42,7 +43,22 @@ async def select_context_steps(
         return candidates
 
     candidate_steps = [candidate.step for candidate in candidates]
-    scores = await scorer(query, candidate_steps)
+    model_steps = [
+        Step(
+            id=step.id,
+            step_number=step.step_number,
+            text=model_view_text(step.text).text,
+            title=(
+                model_view_text(step.title).text
+                if step.title is not None
+                else None
+            ),
+            occurred_at=step.occurred_at,
+            source_step_number=step.source_step_number,
+        )
+        for step in candidate_steps
+    ]
+    scores = await scorer(model_view_text(query).text, model_steps)
     selected_steps = rerank_steps(
         steps=candidate_steps,
         scores=scores,
