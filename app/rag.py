@@ -414,6 +414,18 @@ def _validate_provider_summary(text: str, context: dict[str, Any]) -> Validation
         require_attention_section=True,
         required_attention_phrases=list(context.get("source_warnings", [])),
         require_document_title=True,
+        allowed_headings=(
+            "Resumo do processo",
+            "Partes",
+            "Síntese",
+            "Linha do tempo relevante",
+            "Situação atual",
+            "Pontos de atenção",
+            "Decisões",
+            "Prazos em curso",
+            "Processos relacionados",
+            "Anexos",
+        ),
     )
 
 
