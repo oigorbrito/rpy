@@ -4,13 +4,16 @@ import asyncio
 import json
 import os
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
 JUDIT_REQUESTS_URL = "https://requests.production.judit.io/requests/"
 JUDIT_TRACKING_URL = "https://tracking.production.judit.io/tracking"
+JUDIT_LAWSUITS_URL = "https://lawsuits.production.judit.io/lawsuits"
 _MAX_RESPONSE_BYTES = 262144
+_DEFAULT_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024
 
 
 class JuditRequestError(RuntimeError):
@@ -32,6 +35,12 @@ class JuditTrackingResult:
     status: str
 
 
+@dataclass(frozen=True, slots=True)
+class JuditAttachmentDownload:
+    content_type: str
+    data: bytes
+
+
 def _timeout_seconds() -> float:
     raw = os.environ.get("JUDIT_TIMEOUT_SECONDS", "15")
     try:
@@ -40,6 +49,17 @@ def _timeout_seconds() -> float:
         raise RuntimeError("JUDIT_TIMEOUT_SECONDS must be numeric") from exc
     if not 0 < value <= 60:
         raise RuntimeError("JUDIT_TIMEOUT_SECONDS must be between 0 and 60")
+    return value
+
+
+def _attachment_max_bytes() -> int:
+    raw = os.environ.get("ATTACHMENT_MAX_BYTES", str(_DEFAULT_ATTACHMENT_MAX_BYTES))
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise RuntimeError("ATTACHMENT_MAX_BYTES must be an integer") from exc
+    if value <= 0:
+        raise RuntimeError("ATTACHMENT_MAX_BYTES must be greater than zero")
     return value
 
 
@@ -106,6 +126,64 @@ def _provider_request(
     return body
 
 
+def _attachment_content_type(response: Any) -> str:
+    headers = getattr(response, "headers", None)
+    value = headers.get("Content-Type") if headers is not None else None
+    normalized = str(value or "application/octet-stream").split(";", 1)[0].strip().lower()
+    return normalized or "application/octet-stream"
+
+
+def _download_attachment_sync(
+    code: str,
+    instance: str | int,
+    attachment_id: str,
+) -> JuditAttachmentDownload:
+    normalized_code = str(code).strip()
+    normalized_instance = str(instance).strip()
+    normalized_attachment_id = str(attachment_id).strip()
+    if not normalized_code:
+        raise ValueError("process code is required")
+    if not normalized_instance or "/" in normalized_instance:
+        raise ValueError("lawsuit instance is required")
+    if not normalized_attachment_id:
+        raise ValueError("attachment_id is required")
+
+    url = (
+        f"{JUDIT_LAWSUITS_URL}/"
+        f"{urllib.parse.quote(normalized_code, safe='')}/"
+        f"{urllib.parse.quote(normalized_instance, safe='')}/attachments/"
+        f"{urllib.parse.quote(normalized_attachment_id, safe='')}"
+    )
+    request = urllib.request.Request(
+        url,
+        method="GET",
+        headers={
+            "Accept": "application/octet-stream,*/*",
+            "api-key": _api_key(),
+        },
+    )
+    max_bytes = _attachment_max_bytes()
+    try:
+        with urllib.request.urlopen(request, timeout=_timeout_seconds()) as response:
+            if response.status != 200:
+                raise JuditRequestError(
+                    f"Judit attachment download failed with HTTP {response.status}"
+                )
+            data = response.read(max_bytes + 1)
+            if len(data) > max_bytes:
+                raise JuditRequestError("Judit attachment exceeded safe size")
+            content_type = _attachment_content_type(response)
+    except urllib.error.HTTPError as exc:
+        raise JuditRequestError(
+            f"Judit attachment download failed with HTTP {exc.code}",
+            retry_safe=400 <= exc.code < 500 and exc.code not in {408, 429},
+        ) from None
+    except (urllib.error.URLError, TimeoutError, OSError):
+        raise JuditRequestError("Judit attachment download failed") from None
+
+    return JuditAttachmentDownload(content_type=content_type, data=data)
+
+
 def _create_request_sync(code: str) -> JuditRequestResult:
     body = _provider_request(
         JUDIT_REQUESTS_URL,
@@ -167,3 +245,18 @@ async def create_lawsuit_tracking(code: str, *, recurrence_days: int = 1) -> Jud
 
 async def delete_lawsuit_tracking(tracking_id: str) -> None:
     await asyncio.to_thread(_delete_tracking_sync, tracking_id)
+
+
+async def download_lawsuit_attachment(
+    code: str,
+    *,
+    instance: str | int,
+    attachment_id: str,
+) -> JuditAttachmentDownload:
+    """Download already-authorized Judit attachment bytes behind the provider boundary."""
+    return await asyncio.to_thread(
+        _download_attachment_sync,
+        code,
+        instance,
+        attachment_id,
+    )
