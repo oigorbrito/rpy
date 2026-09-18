@@ -6,9 +6,11 @@ from typing import Any
 from app.datajud_client import lookup_datajud_metadata
 from app.datajud_enrichment import merge_datajud_metadata
 from app.datajud_provenance import replace_datajud_field_provenance
+from app.attachments import upsert_attachment_state
 from app.db import create_pool
 from app.json_utils import decode_json_object
-from app.judit import extract_promotable_fields, parse_event
+from app.judit import extract_attachment_references, extract_promotable_fields, parse_event
+from app.judit_client import judit_attachments_enabled
 from app.processes import finalize_version, preferred_judit_version
 from app.public_lifecycle import transition_requests_for_judit_request
 from app.queue import enqueue
@@ -178,6 +180,7 @@ async def finalize_judit_request_task(payload: dict[str, Any]) -> dict[str, Any]
                     )
 
                 summary_enqueued = False
+                attachment_job_enqueued = False
                 if promoted:
                     await transition_requests_for_judit_request(
                         conn,
@@ -188,18 +191,57 @@ async def finalize_judit_request_task(payload: dict[str, Any]) -> dict[str, Any]
                     )
 
                 if promoted and not bool(staged["source_cached_response"]):
-                    job = await enqueue(
-                        conn,
-                        task_name="generate_process_summary",
-                        payload={
-                            "process_id": str(staged["process_id"]),
-                            "version_id": str(staged["version_id"]),
-                            "code": staged["code"],
-                            "judit_request_id": request_id,
-                        },
-                        idempotency_key=f"summary:{staged['version_id']}",
+                    attachment_refs = (
+                        extract_attachment_references(staged_event.response_data)
+                        if judit_attachments_enabled()
+                        else []
                     )
-                    summary_enqueued = job is not None
+                    if attachment_refs:
+                        for ref in attachment_refs:
+                            await upsert_attachment_state(
+                                conn,
+                                process_id=staged["process_id"],
+                                version_id=staged["version_id"],
+                                source_attachment_id=ref.attachment_id,
+                                status="pending",
+                            )
+                    ready_refs = [ref for ref in attachment_refs if ref.status == "done"]
+                    if ready_refs:
+                        attachment_job = await enqueue(
+                            conn,
+                            task_name="process_judit_attachments",
+                            payload={
+                                "process_id": str(staged["process_id"]),
+                                "version_id": str(staged["version_id"]),
+                                "code": staged["code"],
+                                "judit_request_id": request_id,
+                                "attachments": [
+                                    {
+                                        "attachment_id": ref.attachment_id,
+                                        "instance": ref.instance,
+                                        "status": ref.status,
+                                        "extension": ref.extension,
+                                        "step_id": ref.step_id,
+                                    }
+                                    for ref in ready_refs
+                                ],
+                            },
+                            idempotency_key=f"attachments:{staged['version_id']}",
+                        )
+                        attachment_job_enqueued = attachment_job is not None
+                    else:
+                        job = await enqueue(
+                            conn,
+                            task_name="generate_process_summary",
+                            payload={
+                                "process_id": str(staged["process_id"]),
+                                "version_id": str(staged["version_id"]),
+                                "code": staged["code"],
+                                "judit_request_id": request_id,
+                            },
+                            idempotency_key=f"summary:{staged['version_id']}",
+                        )
+                        summary_enqueued = job is not None
                 elif await _complete_from_current_summary(
                     conn,
                     request_id=request_id,
@@ -237,6 +279,7 @@ async def finalize_judit_request_task(payload: dict[str, Any]) -> dict[str, Any]
             "promoted": promoted,
             "cached_response": bool(staged["source_cached_response"]),
             "summary_enqueued": summary_enqueued,
+            "attachment_job_enqueued": attachment_job_enqueued,
             "equivalent_to_version_id": (
                 str(equivalent_to_version_id)
                 if equivalent_to_version_id is not None
