@@ -9,6 +9,7 @@ import asyncpg
 
 from app.attachments import search_authorized_attachment_chunks
 from app.provenance import selected_attachment_sources
+from app.unicode_security import model_view_text
 
 DEFAULT_ATTACHMENT_RETRIEVAL_LIMIT = 12
 DEFAULT_PROVIDER_ATTACHMENT_TEXT_MAX_CHARS = 20_000
@@ -81,7 +82,7 @@ def serialize_attachment_chunks(
     remaining = total_text_limit
     remaining_items = len(chunks)
     for chunk in chunks:
-        text = str(chunk.get("text") or "")
+        text = model_view_text(str(chunk.get("text") or "")).text
         allowance = remaining // remaining_items if remaining_items else 0
         bounded = _truncate(text, allowance)
         rendered.append(
