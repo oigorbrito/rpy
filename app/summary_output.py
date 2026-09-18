@@ -7,38 +7,32 @@ from typing import Any
 SUMMARY_OUTPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "synthesis": {"type": "string", "minLength": 1, "maxLength": 6000},
+        "synthesis": {"type": "string"},
         "timeline": {
             "type": "array",
-            "items": {"type": "string", "minLength": 1, "maxLength": 2000},
-            "maxItems": 24,
+            "items": {"type": "string"},
         },
-        "current_status": {"type": "string", "minLength": 1, "maxLength": 4000},
+        "current_status": {"type": "string"},
         "attention": {
             "type": "array",
-            "items": {"type": "string", "minLength": 1, "maxLength": 2000},
+            "items": {"type": "string"},
             "minItems": 1,
-            "maxItems": 12,
         },
         "decisions": {
             "type": "array",
-            "items": {"type": "string", "minLength": 1, "maxLength": 2000},
-            "maxItems": 16,
+            "items": {"type": "string"},
         },
         "deadlines": {
             "type": "array",
-            "items": {"type": "string", "minLength": 1, "maxLength": 2000},
-            "maxItems": 12,
+            "items": {"type": "string"},
         },
         "related_processes": {
             "type": "array",
-            "items": {"type": "string", "minLength": 1, "maxLength": 2000},
-            "maxItems": 12,
+            "items": {"type": "string"},
         },
         "attachments": {
             "type": "array",
-            "items": {"type": "string", "minLength": 1, "maxLength": 2000},
-            "maxItems": 12,
+            "items": {"type": "string"},
         },
     },
     "required": [
@@ -72,6 +66,17 @@ _LIST_FIELDS = (
 )
 _REQUIRED_KEYS = frozenset(SUMMARY_OUTPUT_SCHEMA["required"])
 _SPACE_RE = re.compile(r"\s+")
+_MAX_SYNTHESIS_CHARS = 6000
+_MAX_STATUS_CHARS = 4000
+_MAX_ITEM_CHARS = 2000
+_MAX_ITEMS = {
+    "timeline": 24,
+    "attention": 12,
+    "decisions": 16,
+    "deadlines": 12,
+    "related_processes": 12,
+    "attachments": 12,
+}
 
 
 def _inline(value: Any) -> str:
@@ -88,7 +93,11 @@ def _prose_line(value: Any) -> str:
 def _string_list(value: Any, *, key: str, require_nonempty: bool = False) -> list[str]:
     if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
         raise ValueError(f"structured summary field must be a string array: {key}")
+    if len(value) > _MAX_ITEMS[key]:
+        raise ValueError(f"structured summary field has too many items: {key}")
     rendered = [_prose_line(item) for item in value if _inline(item)]
+    if any(len(item) > _MAX_ITEM_CHARS for item in rendered):
+        raise ValueError(f"structured summary item is too long: {key}")
     if require_nonempty and not rendered:
         raise ValueError(f"structured summary field must not be empty: {key}")
     return rendered
@@ -108,10 +117,14 @@ def parse_structured_summary(raw: str) -> dict[str, Any]:
     current_status = payload.get("current_status")
     if not isinstance(synthesis, str) or not _inline(synthesis):
         raise ValueError("structured summary synthesis must be a non-empty string")
+    if len(synthesis) > _MAX_SYNTHESIS_CHARS:
+        raise ValueError("structured summary synthesis is too long")
     if not isinstance(current_status, str) or not _inline(current_status):
         raise ValueError("structured summary current_status must be a non-empty string")
+    if len(current_status) > _MAX_STATUS_CHARS:
+        raise ValueError("structured summary current_status is too long")
 
-    normalized = {
+    return {
         "synthesis": _prose_line(synthesis),
         "timeline": _string_list(payload.get("timeline"), key="timeline"),
         "current_status": _prose_line(current_status),
@@ -125,7 +138,6 @@ def parse_structured_summary(raw: str) -> dict[str, Any]:
         ),
         "attachments": _string_list(payload.get("attachments"), key="attachments"),
     }
-    return normalized
 
 
 def _append_list(lines: list[str], title: str, items: list[str]) -> None:
