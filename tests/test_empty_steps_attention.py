@@ -65,7 +65,7 @@ def test_empty_steps_warning_must_be_inside_attention_section() -> None:
     }
 
     invalid = rag._validate_provider_summary(
-        "## Síntese\nNenhum movimento processual foi fornecido no payload.\n\n"
+        "# Resumo do processo\n\n## Síntese\nNenhum movimento processual foi fornecido no payload.\n\n"
         "## Pontos de atenção\nNenhuma divergência factual identificada.",
         context,
     )
@@ -75,7 +75,7 @@ def test_empty_steps_warning_must_be_inside_attention_section() -> None:
     )
 
     valid = rag._validate_provider_summary(
-        f"## Pontos de atenção\n{rag.EMPTY_STEPS_WARNING}",
+        f"# Resumo do processo\n\n## Pontos de atenção\n{rag.EMPTY_STEPS_WARNING}",
         context,
     )
     assert valid.passed is True
@@ -108,11 +108,11 @@ async def test_empty_steps_warning_is_sent_to_single_correction_attempt(monkeypa
     async def fake_generate(client, supplied_context, validation_errors=None):
         generation_errors.append(validation_errors)
         if validation_errors is None:
-            return "## Pontos de atenção\nNenhuma divergência factual identificada."
+            return "# Resumo do processo\n\n## Pontos de atenção\nNenhuma divergência factual identificada."
         assert any(
             rag.EMPTY_STEPS_WARNING in error for error in validation_errors
         )
-        return f"## Pontos de atenção\n{rag.EMPTY_STEPS_WARNING}"
+        return f"# Resumo do processo\n\n## Pontos de atenção\n{rag.EMPTY_STEPS_WARNING}"
 
     async def fake_persist(conn, **kwargs):
         persisted.update(kwargs)
