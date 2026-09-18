@@ -90,14 +90,14 @@ def test_gap_warning_must_appear_inside_attention_section() -> None:
     }
 
     invalid = rag._validate_provider_summary(
-        f"## Síntese\n{warning}\n\n## Pontos de atenção\nNenhuma divergência factual identificada.",
+        f"# Resumo do processo\n\n## Síntese\n{warning}\n\n## Pontos de atenção\nNenhuma divergência factual identificada.",
         context,
     )
     assert invalid.passed is False
     assert f"required attention fact missing: {warning}" in invalid.errors
 
     valid = rag._validate_provider_summary(
-        f"## Pontos de atenção\n{warning}",
+        f"# Resumo do processo\n\n## Pontos de atenção\n{warning}",
         context,
     )
     assert valid.passed is True

@@ -32,7 +32,7 @@ def test_provider_payload_exposes_total_count_not_only_retrieved_count() -> None
 def test_wired_validation_uses_total_count_and_exact_provider_dates() -> None:
     result = _validate_provider_summary(
         (
-            "# Resumo\n"
+            "# Resumo do processo\n"
             "O processo possui 200 movimentos e foi distribuído em 10/09/2026.\n\n"
             "## Pontos de atenção\nNenhuma divergência objetiva identificada."
         ),
@@ -44,7 +44,7 @@ def test_wired_validation_uses_total_count_and_exact_provider_dates() -> None:
 def test_wired_validation_rejects_retrieved_count_as_total() -> None:
     result = _validate_provider_summary(
         (
-            "# Resumo\nO processo possui 20 movimentos.\n\n"
+            "# Resumo do processo\nO processo possui 20 movimentos.\n\n"
             "## Pontos de atenção\nNenhuma divergência objetiva identificada."
         ),
         _context(),
@@ -56,7 +56,7 @@ def test_wired_validation_rejects_retrieved_count_as_total() -> None:
 def test_wired_validation_rejects_date_not_sent_to_provider() -> None:
     result = _validate_provider_summary(
         (
-            "# Resumo\nAudiência em 16/09/2026.\n\n"
+            "# Resumo do processo\nAudiência em 16/09/2026.\n\n"
             "## Pontos de atenção\nNenhuma divergência objetiva identificada."
         ),
         _context(),
@@ -66,6 +66,6 @@ def test_wired_validation_rejects_date_not_sent_to_provider() -> None:
 
 
 def test_wired_validation_requires_nonempty_attention_section() -> None:
-    result = _validate_provider_summary("# Resumo\nProcesso em andamento.", _context())
+    result = _validate_provider_summary("# Resumo do processo\nProcesso em andamento.", _context())
     assert result.passed is False
     assert "Pontos de atenção section is required" in result.errors

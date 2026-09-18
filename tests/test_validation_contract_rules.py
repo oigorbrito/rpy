@@ -1,3 +1,5 @@
+import pytest
+
 from app.validation import validar
 
 CODE = "0000000-00.0000.0.00.0000"
@@ -335,3 +337,50 @@ def test_rejects_duplicate_core_section() -> None:
     )
     assert result.passed is False
     assert "duplicate core section: Síntese" in result.errors
+
+
+def test_accepts_exact_document_title_when_required() -> None:
+    result = validar(
+        text="# Resumo do processo\n\n## Síntese\nResumo factual.",
+        code=CODE,
+        parties=PARTIES,
+        require_document_title=True,
+    )
+    assert result.passed is True
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "## Resumo do processo\n\n## Síntese\nResumo factual.",
+        "# resumo do processo\n\n## Síntese\nResumo factual.",
+        "Introdução\n\n# Resumo do processo\n\n## Síntese\nResumo factual.",
+    ],
+)
+def test_rejects_noncanonical_or_noninitial_document_title(text: str) -> None:
+    result = validar(
+        text=text,
+        code=CODE,
+        parties=PARTIES,
+        require_document_title=True,
+    )
+    assert result.passed is False
+    assert (
+        "summary must start with exact document title: # Resumo do processo"
+        in result.errors
+    )
+
+
+def test_rejects_duplicate_document_title() -> None:
+    result = validar(
+        text=(
+            "# Resumo do processo\n\n"
+            "## Síntese\nResumo factual.\n\n"
+            "# Resumo do processo"
+        ),
+        code=CODE,
+        parties=PARTIES,
+        require_document_title=True,
+    )
+    assert result.passed is False
+    assert "duplicate document title: Resumo do processo" in result.errors
