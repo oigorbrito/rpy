@@ -246,6 +246,15 @@ def _download_signed_attachment_sync(url: str, max_bytes: int) -> JuditAttachmen
     )
     try:
         with urllib.request.urlopen(request, timeout=_timeout_seconds()) as response:
+            final_url = response.geturl()
+            final_parsed = urllib.parse.urlparse(final_url)
+            if (
+                final_parsed.scheme != "https"
+                or not final_parsed.netloc
+                or final_parsed.username
+                or final_parsed.password
+            ):
+                raise JuditRequestError("unsafe signed attachment redirect")
             raw = response.read(max_bytes + 1)
             if len(raw) > max_bytes:
                 raise JuditRequestError("Judit attachment exceeded safe size", retry_safe=True)
