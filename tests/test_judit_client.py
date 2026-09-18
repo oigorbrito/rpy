@@ -8,12 +8,27 @@ import pytest
 from app import judit_client
 
 
+class _Headers:
+    def __init__(self, values: dict[str, str] | None = None):
+        self.values = values or {}
+
+    def get(self, name: str):
+        return self.values.get(name)
+
+
 class _Response:
     status = 201
 
-    def __init__(self, body: bytes, *, status: int = 201):
+    def __init__(
+        self,
+        body: bytes,
+        *,
+        status: int = 201,
+        headers: dict[str, str] | None = None,
+    ):
         self.body = body
         self.status = status
+        self.headers = _Headers(headers)
 
     def __enter__(self):
         return self
@@ -44,6 +59,97 @@ def test_create_request_uses_cnj_contract_without_attachments(monkeypatch: pytes
         "search": {"search_type": "lawsuit_cnj", "search_key": "0000000-00.0000.0.00.0001"},
         "with_attachments": False,
     }
+
+
+def test_download_attachment_uses_authenticated_bounded_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = {}
+    monkeypatch.setenv("JUDIT_API_KEY", "attachment-key")
+    monkeypatch.setenv("ATTACHMENT_MAX_BYTES", "16")
+    monkeypatch.setattr(
+        judit_client.urllib.request,
+        "urlopen",
+        lambda request, timeout: captured.update(request=request, timeout=timeout)
+        or _Response(
+            b"%PDF-synthetic",
+            status=200,
+            headers={"Content-Type": "application/pdf; charset=binary"},
+        ),
+    )
+
+    result = judit_client._download_attachment_sync(
+        "0000000-00.0000.0.00.0001",
+        1,
+        "att/id 123",
+    )
+
+    request = captured["request"]
+    assert request.full_url == (
+        f"{judit_client.JUDIT_LAWSUITS_URL}/"
+        "0000000-00.0000.0.00.0001/1/attachments/att%2Fid%20123"
+    )
+    assert request.method == "GET"
+    assert request.get_header("Api-key") == "attachment-key"
+    assert result.content_type == "application/pdf"
+    assert result.data == b"%PDF-synthetic"
+
+
+def test_download_attachment_rejects_oversized_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("JUDIT_API_KEY", "attachment-key")
+    monkeypatch.setenv("ATTACHMENT_MAX_BYTES", "4")
+    monkeypatch.setattr(
+        judit_client.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: _Response(b"12345", status=200),
+    )
+
+    with pytest.raises(judit_client.JuditRequestError, match="exceeded safe size"):
+        judit_client._download_attachment_sync(
+            "0000000-00.0000.0.00.0001",
+            1,
+            "att-1",
+        )
+
+
+def test_download_attachment_http_error_discards_body_and_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("JUDIT_API_KEY", "super-secret-attachment-key")
+
+    def fail(request, timeout):
+        raise urllib.error.HTTPError(
+            request.full_url,
+            403,
+            "forbidden sensitive provider body",
+            {},
+            None,
+        )
+
+    monkeypatch.setattr(judit_client.urllib.request, "urlopen", fail)
+
+    with pytest.raises(judit_client.JuditRequestError) as exc:
+        judit_client._download_attachment_sync(
+            "0000000-00.0000.0.00.0001",
+            1,
+            "att-1",
+        )
+
+    assert "403" in str(exc.value)
+    assert "super-secret-attachment-key" not in str(exc.value)
+    assert "sensitive provider body" not in str(exc.value)
+    assert exc.value.retry_safe is True
+
+
+def test_download_attachment_requires_safe_identifiers() -> None:
+    with pytest.raises(ValueError, match="process code"):
+        judit_client._download_attachment_sync("", 1, "att-1")
+    with pytest.raises(ValueError, match="instance"):
+        judit_client._download_attachment_sync("0000000-00.0000.0.00.0001", "", "att-1")
+    with pytest.raises(ValueError, match="attachment_id"):
+        judit_client._download_attachment_sync("0000000-00.0000.0.00.0001", 1, "")
 
 
 def test_create_tracking_uses_lawsuit_cnj_and_recurrence(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -155,3 +261,9 @@ def test_timeout_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("JUDIT_TIMEOUT_SECONDS", "61")
     with pytest.raises(RuntimeError, match="between 0 and 60"):
         judit_client._timeout_seconds()
+
+
+def test_attachment_max_bytes_is_positive(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ATTACHMENT_MAX_BYTES", "0")
+    with pytest.raises(RuntimeError, match="greater than zero"):
+        judit_client._attachment_max_bytes()
