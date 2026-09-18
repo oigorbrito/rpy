@@ -7,7 +7,7 @@ import pytest
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "validate_production_compose.py"
 spec = importlib.util.spec_from_file_location("validate_production_compose", MODULE_PATH)
-assert spec is not None and spec.loader is not None
+assert spec is not None and spec.loader is not None  # nosec B101
 contract = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(contract)
 
@@ -18,7 +18,7 @@ def _runtime_service(*, cpus: float, mem_limit: str, pids_limit: int) -> dict:
         "user": "10001:10001",
         "cap_drop": ["ALL"],
         "security_opt": ["no-new-privileges:true"],
-        "tmpfs": ["/tmp:rw,noexec,nosuid,nodev,size=64m"],
+        "tmpfs": ["/tmp:rw,noexec,nosuid,nodev,size=64m"],  # nosec B108
         "cpus": cpus,
         "mem_limit": mem_limit,
         "pids_limit": pids_limit,
@@ -46,7 +46,7 @@ def test_runtime_confinement_accepts_expected_budget() -> None:
         ("read_only", False, "root filesystem must be read-only"),
         ("cap_drop", [], "must drop all Linux capabilities"),
         ("security_opt", [], "must enable no-new-privileges"),
-        ("tmpfs", ["/tmp:rw"], "/tmp tmpfs must include noexec"),
+        ("tmpfs", ["/tmp:rw"], "/tmp tmpfs must include noexec"),  # nosec B108
         ("pids_limit", 0, "pids_limit must be positive"),
     ],
 )
@@ -94,7 +94,7 @@ def _networked_services() -> dict:
         "egress-proxy": {
             "networks": {"provider-gateway": None, "egress": None},
             "environment": {
-                "EGRESS_PROXY_BIND_HOST": "0.0.0.0",
+                "EGRESS_PROXY_BIND_HOST": "0.0.0.0",  # nosec B104
                 "EGRESS_PROXY_ALLOWED_HOSTS": "api.anthropic.com",
                 "EGRESS_PROXY_CONNECT_TIMEOUT_SECONDS": "10",
             },
