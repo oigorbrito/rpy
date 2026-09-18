@@ -137,6 +137,7 @@ function createHarness(fetchResponses) {
   const context = {
     document,
     console,
+    TypeError,
     requestAnimationFrame: callback => callback(),
     navigator: {
       clipboard: {
