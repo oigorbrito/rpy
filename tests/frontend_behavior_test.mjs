@@ -15,11 +15,11 @@ class Element {
 }
 function run(fetchResponses) {
   const elements = Object.fromEntries(ids.map(id=>[id,new Element(id)]));
-  let timer=null, fetchIndex=0;
+  let timer=null, fetchIndex=0, clipboardText="";
   const document={querySelector: s=>elements[s.slice(1)], createElement: tag=>new Element(tag)};
-  const context={document, console, requestAnimationFrame: fn=>fn(), navigator:{clipboard:{writeText:async()=>{}}}, window:{matchMedia:()=>({matches:false}), addEventListener(){}} , setTimeout:fn=>{timer=fn; return 1}, clearTimeout:()=>{timer=null}, fetch:async()=>fetchResponses[Math.min(fetchIndex++,fetchResponses.length-1)]};
+  const context={document, console, requestAnimationFrame: fn=>fn(), navigator:{clipboard:{writeText:async value=>{clipboardText=value}}}, window:{matchMedia:()=>({matches:false}), addEventListener(){}} , setTimeout:fn=>{timer=fn; return 1}, clearTimeout:()=>{timer=null}, fetch:async()=>fetchResponses[Math.min(fetchIndex++,fetchResponses.length-1)]};
   vm.runInNewContext(fs.readFileSync("app/frontend/app.js","utf8"), context);
-  return {elements, async search(){await elements["search-form"].listeners.submit({preventDefault(){}})}, async tick(){assert(timer); const fn=timer; timer=null; await fn();}, hasTimer:()=>timer!==null};
+  return {elements, async search(){await elements["search-form"].listeners.submit({preventDefault(){}})}, async tick(){assert(timer); const fn=timer; timer=null; await fn();}, hasTimer:()=>timer!==null, clipboard:()=>clipboardText};
 }
 const ready = {ok:true,status:200,json:async()=>({code:"0000000-00.2026.8.21.0001",class_name:"Classe",court:"TJRS",summary_status:"available",summary:{markdown:"Resumo pronto"},parties:[],subjects:[],header:{},recent_steps:[{title:"Sentença",text:"Movimento público"}]})};
 const notFound = {ok:false,status:404,json:async()=>({detail:"not found"})};
@@ -32,4 +32,5 @@ ui=run([{...ready,json:async()=>({code:"0000000-00.2026.8.21.0003",class_name:"S
 
 const jsxReady = {ok:true,status:200,json:async()=>({code:"0000000-00.2026.8.21.0010",class_name:"Classe",court:"TJRS",summary_status:"available",summary:{markdown:'# Resumo do processo\n<ProcessHeader className="process-header">\n- Processo: 0000000-00.2026.8.21.0010\n</ProcessHeader>\n## Partes\n<Party name="Maria da Silva" />\n<img src=x onerror=alert(1)>'},parties:[{name:"Maria da Silva"}],subjects:[],header:{},recent_steps:[]})};
 ui=run([jsxReady]); ui.elements["process-code"].value="0000000-00.2026.8.21.0010"; ui.elements["bearer-token"].value="token"; await ui.search(); const jsxText=ui.elements["summary-body"].renderedText; assert.ok(jsxText.includes("Maria da Silva")); assert.ok(jsxText.includes("Processo: 0000000-00.2026.8.21.0010")); assert.ok(jsxText.includes("<img src=x onerror=alert(1)>")); const summaryChildren=ui.elements["summary-body"].children; assert.ok(summaryChildren.some(n=>n.className==="summary-process-header")); assert.ok(summaryChildren.some(n=>n.children?.some?.(x=>x.className==="summary-party")) || jsxText.includes("Maria da Silva"));
+await ui.elements["copy-summary"].listeners.click(); assert.ok(ui.clipboard().includes("Resumo do processo")); assert.ok(ui.clipboard().includes("Maria da Silva")); assert.ok(ui.clipboard().includes("Processo: 0000000-00.2026.8.21.0010")); assert.doesNotMatch(ui.clipboard(), /<ProcessHeader|<Party/);
 console.log("frontend behavior: PASS (ready, processing->ready, polling stop, 404/error clearing, secret non-leak, local fetch only)");
