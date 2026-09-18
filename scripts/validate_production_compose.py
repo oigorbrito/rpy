@@ -37,6 +37,11 @@ WORKER_REQUIRED_ENV = {
     "DATABASE_URL",
     "JUDIT_API_KEY",
     "JUDIT_TIMEOUT_SECONDS",
+    "DATAJUD_ENABLED",
+    "DATAJUD_AUTHORIZED_USE",
+    "DATAJUD_API_KEY",
+    "DATAJUD_BASE_URL",
+    "DATAJUD_TIMEOUT_SECONDS",
     "ANTHROPIC_API_KEY",
     "OPENAI_API_KEY",
     "EMBEDDING_MODEL",
@@ -88,6 +93,7 @@ PROVIDER_SECRETS = {
     "OPENAI_API_KEY",
     "COHERE_API_KEY",
     "JUDIT_API_KEY",
+    "DATAJUD_API_KEY",
 }
 DB_ROLE_USERS = {
     "api": "rpy_api",
@@ -254,6 +260,11 @@ def _validate_worker_embedding_contract(services: dict[str, Any]) -> None:
         "ALLOW_EXTERNAL_RERANKER",
         "COHERE_RERANKER_MODEL",
         "RERANKER_TIMEOUT_SECONDS",
+        "DATAJUD_ENABLED",
+        "DATAJUD_AUTHORIZED_USE",
+        "DATAJUD_API_KEY",
+        "DATAJUD_BASE_URL",
+        "DATAJUD_TIMEOUT_SECONDS",
     )
     left = _environment(services, "worker-1")
     right = _environment(services, "worker-2")
