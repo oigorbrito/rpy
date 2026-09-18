@@ -4,9 +4,18 @@ Rpy treats Langfuse as an optional, fail-open observability sink. PostgreSQL rem
 
 ## Runtime contract
 
-Install the optional dependency with `rpy[observability]` and enable tracing explicitly with `LANGFUSE_ENABLED=true`. Configure the standard Langfuse SDK credentials and self-hosted base URL for the deployment. When the extra is not installed, configuration is missing, or the Langfuse client raises, the worker continues without tracing.
+The production image includes the constrained `rpy[observability]` extra and the image smoke verifies that the Langfuse SDK is importable. Tracing is still disabled by default and must be enabled explicitly with `LANGFUSE_ENABLED=true`.
 
-The integration targets the Langfuse Python SDK v4/OpenTelemetry observation API. It does not use the legacy trace/span/generation ingestion APIs.
+Production activation requires worker-only:
+
+- `LANGFUSE_PUBLIC_KEY`;
+- `LANGFUSE_SECRET_KEY`;
+- `LANGFUSE_BASE_URL` using HTTPS;
+- `LANGFUSE_TRACING_ENVIRONMENT` (default `production`).
+
+The official Python SDK v4 uses these environment variables with `get_client()`. The tracing environment must satisfy the Langfuse naming contract (lowercase letters/numbers/hyphens/underscores, maximum 40 characters, and no `langfuse` prefix). Production preflight validates this shape before deployment.
+
+The integration targets the Langfuse Python SDK v4/OpenTelemetry observation API. It does not use the legacy trace/span/generation ingestion APIs. If configuration is disabled or the client raises, the worker continues without tracing.
 
 ## Data minimization
 
@@ -31,9 +40,12 @@ Langfuse traces are operational telemetry, not the legal/audit record. Productio
 
 1. restrict Langfuse access to the operations/engineering roles that already have production observability access;
 2. disable public trace sharing;
-3. use the shortest retention window that still supports incident response and performance analysis; the deployment default for Rpy is **30 days**, unless the data-protection owner approves a different period;
-4. keep PostgreSQL audit/provenance retention independent from Langfuse retention;
-5. rotate Langfuse credentials independently from application/provider credentials.
+3. configure an explicit trace-retention policy appropriate for incident response and performance analysis; Rpy recommends **30 days** unless the data-protection owner approves a different period;
+4. verify that the selected Langfuse deployment/edition actually supports the intended retention policy;
+5. keep PostgreSQL audit/provenance retention independent from Langfuse retention;
+6. rotate Langfuse credentials independently from application/provider credentials.
+
+Self-hosted Langfuse does not automatically expire event data by default. A 30-day Rpy target is therefore an operational policy to configure and verify, not an SDK default.
 
 A deployment that cannot enforce access control and retention must leave `LANGFUSE_ENABLED=false`.
 

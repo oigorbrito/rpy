@@ -25,7 +25,8 @@ async def database() -> None:
 async def _fixture(conn):
     process_id = uuid4()
     version_id = uuid4()
-    code = f"0000000-00.0000.0.00.{str(process_id.int)[-4:]}"
+    serial = f"{process_id.int % 100_000_000_000:011d}"
+    code = f"{serial[:7]}-00.0000.0.00.{serial[7:]}"
     await conn.execute(
         "INSERT INTO processes (id, code) VALUES ($1, $2)",
         process_id,

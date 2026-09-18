@@ -17,6 +17,7 @@ def test_sanitize_error_message_redacts_all_provider_api_keys(monkeypatch) -> No
         "JUDIT_API_KEY": "judit-provider-secret",
         "DATAJUD_API_KEY": "datajud-provider-secret",
         "COHERE_API_KEY": "cohere-provider-secret",
+        "LANGFUSE_SECRET_KEY": "langfuse-observability-secret",
     }
     for name, value in secrets.items():
         monkeypatch.setenv(name, value)

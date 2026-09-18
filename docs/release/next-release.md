@@ -28,6 +28,7 @@ This document tracks the current `main` after the historical `v0.1.0` release. I
 |---|---|---|
 | Judit | async request/tracking/webhook contract, idempotency, tenant correlation, safe errors | account/API key, budget, authorized CNJ/tenant, live provider acceptance |
 | DataJud | optional metadata enrichment, secrecy skip, explicit authorized-use gate, worker-only key contract | applicable CNJ/legal/product authorization, current key, controlled acceptance |
+| Langfuse observability | metadata-only fail-open tracing boundary; SDK/image/config/redaction contract | project credentials, HTTPS endpoint, access control and verified retention policy if enabled |
 | Anthropic | pinned model routing, retry/validation/telemetry, secrecy short-circuit | API key/budget and controlled live acceptance |
 | OpenAI legacy embeddings | pinned model and explicit 1536-dimension contract | key/budget only if legacy rollback path is selected |
 | Cohere Embed | isolated 1024-dimension semantic space, no fallback, secrecy guards | environment-specific authorization, key, controlled acceptance |
