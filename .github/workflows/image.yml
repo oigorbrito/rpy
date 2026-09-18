@@ -9,6 +9,8 @@ on:
 permissions:
   contents: read
   packages: write
+  id-token: write
+  attestations: write
 
 jobs:
   test:
@@ -100,6 +102,13 @@ jobs:
           IMAGE_REF="ghcr.io/${GITHUB_REPOSITORY}@${IMAGE_DIGEST}"
           docker pull "$IMAGE_REF"
           sh scripts/verify_image_runtime.sh "$IMAGE_REF"
+
+      - name: Attest published image provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-name: ghcr.io/${{ github.repository }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
 
       - name: Record immutable deployment reference
         env:

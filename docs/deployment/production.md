@@ -12,6 +12,15 @@ The same exact digest is used by `migrate`, `api`, both workers and `scheduler`.
 
 Build and publish the image once in trusted CI. Record the resulting registry digest as release metadata. Promote that digest unchanged through environments; do not rebuild for staging or production. This keeps migration code and runtime code on the same artifact revision.
 
+The image publication workflow also creates a GitHub artifact attestation for the exact published digest after the digest passes the runtime smoke. Before promotion, an operator with GitHub CLI access can verify the build provenance:
+
+```bash
+export RPY_IMAGE='ghcr.io/oigorbrito/rpy@sha256:<64-hex-digest>'
+gh attestation verify "oci://${RPY_IMAGE}" -R oigorbrito/rpy
+```
+
+Attestation proves provenance (repository/workflow/commit/build identity); it is not a substitute for vulnerability review, runtime smoke, tests or deployment approval.
+
 Rollback is artifact selection, not reconstruction: set `RPY_IMAGE` back to a previously known-good digest and execute the normal deployment sequence. Database migrations still determine whether an application rollback is schema-compatible, so destructive migrations require their own explicit rollback plan.
 
 ## Topology

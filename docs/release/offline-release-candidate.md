@@ -29,7 +29,8 @@ e leitura autenticada. Usa dados sintéticos e não exige chaves pagas.
 - [x] contratos de providers testados com fakes e sem rede;
 - [x] frontend comportamental offline verde;
 - [x] exemplos de configuração conferidos contra o runtime;
-- [x] PRs necessários integrados e CI do head exato verde.
+- [x] PRs necessários integrados e CI do head exato verde;
+- [x] workflow de imagem produz provenance attestation verificável para o digest publicado.
 
 O fresh clone foi validado em Windows fora do ambiente de desenvolvimento anterior:
 a imagem foi reconstruída, migrations 001-014 foram aplicadas e o smoke terminou com
@@ -50,6 +51,7 @@ declarado em `pyproject.toml`. A tag prevista é `v0.1.0`.
 | Pipeline operacional | `scripts/smoke_offline.*` | sim | repository gate |
 | Frontend | harness Node comportamental | sim | repository gate |
 | Fresh clone externo | smoke em checkout limpo no Windows | sim | passed |
+| Provenance da imagem | GitHub artifact attestation do digest publicado | não | release workflow |
 | Judit real | provider acceptance controlado | não | deferred |
 | Anthropic/OpenAI reais | provider acceptance controlado | não | deferred |
 
