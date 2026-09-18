@@ -38,4 +38,4 @@ Reports are particularly important when they involve:
 
 Until a newer release is published, security fixes target the current `main` branch and the latest published `0.1.x` release line.
 
-Provider acceptance against real Judit/Anthropic/OpenAI accounts is operational validation and must not be used as a substitute for a minimal synthetic security reproduction.
+Provider acceptance against real Judit/Anthropic/OpenAI/Cohere accounts or real BGE artifacts is operational validation and must not be used as a substitute for a minimal synthetic security reproduction. Follow `docs/release/provider-acceptance.md` and never publish acceptance credentials or raw judicial payloads.
