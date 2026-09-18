@@ -78,10 +78,17 @@ def _inline(value: Any) -> str:
     return _SPACE_RE.sub(" ", str(value or "")).strip()
 
 
+def _prose_line(value: Any) -> str:
+    text = _inline(value)
+    if text.startswith(("#", "<", "`", "- ", "* ")):
+        return "\u2060" + text
+    return text
+
+
 def _string_list(value: Any, *, key: str, require_nonempty: bool = False) -> list[str]:
     if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
         raise ValueError(f"structured summary field must be a string array: {key}")
-    rendered = [_inline(item) for item in value if _inline(item)]
+    rendered = [_prose_line(item) for item in value if _inline(item)]
     if require_nonempty and not rendered:
         raise ValueError(f"structured summary field must not be empty: {key}")
     return rendered
@@ -105,9 +112,9 @@ def parse_structured_summary(raw: str) -> dict[str, Any]:
         raise ValueError("structured summary current_status must be a non-empty string")
 
     normalized = {
-        "synthesis": _inline(synthesis),
+        "synthesis": _prose_line(synthesis),
         "timeline": _string_list(payload.get("timeline"), key="timeline"),
-        "current_status": _inline(current_status),
+        "current_status": _prose_line(current_status),
         "attention": _string_list(
             payload.get("attention"), key="attention", require_nonempty=True
         ),
