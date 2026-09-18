@@ -10,16 +10,16 @@ def _validate(text: str):
 
 def test_prompt_documents_conditional_section_order() -> None:
     positions = [
-        PROCESS_SUMMARY_SYSTEM_PROMPT.index(title)
-        for title in (
-            "Decisões",
-            "Prazos em curso",
-            "Processos relacionados",
-            "Anexos",
+        PROCESS_SUMMARY_SYSTEM_PROMPT.index(field)
+        for field in (
+            "decisions",
+            "deadlines",
+            "related_processes",
+            "attachments",
         )
     ]
     assert positions == sorted(positions)
-    assert "Essas seções são condicionais" in PROCESS_SUMMARY_SYSTEM_PROMPT
+    assert "são condicionais" in PROCESS_SUMMARY_SYSTEM_PROMPT
 
 
 def test_accepts_conditional_sections_in_documented_relative_order() -> None:
