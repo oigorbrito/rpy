@@ -74,6 +74,8 @@ def test_release_workflow_observations_cover_image_publish_evidence() -> None:
         "published-image-smoke",
         "published-image-attestation",
         "published-image-attestation-digest",
+        "attestation-id-token-permission",
+        "attestation-write-permission",
     }
 
     assert expected <= by_name.keys()
