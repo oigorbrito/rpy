@@ -226,11 +226,7 @@ def _sniff_attachment_content_type(raw_type: str | None, data: bytes) -> str:
         return "image/png"
     if data.startswith(b"\xff\xd8\xff"):
         return "image/jpeg"
-    try:
-        data.decode("utf-8")
-    except UnicodeDecodeError:
-        return media_type or "application/octet-stream"
-    return "text/plain"
+    return media_type or "application/octet-stream"
 
 
 def _download_signed_attachment_sync(url: str, max_bytes: int) -> JuditAttachmentDownload:
