@@ -357,7 +357,7 @@ async def test_new_attachment_manifest_promotes_version_and_persists_pending_met
     assert current_version != version_1
     assert attachment["source_attachment_id"] == "att-decisao-1"
     assert attachment["source_name"] == "DECISAO 1.pdf"
-    assert attachment["source_date"].isoformat() == "2026-09-17T09:00:00-03:00"
+    assert attachment["source_date"].isoformat() == "2026-09-17T12:00:00+00:00"
     assert attachment["provider_status"] == "done"
     assert attachment["status"] == "pending"
     assert attachment["content_sha256"] is None
