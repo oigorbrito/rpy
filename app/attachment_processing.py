@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import io
 import os
+import subprocess
+import tempfile
+from pathlib import Path
 from dataclasses import dataclass
 from typing import Literal
 from uuid import UUID
@@ -16,6 +20,9 @@ from app.attachments import AttachmentChunkInput, replace_attachment_chunks, ups
 DEFAULT_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024
 DEFAULT_ATTACHMENT_CHUNK_CHARS = 4_000
 MIN_ATTACHMENT_CHUNK_CHARS = 256
+DEFAULT_ATTACHMENT_OCR_TIMEOUT_SECONDS = 30
+DEFAULT_ATTACHMENT_OCR_LANGUAGE = "por"
+OCR_IMAGE_CONTENT_TYPES = ("image/png", "image/jpeg")
 
 FailureStatus = Literal["corrupt", "unreadable"]
 
@@ -31,6 +38,48 @@ class AttachmentProcessingError(ValueError):
         super().__init__(error_code)
         self.status = status
         self.error_code = error_code
+
+
+@dataclass(frozen=True, slots=True)
+class AttachmentOCRConfig:
+    enabled: bool = False
+    binary: str = "tesseract"
+    language: str = DEFAULT_ATTACHMENT_OCR_LANGUAGE
+    timeout_seconds: int = DEFAULT_ATTACHMENT_OCR_TIMEOUT_SECONDS
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    value = raw.strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    raise RuntimeError(f"{name} must be a boolean")
+
+
+def attachment_ocr_config() -> AttachmentOCRConfig:
+    enabled = _env_bool("ATTACHMENT_OCR_ENABLED", False)
+    binary = str(os.getenv("ATTACHMENT_OCR_BINARY") or "tesseract").strip()
+    language = str(
+        os.getenv("ATTACHMENT_OCR_LANGUAGE") or DEFAULT_ATTACHMENT_OCR_LANGUAGE
+    ).strip()
+    timeout_seconds = _positive_env_int(
+        "ATTACHMENT_OCR_TIMEOUT_SECONDS",
+        DEFAULT_ATTACHMENT_OCR_TIMEOUT_SECONDS,
+    )
+    if enabled and not binary:
+        raise RuntimeError("ATTACHMENT_OCR_BINARY is required when OCR is enabled")
+    if enabled and not language:
+        raise RuntimeError("ATTACHMENT_OCR_LANGUAGE is required when OCR is enabled")
+    return AttachmentOCRConfig(
+        enabled=enabled,
+        binary=binary,
+        language=language,
+        timeout_seconds=timeout_seconds,
+    )
 
 
 def _positive_env_int(name: str, default: int) -> int:
@@ -236,6 +285,130 @@ def parse_pdf_attachment(
     return chunks
 
 
+def _validate_image_payload(
+    data: bytes,
+    *,
+    content_type: str,
+    limits: AttachmentProcessingLimits,
+) -> str:
+    normalized_type = normalize_content_type(content_type)
+    if normalized_type not in OCR_IMAGE_CONTENT_TYPES:
+        raise AttachmentProcessingError(
+            status="unreadable",
+            error_code="unsupported_content_type",
+        )
+    if len(data) > limits.max_bytes:
+        raise AttachmentProcessingError(
+            status="unreadable",
+            error_code="attachment_too_large",
+        )
+    if not data:
+        raise AttachmentProcessingError(
+            status="unreadable",
+            error_code="empty_attachment",
+        )
+    if normalized_type == "image/png":
+        if not data.startswith(b"\x89PNG\r\n\x1a\n"):
+            raise AttachmentProcessingError(
+                status="corrupt",
+                error_code="invalid_image_header",
+            )
+        return ".png"
+    if not data.startswith(b"\xff\xd8\xff"):
+        raise AttachmentProcessingError(
+            status="corrupt",
+            error_code="invalid_image_header",
+        )
+    return ".jpg"
+
+
+def _run_tesseract_ocr(
+    data: bytes,
+    *,
+    suffix: str,
+    config: AttachmentOCRConfig,
+) -> str:
+    with tempfile.TemporaryDirectory(prefix="rpy-ocr-") as directory:
+        image_path = Path(directory) / f"attachment{suffix}"
+        image_path.write_bytes(data)
+        try:
+            completed = subprocess.run(
+                [
+                    config.binary,
+                    str(image_path),
+                    "stdout",
+                    "-l",
+                    config.language,
+                    "--psm",
+                    "6",
+                    "quiet",
+                ],
+                check=False,
+                capture_output=True,
+                timeout=config.timeout_seconds,
+            )
+        except FileNotFoundError as exc:
+            raise AttachmentProcessingError(
+                status="unreadable",
+                error_code="ocr_unavailable",
+            ) from exc
+        except subprocess.TimeoutExpired as exc:
+            raise AttachmentProcessingError(
+                status="unreadable",
+                error_code="ocr_timeout",
+            ) from exc
+        if completed.returncode != 0:
+            raise AttachmentProcessingError(
+                status="unreadable",
+                error_code="ocr_failed",
+            )
+        try:
+            text = completed.stdout.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise AttachmentProcessingError(
+                status="unreadable",
+                error_code="ocr_invalid_utf8",
+            ) from exc
+        return text
+
+
+async def parse_image_attachment_ocr(
+    data: bytes,
+    *,
+    content_type: str,
+    limits: AttachmentProcessingLimits | None = None,
+    config: AttachmentOCRConfig | None = None,
+) -> list[AttachmentChunkInput]:
+    effective_limits = limits or attachment_processing_limits()
+    effective_config = config or attachment_ocr_config()
+    suffix = _validate_image_payload(
+        data,
+        content_type=content_type,
+        limits=effective_limits,
+    )
+    if not effective_config.enabled:
+        raise AttachmentProcessingError(
+            status="unreadable",
+            error_code="ocr_disabled",
+        )
+    text = await asyncio.to_thread(
+        _run_tesseract_ocr,
+        data,
+        suffix=suffix,
+        config=effective_config,
+    )
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not normalized:
+        raise AttachmentProcessingError(
+            status="unreadable",
+            error_code="ocr_no_text",
+        )
+    return chunk_attachment_text(
+        normalized,
+        chunk_chars=effective_limits.chunk_chars,
+    )
+
+
 def parse_attachment(
     data: bytes,
     *,
@@ -267,11 +440,18 @@ async def process_attachment_bytes(
     effective_limits = limits or attachment_processing_limits()
     digest = hashlib.sha256(data).hexdigest()
     try:
-        chunks = parse_attachment(
-            data,
-            content_type=content_type,
-            limits=effective_limits,
-        )
+        if normalize_content_type(content_type) in OCR_IMAGE_CONTENT_TYPES:
+            chunks = await parse_image_attachment_ocr(
+                data,
+                content_type=content_type,
+                limits=effective_limits,
+            )
+        else:
+            chunks = parse_attachment(
+                data,
+                content_type=content_type,
+                limits=effective_limits,
+            )
     except AttachmentProcessingError as exc:
         attachment_id = await upsert_attachment_state(
             conn,
