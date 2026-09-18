@@ -450,6 +450,7 @@ def _render_pdf_pages_for_ocr(
             error_code="pdf_ocr_rasterizer_unavailable",
         ) from exc
 
+    document = None
     try:
         document = pdfium.PdfDocument(data)
         page_count = len(document)
@@ -476,8 +477,6 @@ def _render_pdf_pages_for_ocr(
                     bitmap.close()
                 if hasattr(page, "close"):
                     page.close()
-        if hasattr(document, "close"):
-            document.close()
         return rendered
     except AttachmentProcessingError:
         raise
@@ -486,6 +485,9 @@ def _render_pdf_pages_for_ocr(
             status="unreadable",
             error_code="pdf_ocr_rasterize_failed",
         ) from exc
+    finally:
+        if document is not None and hasattr(document, "close"):
+            document.close()
 
 
 async def parse_pdf_attachment_ocr(
