@@ -43,6 +43,7 @@ from app.summary_output import (
 )
 from app.tasks import PermanentTaskError, task
 from app.tpu_glossary import resolve_process_tpu_definitions
+from app.unicode_security import model_view_text, model_view_value
 from app.validation import ValidationResult, validar
 
 SONNET_MODEL = "claude-sonnet-5"
@@ -145,7 +146,10 @@ def _provider_datetime(value: Any) -> str | None:
 
 def _serialize_steps(ranked: list[Any]) -> list[dict[str, Any]]:
     _, step_max, steps_total_max = provider_context_limits()
-    texts = [_truncate_text(str(item.step.text or ""), step_max) for item in ranked]
+    texts = [
+        _truncate_text(model_view_text(str(item.step.text or "")).text, step_max)
+        for item in ranked
+    ]
 
     if sum(len(text) for text in texts) > steps_total_max:
         bounded: list[str] = []
@@ -163,7 +167,11 @@ def _serialize_steps(ranked: list[Any]) -> list[dict[str, Any]]:
         {
             "step_number": item.step.step_number,
             "occurred_at": _provider_datetime(item.step.occurred_at),
-            "title": item.step.title,
+            "title": (
+                model_view_text(str(item.step.title)).text
+                if item.step.title is not None
+                else None
+            ),
             "text": text,
         }
         for item, text in zip(ranked, texts, strict=True)
@@ -315,6 +323,10 @@ async def _load_context(
         scorer=reranker_scorer,
     )
     base["_selected_sources"] = selected_movement_sources(ranked)
+    for source in base["_selected_sources"]:
+        _record_unicode_security_flags(
+            base, list(source.get("unicode_security_flags") or [])
+        )
     base["steps"] = _serialize_steps(ranked)
 
     base["_attachment_sources"] = []
@@ -328,6 +340,10 @@ async def _load_context(
             base_query=RETRIEVAL_QUERY,
         )
         base["_attachment_sources"] = attachment_sources
+        for source in attachment_sources:
+            _record_unicode_security_flags(
+                base, list(source.get("unicode_security_flags") or [])
+            )
         if status_counts:
             base["attachment_status"] = status_counts
             warnings = attachment_status_warnings(status_counts)
@@ -370,24 +386,38 @@ def _secret_summary(context: dict[str, Any]) -> str:
     return "\n".join(lines).strip()
 
 
+def _record_unicode_security_flags(
+    context: dict[str, Any], flags: list[str] | tuple[str, ...]
+) -> None:
+    current = {
+        str(flag)
+        for flag in context.get("_unicode_security_flags", [])
+        if isinstance(flag, str)
+    }
+    current.update(str(flag) for flag in flags)
+    context["_unicode_security_flags"] = sorted(current)
+
+
 def _provider_payload(context: dict[str, Any]) -> tuple[dict[str, Any], list[Any]]:
     if _is_secret_context(context):
-        return (
-            {
-                "class_name": context.get("class_name"),
-                "header": context.get("header") or {},
-            },
-            [],
-        )
-
-    return (
-        {
+        raw_process = {
+            "class_name": context.get("class_name"),
+            "header": context.get("header") or {},
+        }
+        raw_steps: list[Any] = []
+    else:
+        raw_process = {
             key: value
             for key, value in context.items()
             if key != "steps" and not key.startswith("_")
-        },
-        list(context.get("steps", [])),
+        }
+        raw_steps = list(context.get("steps", []))
+
+    rendered, flags = model_view_value(
+        {"process": raw_process, "steps": raw_steps}
     )
+    _record_unicode_security_flags(context, flags)
+    return dict(rendered["process"]), list(rendered["steps"])
 
 
 def _provider_source_text(context: dict[str, Any]) -> str:
@@ -615,14 +645,15 @@ async def _persist_summary(
     selected_sources: list[dict[str, Any]] | None = None,
     attachment_sources: list[dict[str, Any]] | None = None,
     glossary_sources: list[dict[str, Any]] | None = None,
+    unicode_security_flags: list[str] | None = None,
 ) -> bool:
     async with conn.transaction():
         row = await conn.fetchrow(
             """
             INSERT INTO process_summaries (
                 process_id, version_id, markdown, validation, model, prompt_version,
-                generation_ms, usage, cache_hit, cost_usd
-            ) VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8::jsonb, $9, $10)
+                generation_ms, usage, cache_hit, cost_usd, unicode_security_flags
+            ) VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8::jsonb, $9, $10, $11::jsonb)
             ON CONFLICT (process_id, version_id)
             DO UPDATE SET markdown = EXCLUDED.markdown,
                           validation = EXCLUDED.validation,
@@ -632,6 +663,7 @@ async def _persist_summary(
                           usage = EXCLUDED.usage,
                           cache_hit = EXCLUDED.cache_hit,
                           cost_usd = EXCLUDED.cost_usd,
+                          unicode_security_flags = EXCLUDED.unicode_security_flags,
                           created_at = NOW()
             WHERE COALESCE((process_summaries.validation->>'passed')::boolean, false) = false
                OR (
@@ -653,6 +685,7 @@ async def _persist_summary(
             json.dumps(usage or {}),
             cache_hit,
             cost_usd,
+            json.dumps(unicode_security_flags or []),
         )
         if row is None:
             return False
@@ -797,6 +830,7 @@ async def generate_summary(
             selected_sources=list(context.get("_selected_sources", [])),
             attachment_sources=list(context.get("_attachment_sources", [])),
             glossary_sources=list(context.get("_glossary_sources", [])),
+            unicode_security_flags=list(context.get("_unicode_security_flags", [])),
         )
     return {
         "validation": validation,
