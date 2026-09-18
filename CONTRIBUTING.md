@@ -69,6 +69,8 @@ Before requesting review:
 
 The GitHub Actions workflow is the source of truth for repository gates. A local pass does not replace a failed or missing CI run.
 
+For frontend behavior changes, use `docs/frontend/behavior-harness.md` as the test-design contract: prefer named scenarios and observable effects (requests, rendered state, focus, ARIA state, clipboard and bounded timers) over assertions coupled to implementation structure.
+
 ## Commit and naming conventions
 
 Use concise imperative commit subjects. Conventional prefixes such as `fix:`, `test:`, `docs:`, `ci:` and `chore:` are encouraged when they improve scanability, but semantic clarity matters more than rigid formatting.
