@@ -43,6 +43,20 @@ The API publishes port 8000 on `127.0.0.1` by default. Put a TLS-terminating rev
 
 The ingress should enforce a request-body limit no greater than `JUDIT_WEBHOOK_MAX_BODY_BYTES` and should preserve the application's `/health` and `/ready` behavior. `/health` is liveness-only; `/ready` verifies PostgreSQL reachability.
 
+## Browser security headers
+
+The application applies a deterministic browser-security baseline to every HTTP response, including frontend assets, JSON/API responses and errors:
+
+- `Content-Security-Policy: default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; frame-src 'none'; form-action 'self'`;
+- `X-Content-Type-Options: nosniff`;
+- `X-Frame-Options: DENY` as legacy defense in depth alongside CSP `frame-ancestors 'none'`;
+- `Referrer-Policy: no-referrer`;
+- `Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()`.
+
+The frontend deliberately uses only same-origin external JavaScript/CSS and requires no `unsafe-inline` or `unsafe-eval` CSP exception. A new browser capability or external frontend origin must be treated as a security-contract change and accompanied by tests before the policy is relaxed.
+
+HTTP Strict Transport Security (HSTS) remains owned by the TLS-terminating ingress/reverse proxy, not the application container. Enable HSTS only where HTTPS is actually authoritative for the public hostname; do not infer HTTPS from the internal HTTP hop between ingress and Rpy.
+
 ## Secrets
 
 Production has no fallback values for:

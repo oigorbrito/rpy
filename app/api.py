@@ -27,6 +27,7 @@ from app.observability import (
 from app.process_requests import grant_request_tenants, request_process
 from app.processes import get_authorized_process, log_access, stage_version
 from app.queue import enqueue
+from app.security_headers import SecurityResponseHeadersMiddleware
 from app.tenancy import configured_webhook_tenant, validate_carteira_seed
 from app.webhook_security import (
     JuditWebhookSecretRedactionMiddleware,
@@ -56,6 +57,7 @@ app = FastAPI(title="Rpy", lifespan=lifespan)
 app.add_middleware(ApiKeySecurityMiddleware)
 app.add_middleware(JuditWebhookBodyLimitMiddleware)
 app.add_middleware(JuditWebhookSecretRedactionMiddleware)
+app.add_middleware(SecurityResponseHeadersMiddleware)
 app.include_router(api_v1_router)
 app.include_router(frontend_router)
 
