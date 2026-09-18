@@ -12,7 +12,7 @@ def test_allowlist_requires_dns_names(monkeypatch: pytest.MonkeyPatch) -> None:
         "EGRESS_PROXY_ALLOWED_HOSTS",
         "api.anthropic.com, requests.production.judit.io",
     )
-    assert egress_proxy._allowed_hosts() == frozenset(
+    assert egress_proxy._allowed_hosts() == frozenset(  # nosec B101
         {"api.anthropic.com", "requests.production.judit.io"}
     )
 
@@ -29,7 +29,7 @@ def test_allowlist_requires_dns_names(monkeypatch: pytest.MonkeyPatch) -> None:
     ],
 )
 def test_connect_target_is_exact_tls_hostname(target: str, expected: str) -> None:
-    assert egress_proxy._parse_connect_target(target) == expected
+    assert egress_proxy._parse_connect_target(target) == expected  # nosec B101
 
 
 @pytest.mark.parametrize(
@@ -89,8 +89,8 @@ async def test_disallowed_connect_is_rejected_before_dns_or_socket(
         timeout_seconds=1.0,
     )
 
-    assert b"403 Forbidden" in bytes(writer.data)
-    assert writer.closed is True
+    assert b"403 Forbidden" in bytes(writer.data)  # nosec B101
+    assert writer.closed is True  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -108,7 +108,7 @@ async def test_plain_http_proxying_is_not_supported() -> None:
         timeout_seconds=1.0,
     )
 
-    assert b"405 Method Not Allowed" in bytes(writer.data)
+    assert b"405 Method Not Allowed" in bytes(writer.data)  # nosec B101
 
 
 
@@ -131,8 +131,8 @@ async def test_idle_handshake_times_out_and_closes_connection(
         timeout_seconds=0.01,
     )
 
-    assert b"400 Bad Request" in bytes(writer.data)
-    assert writer.closed is True
+    assert b"400 Bad Request" in bytes(writer.data)  # nosec B101
+    assert writer.closed is True  # nosec B101
 
 
 
@@ -170,5 +170,5 @@ async def test_upstream_socket_uses_authorized_allowlist_value(
         timeout_seconds=1.0,
     )
 
-    assert observed == [("api.anthropic.com", 443)]
-    assert b"200 Connection Established" in bytes(writer.data)
+    assert observed == [("api.anthropic.com", 443)]  # nosec B101
+    assert b"200 Connection Established" in bytes(writer.data)  # nosec B101
