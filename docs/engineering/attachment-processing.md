@@ -185,6 +185,21 @@ This boundary is intentionally **not** wired to automatic acquisition yet. `with
 
 Current Judit materials agree on `with_attachments: true`, attachment ids and CNJ/instance addressing, but currently expose more than one download/authentication shape. Automatic acquisition therefore remains gated until one deployment-authoritative contract is selected and tested. Provider availability, commercial authorization and private-document credentials remain deployment concerns rather than assumptions in code.
 
+## Controlled Judit acquisition
+
+Automatic source acquisition is wired behind two deployment gates and is disabled by default:
+
+- `JUDIT_ATTACHMENTS_ENABLED=true`;
+- `JUDIT_ATTACHMENT_DOWNLOAD_MODE=direct_api_key`.
+
+When both are explicit, new Judit requests and trackings set `with_attachments: true`. For a promoted, non-cached, non-secret version with a non-empty attachment manifest, finalization enqueues one `process_judit_attachments` job instead of generating the summary immediately.
+
+The acquisition job operates only on the current finalized version. It downloads each local `pending` attachment through the bounded Judit client, processes bytes locally, and enqueues `generate_process_summary` only after the version has no remaining `pending` attachments. Retries are idempotent because already-processed rows are not selected again.
+
+A deterministic provider rejection (normal 4xx other than 408/429) becomes attachment-local `unavailable/judit_download_rejected`, allowing the process summary to continue with the existing degraded-status warning. Timeouts, transport failures, 408, 429 and 5xx remain ambiguous and fail the acquisition job so the durable queue can retry instead of silently discarding a document.
+
+The configured mode is intentionally explicit because Judit's current official materials are inconsistent: the general authentication/quickstart documentation specifies `api-key` for all API modules, and current 2026 integration examples show direct lawsuit attachment download with `api-key`, while the attachment-specific API-reference page still shows a Bearer-token endpoint returning an `attachment_url`. Rpy therefore does not silently select a mode when attachment collection is enabled.
+
 ## Judit activation gate
 
 `with_attachments` remains `false` until all of the following exist in one tested rollout:
