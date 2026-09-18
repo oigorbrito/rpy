@@ -34,3 +34,19 @@ def test_frontend_clears_previous_result_before_search_and_on_new_search()->None
 
 def test_frontend_uses_public_api_shape_for_secret_and_unauthorized_states()->None:
  source=(FRONTEND/"app.js").read_text(); assert "response.status===404" in source; assert "data.parties" in source; assert "data.subjects" in source; assert "data.recent_steps" in source; assert "innerHTML" not in source; assert "request_id" not in source
+
+
+def test_frontend_summary_renderer_is_allowlisted_and_non_executable()->None:
+ source=(FRONTEND/"app.js").read_text()
+ stylesheet=(FRONTEND/"app.css").read_text()
+ assert "summary-process-header" in source
+ assert "summary-party" in source
+ assert "data-component','ProcessHeader'" in source
+ assert "data-component','Party'" in source
+ assert "innerHTML" not in source
+ assert "eval(" not in source
+ assert "new Function" not in source
+ assert "ProcessHeader\\s+className=" in source
+ assert "<Party\\s+name=" in source
+ assert ".summary-process-header" in stylesheet
+ assert ".summary-party" in stylesheet
