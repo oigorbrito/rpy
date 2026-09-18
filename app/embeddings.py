@@ -32,9 +32,10 @@ _FIXED_1536_MODELS = {"text-embedding-ada-002"}
 def vector_retrieval_configured() -> bool:
     """Return whether vector retrieval is available for the selected rollout mode.
 
-    The new semantic-space runtime is explicit and local BGE-only for now. When
-    disabled, the historical OpenAI/vector(1536) path remains available as a
-    rollback boundary. Provider failures are never converted into cross-space
+    The provider/model-isolated runtime selects exactly one approved semantic
+    space (local BGE by default, optional Cohere when explicitly authorized).
+    When disabled, the historical OpenAI/vector(1536) path remains available as
+    a rollback boundary. Provider failures are never converted into cross-space
     fallback.
     """
     if embedding_space_runtime_enabled():

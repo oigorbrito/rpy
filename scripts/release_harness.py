@@ -24,6 +24,7 @@ def main() -> int:
 
     release_notes = ROOT / "docs" / "release" / f"{tag}.md"
     candidate = ROOT / "docs" / "release" / "offline-release-candidate.md"
+    provider_acceptance = ROOT / "docs" / "release" / "provider-acceptance.md"
     readme = ROOT / "README.md"
     license_file = ROOT / "LICENSE"
     notice_file = ROOT / "NOTICE"
@@ -33,6 +34,7 @@ def main() -> int:
     for path in (
         release_notes,
         candidate,
+        provider_acceptance,
         readme,
         license_file,
         notice_file,
@@ -48,6 +50,7 @@ def main() -> int:
     if not errors:
         release_text = read(release_notes)
         candidate_text = read(candidate)
+        provider_acceptance_text = read(provider_acceptance)
         readme_text = read(readme)
         license_text = read(license_file)
         notice_text = read(notice_file)
@@ -60,6 +63,16 @@ def main() -> int:
             errors.append("offline release candidate must match pyproject version/tag")
         if "- [ ]" in candidate_text:
             errors.append("offline release Definition of Done still contains unchecked items")
+        for marker in (
+            "## Preconditions",
+            "## 1. Judit acquisition",
+            "## 2. Anthropic generation",
+            "## 3. Embeddings",
+            "## 4. Reranking",
+            "## Stop conditions",
+        ):
+            if marker not in provider_acceptance_text:
+                errors.append(f"provider acceptance runbook missing required section: {marker}")
 
         for command in ("./scripts/smoke_offline.sh", ".\\scripts\\smoke_offline.ps1"):
             if command not in readme_text:

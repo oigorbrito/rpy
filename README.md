@@ -14,7 +14,7 @@ jobs=complete
 providers=0
 ```
 
-Judit, Anthropic e OpenAI reais são uma etapa posterior de **Provider Acceptance**, opcional e não bloqueante para o release offline. Consulte `docs/release/offline-release-candidate.md` e `docs/release/v0.1.0.md`.
+Judit, Anthropic, OpenAI e Cohere reais são uma etapa posterior de **Provider Acceptance**, controlada por ambiente e não bloqueante para a qualificação offline. BGE real também exige artifact/benchmark próprios antes de ativação. Consulte `docs/release/provider-acceptance.md`, `docs/release/offline-release-candidate.md` e `docs/release/v0.1.0.md`.
 
 ## Princípios de engenharia
 
@@ -213,6 +213,7 @@ Documentação operacional:
 - `docs/deployment/production.md` — topologia e deployment;
 - `docs/deployment/backup-restore.md` — backup e restore drill;
 - `docs/release/offline-release-candidate.md` — Definition of Done/evidências;
+- `docs/release/provider-acceptance.md` — aceitação controlada de providers/artifacts reais;
 - `docs/release/v0.1.0.md` — release notes;
 - `docs/engineering/empirical-engineering.md` — política de evidência técnica;
 - `docs/engineering/project-harness.md` — contrato executável do harness do projeto.

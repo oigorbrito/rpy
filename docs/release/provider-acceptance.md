@@ -1,0 +1,202 @@
+# Provider acceptance runbook
+
+This runbook defines the controlled, environment-specific acceptance that happens **after** the repository/offline release gates are green and **before** a deployment enables paid/external provider behavior with real credentials.
+
+It does not grant legal authority, approve data processing, or replace provider contracts. It exists so the product can be delivered ready to receive the approvals, API keys and artifacts that are controlled outside the repository.
+
+## Current contract snapshot
+
+Externally revalidated on 2026-09-18 against official provider documentation:
+
+| Boundary | Rpy contract | Official source checked |
+|---|---|---|
+| Anthropic generation | `claude-sonnet-5` for <=100 movements; `claude-opus-5` for >100 | https://docs.anthropic.com/en/docs/about-claude/model-deprecations |
+| OpenAI legacy embeddings | `text-embedding-3-small`, explicitly requested at 1536 dimensions | https://platform.openai.com/docs/models |
+| Cohere embeddings | `embed-v4.0`, float embeddings, explicit `output_dimension=1024` | https://docs.cohere.com/docs/cohere-embed |
+| Cohere reranking | `rerank-v4.0-pro`, Rerank v2 | https://docs.cohere.com/docs/rerank |
+| Judit auth/services | `api-key`; Requests, Tracking and Lawsuits production services | https://docs.judit.io/llms.txt |
+| Image provenance | GitHub artifact attestation bound to the published digest | https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations |
+
+The repository tests prove the request shapes with fakes and enforce these configured identifiers. This table is not a substitute for a live acceptance against the account/plan actually provisioned to the target environment.
+
+## Preconditions
+
+Do not start live provider acceptance until all applicable items below are satisfied:
+
+- an immutable `RPY_IMAGE=...@sha256:...` has passed repository CI and published-image runtime smoke;
+- its GitHub artifact attestation has been verified;
+- `python scripts/validate_deploy_env.py --env-file <secret-managed-env>` passes;
+- the target environment has dedicated, rotatable credentials from its secret manager;
+- provider budget/rate-limit ownership is known;
+- a tenant and process/CNJ explicitly authorized for this acceptance are identified;
+- no real process payload is copied into repository fixtures, issues or PRs;
+- external embedding/reranking authorization has been granted separately for that environment when Cohere is selected;
+- legal/governance prerequisites required by #148 are approved before mass indexing or production-scale processing.
+
+Record the approval reference outside the repository when it contains contractual, personal or confidential information. In repository evidence, record only a non-sensitive reference identifier.
+
+## Evidence record
+
+For each acceptance run, record:
+
+- date/time and environment;
+- exact application image digest;
+- provider and model selector;
+- non-sensitive approval/reference ID;
+- provider request/tracking ID when safe to retain;
+- HTTP/result class, not raw provider response bodies;
+- observed latency;
+- provider-reported usage/cost when available;
+- retry count;
+- final application state;
+- sanitized log reference;
+- operator/reviewer identity according to the organization's normal change-management system.
+
+Never record API keys, bearer tokens, webhook tokens, signed attachment URLs, raw judicial payloads or unredacted personal identifiers.
+
+## 1. Judit acquisition
+
+Start with attachments disabled:
+
+```text
+JUDIT_ATTACHMENTS_ENABLED=false
+```
+
+Acceptance must prove:
+
+1. one explicitly authorized CNJ can create an asynchronous lawsuit request;
+2. the returned `request_id` is durably correlated before any callback can grant tenant access;
+3. webhook delivery/finalization reaches the expected tenant-scoped state;
+4. a repeated user request does not create an unintended duplicate side effect;
+5. cached and fresh responses preserve the documented precedence (`cached_response=false` wins);
+6. provider errors are sanitized and do not expose response bodies or credentials;
+7. observed request volume/cost is within the pre-approved acceptance budget.
+
+The current Judit documentation index states that API calls use `api-key`, that asynchronous requests use `requests.production.judit.io`, tracking uses `tracking.production.judit.io`, and lawsuit/attachment access is under `lawsuits.production.judit.io`.
+
+### Attachment activation hold
+
+Keep paid attachment acquisition disabled until a live, explicitly authorized acceptance confirms the attachment contract for the provisioned Judit account.
+
+The official documentation currently has an inconsistency: the canonical documentation index describes the Lawsuits service and `api-key` authentication, while one generated attachment-reference page shows a different host/auth presentation. Because attachment collection is opt-in and chargeable, Rpy must not guess between those representations.
+
+Before setting:
+
+```text
+JUDIT_ATTACHMENTS_ENABLED=true
+JUDIT_ATTACHMENT_DOWNLOAD_MODE=direct_api_key
+```
+
+confirm, with the provider/account actually provisioned:
+
+- accepted authentication header;
+- effective attachment endpoint/host;
+- whether the first response is bytes or metadata containing a download URL;
+- content-type behavior;
+- maximum expected size;
+- billing behavior;
+- handling of private/secret attachments.
+
+If the live contract differs from `app/judit_client.py`, update the adapter and fake contract tests first; do not patch production configuration around a code mismatch.
+
+## 2. Anthropic generation
+
+Use one explicitly authorized, non-secret process.
+
+Acceptance must prove:
+
+- <=100 persisted movements selects `claude-sonnet-5`;
+- >100 selects `claude-opus-5` when that scenario is intentionally exercised;
+- the request uses the configured 4,000-token output ceiling;
+- generated output passes the post-generation validator before publication;
+- one correction attempt behaves as documented when the first output is invalid;
+- usage/cache telemetry is persisted without provider secrets;
+- a secret-process control case does not call Anthropic at all.
+
+Do not use a production secret process as a negative test. The repository already proves that boundary deterministically; production acceptance should verify configuration/logging, not expose restricted content.
+
+## 3. Embeddings
+
+Exactly one embedding space is active per deployment.
+
+### Legacy OpenAI rollback path
+
+If `EMBEDDING_SPACE_RUNTIME_ENABLED=false`, acceptance may verify the historical OpenAI path:
+
+- `text-embedding-3-small`;
+- explicit 1536 dimensions;
+- correct vector count/dimensions;
+- retrieval succeeds for an authorized long process.
+
+This path is a rollback/legacy boundary, not the target BGE rollout.
+
+### BGE isolated runtime
+
+Before activation:
+
+- mount the real `BAAI/bge-m3` artifact at `BGE_EMBEDDING_PATH`;
+- verify the BGE image/artifact contract;
+- perform the controlled historical reindex;
+- collect real retrieval-quality evidence required by #124.
+
+No model-hub download during production activation counts as artifact readiness.
+
+### Cohere Embed v4
+
+Only after environment-specific external-data authorization:
+
+- set `EMBEDDING_PROVIDER=cohere`;
+- set `ALLOW_EXTERNAL_EMBEDDINGS=true`;
+- use `COHERE_EMBEDDING_MODEL=embed-v4.0`;
+- provide worker-only `COHERE_API_KEY`.
+
+Rpy explicitly requests 1024 dimensions because Cohere Embed v4 supports multiple dimensions and its provider default is not the Rpy semantic-space contract. Verify returned dimensions and confirm secret versions never cross the external boundary.
+
+## 4. Reranking
+
+Reranking remains disabled until intentionally activated.
+
+### BGE reranker
+
+Before production enablement:
+
+1. mount the real `BAAI/bge-reranker-v2-m3` artifact at `BGE_RERANKER_PATH`;
+2. run `python scripts/verify_bge_reranker_artifact.py --model-dir "$BGE_RERANKER_PATH"`;
+3. execute `python scripts/benchmark_reranker.py --scorer bge` on the prepared hardware;
+4. record observed quality and latency evidence.
+
+This is the remaining objective acceptance blocker for #121.
+
+### Cohere Rerank
+
+Only after separate external-reranker authorization:
+
+- `RERANKER_ENABLED=true`;
+- `RERANKER_PROVIDER=cohere`;
+- `ALLOW_EXTERNAL_RERANKER=true`;
+- `COHERE_RERANKER_MODEL=rerank-v4.0-pro`;
+- worker-only `COHERE_API_KEY`.
+
+A Cohere reranker acceptance does not substitute for the real BGE benchmark required by the product decision in #121.
+
+## Stop conditions
+
+Stop the acceptance immediately if any of these occur:
+
+- provider/model differs from the pinned contract;
+- a credential appears in logs or error text;
+- a secret process reaches an external provider;
+- tenant authorization cannot be demonstrated before acquisition/read;
+- provider response shape differs from the tested adapter contract;
+- retries create duplicate irreversible side effects;
+- returned embedding dimensions differ from the configured semantic space;
+- provider cost/rate usage exceeds the approved acceptance budget;
+- legal/governance approval is absent for the tested data boundary.
+
+A stopped acceptance is evidence of a blocker. Do not work around it by weakening validation or bypassing preflight.
+
+## Release interpretation
+
+The repository/offline release may be technically qualified while live provider acceptance remains pending. That means the software artifact is ready to receive environment-specific secrets and approvals; it does **not** mean the organization is authorized to process real portfolios or enable every external provider.
+
+Production-scale operation remains conditional on the relevant approvals, artifacts and provider acceptance evidence.
