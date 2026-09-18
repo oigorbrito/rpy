@@ -164,13 +164,26 @@ Attachment processing state is surfaced without granting the API direct access t
 - `ready` alone does not create a warning; one failed attachment does not invalidate otherwise valid movement/context data;
 - secret-process generation still returns before external-provider attachment retrieval.
 
+## Judit source manifest
+
+When a non-secret Judit lawsuit payload contains an `attachments` array, Rpy normalizes only the minimal source manifest needed for durable identity and later processing:
+
+- `attachment_id` (required for a manifest entry);
+- source attachment name, preferring `attachment_name` and falling back to `content`;
+- source attachment date when parseable;
+- source provider status when present.
+
+Arbitrary provider fields, signed/download URLs and credentials are not copied into the normalized manifest. Duplicate source ids are collapsed deterministically. Secret processes discard the manifest in the promotable structure.
+
+The manifest is part of semantic version identity because adding/removing/changing a source attachment can change the evidence available to a future summary. Local processing status (`pending`, `ready`, `unavailable`, `corrupt`, `unreadable`) is deliberately not part of that fingerprint. New manifest rows start as `pending`; re-syncing source metadata does not reset an already-processed row.
+
 ## Judit authenticated download boundary
 
 Rpy now has a provider-boundary primitive for the documented Judit lawsuit attachment endpoint. It downloads by CNJ, instance and attachment id using the configured `JUDIT_API_KEY`, applies the same `ATTACHMENT_MAX_BYTES` ceiling before returning bytes to local processing, normalizes only the response content type, and never logs or persists provider response bodies, signed URLs or credentials.
 
 This boundary is intentionally **not** wired to automatic acquisition yet. `with_attachments` remains `false` in lawsuit requests, so this change cannot introduce attachment charges or alter release behavior by itself. Automatic acquisition still requires an explicit rollout that parses Judit attachment metadata, preserves the secret/private-document boundary, sequences download/processing before summary publication where required, and proves the flow with synthetic integration coverage.
 
-Current public Judit references reviewed for this boundary document both `with_attachments: true` and authenticated attachment download by CNJ/instance/attachment id. Provider availability, commercial authorization and private-document credentials remain deployment concerns rather than assumptions in code.
+Current Judit materials agree on `with_attachments: true`, attachment ids and CNJ/instance addressing, but currently expose more than one download/authentication shape. Automatic acquisition therefore remains gated until one deployment-authoritative contract is selected and tested. Provider availability, commercial authorization and private-document credentials remain deployment concerns rather than assumptions in code.
 
 ## Judit activation gate
 

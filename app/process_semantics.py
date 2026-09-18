@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
-SEMANTIC_SCHEMA_VERSION = 1
+SEMANTIC_SCHEMA_VERSION = 2
 _SAO_PAULO = ZoneInfo("America/Sao_Paulo")
 
 
@@ -34,6 +34,15 @@ def _step_semantics(step: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _attachment_semantics(attachment: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "attachment_id": str(attachment.get("attachment_id") or ""),
+        "attachment_date": _datetime_value(attachment.get("attachment_date")),
+        "attachment_name": attachment.get("attachment_name"),
+        "provider_status": attachment.get("provider_status"),
+    }
+
+
 def semantic_document(
     *,
     header: dict[str, Any],
@@ -43,7 +52,9 @@ def semantic_document(
     court: str | None,
     class_name: str | None,
     secrecy_level: int,
+    attachments: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    manifest = attachments or []
     return {
         "schema_version": SEMANTIC_SCHEMA_VERSION,
         "court": court,
@@ -53,6 +64,7 @@ def semantic_document(
         "parties": parties,
         "subjects": subjects,
         "steps": [_step_semantics(step) for step in steps],
+        "attachments": [_attachment_semantics(item) for item in manifest],
     }
 
 

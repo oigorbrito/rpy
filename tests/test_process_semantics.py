@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from app.process_semantics import semantic_fingerprint
+from app.process_semantics import SEMANTIC_SCHEMA_VERSION, semantic_fingerprint
 
 
 def _fields() -> dict:
@@ -23,6 +23,7 @@ def _fields() -> dict:
                 },
             }
         ],
+        "attachments": [],
         "court": "TJRS",
         "class_name": "Procedimento Comum",
         "secrecy_level": 0,
@@ -52,3 +53,37 @@ def test_semantic_fingerprint_changes_for_relevant_structured_metadata() -> None
     right["class_name"] = "Execução Fiscal"
 
     assert semantic_fingerprint(**left) != semantic_fingerprint(**right)
+
+
+def test_semantic_schema_version_tracks_attachment_manifest_contract() -> None:
+    assert SEMANTIC_SCHEMA_VERSION == 2
+
+
+def test_semantic_fingerprint_changes_when_attachment_manifest_changes() -> None:
+    left = _fields()
+    right = _fields()
+    right["attachments"] = [
+        {
+            "attachment_id": "att-1",
+            "attachment_date": datetime(2026, 9, 17, 12, 0, tzinfo=timezone.utc),
+            "attachment_name": "DECISAO.pdf",
+            "provider_status": "done",
+        }
+    ]
+
+    assert semantic_fingerprint(**left) != semantic_fingerprint(**right)
+
+
+def test_local_attachment_processing_status_is_not_semantic() -> None:
+    left = _fields()
+    right = _fields()
+    attachment = {
+        "attachment_id": "att-1",
+        "attachment_date": datetime(2026, 9, 17, 12, 0, tzinfo=timezone.utc),
+        "attachment_name": "DECISAO.pdf",
+        "provider_status": "done",
+    }
+    left["attachments"] = [dict(attachment, status="pending")]
+    right["attachments"] = [dict(attachment, status="ready")]
+
+    assert semantic_fingerprint(**left) == semantic_fingerprint(**right)
