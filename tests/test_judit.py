@@ -136,6 +136,56 @@ def test_extract_current_judit_steps_and_sanitizes_parties() -> None:
     assert "12345678901" not in str(fields["parties"])
 
 
+def test_normalizes_attachment_manifest_without_copying_arbitrary_fields() -> None:
+    fields = extract_promotable_fields(
+        {
+            "code": "0000000-00.0000.0.00.0000",
+            "instance": 1,
+            "attachments": [
+                {
+                    "attachment_id": "att-1",
+                    "attachment_date": "2026-09-17T12:00:00Z",
+                    "attachment_name": "DECISAO.pdf",
+                    "status": "DONE",
+                    "signed_url": "https://sensitive.example.invalid/document",
+                    "secret": "must-not-be-copied",
+                },
+                {
+                    "attachment_id": "att-1",
+                    "attachment_name": "duplicate.pdf",
+                },
+                {"status": "done"},
+            ],
+            "steps": [],
+        }
+    )
+
+    assert fields["attachments"] == [
+        {
+            "attachment_id": "att-1",
+            "attachment_date": fields["attachments"][0]["attachment_date"],
+            "attachment_name": "DECISAO.pdf",
+            "provider_status": "done",
+        }
+    ]
+    assert fields["attachments"][0]["attachment_date"].isoformat() == "2026-09-17T09:00:00-03:00"
+    assert "signed_url" not in fields["attachments"][0]
+    assert "secret" not in fields["attachments"][0]
+
+
+def test_secret_process_discards_attachment_manifest() -> None:
+    fields = extract_promotable_fields(
+        {
+            "code": "0000000-00.0000.0.00.0000",
+            "secrecy_level": 1,
+            "attachments": [{"attachment_id": "att-secret", "status": "done"}],
+            "steps": [],
+        }
+    )
+
+    assert fields["attachments"] == []
+
+
 def test_masks_cpf_and_cnpj_without_mutating_raw_process() -> None:
     process = {
         "code": "0000000-00.0000.0.00.0000",
