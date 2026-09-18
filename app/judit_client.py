@@ -41,6 +41,20 @@ class JuditAttachmentDownload:
     data: bytes
 
 
+def judit_attachments_enabled() -> bool:
+    raw = os.environ.get("JUDIT_ATTACHMENTS_ENABLED", "false").strip().lower()
+    if raw in {"", "0", "false", "no", "off"}:
+        return False
+    if raw not in {"1", "true", "yes", "on"}:
+        raise RuntimeError("JUDIT_ATTACHMENTS_ENABLED must be a boolean")
+    mode = os.environ.get("JUDIT_ATTACHMENT_DOWNLOAD_MODE", "").strip().lower()
+    if mode != "direct_api_key":
+        raise RuntimeError(
+            "JUDIT_ATTACHMENT_DOWNLOAD_MODE must be direct_api_key when attachments are enabled"
+        )
+    return True
+
+
 def _timeout_seconds() -> float:
     raw = os.environ.get("JUDIT_TIMEOUT_SECONDS", "15")
     try:
@@ -190,7 +204,7 @@ def _create_request_sync(code: str) -> JuditRequestResult:
         method="POST",
         payload={
             "search": {"search_type": "lawsuit_cnj", "search_key": code},
-            "with_attachments": False,
+            "with_attachments": judit_attachments_enabled(),
         },
         accepted_statuses={201},
     )
@@ -213,6 +227,7 @@ def _create_tracking_sync(code: str, recurrence_days: int) -> JuditTrackingResul
                 "search_key": code,
                 "response_type": "lawsuit",
             },
+            "with_attachments": judit_attachments_enabled(),
         },
         accepted_statuses={200, 201},
     )
