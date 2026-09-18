@@ -67,6 +67,21 @@ _AMOUNT_CLAIM_RE = re.compile(
     r"^(?:[-*]\s*)?(?P<label>Valor(?: da causa)?)\s*:\s*(?P<value>.+?)\s*$",
     re.IGNORECASE | re.MULTILINE,
 )
+_URL_RE = re.compile(r"https?://[^\\s)>\\]]+", re.IGNORECASE)
+_META_OUTPUT_MARKERS = (
+    "system prompt",
+    "prompt do sistema",
+    "mensagem de sistema",
+    "developer message",
+    "mensagem de desenvolvedor",
+    "instruções internas",
+    "instrucoes internas",
+    "ignore as instruções anteriores",
+    "ignore as instrucoes anteriores",
+    "as a language model",
+    "como modelo de linguagem",
+)
+
 _CORE_SECTION_ORDER = (
     "Partes",
     "Síntese",
@@ -362,6 +377,21 @@ def _source_backed_claim_errors(text: str, source_text: str) -> list[str]:
     return errors
 
 
+def _untrusted_output_errors(text: str, source_text: str) -> list[str]:
+    errors: list[str] = []
+    normalized_text = _normalize_party_name(text)
+    normalized_source = _normalize_party_name(source_text)
+    for marker in _META_OUTPUT_MARKERS:
+        normalized_marker = _normalize_party_name(marker)
+        if normalized_marker in normalized_text and normalized_marker not in normalized_source:
+            errors.append(f"meta-output marker not present in source context: {marker}")
+
+    source_urls = set(_URL_RE.findall(source_text))
+    for url in sorted(set(_URL_RE.findall(text)) - source_urls):
+        errors.append(f"URL not present in source context: {url}")
+    return errors
+
+
 def _canonical_date(value: str) -> str | None:
     for fmt in ("%Y-%m-%d", "%d/%m/%Y"):
         try:
@@ -469,6 +499,7 @@ def validar(
             errors.append(f"date not present in source context: {generated_date}")
         errors.extend(_source_backed_claim_errors(text, source_text))
         errors.extend(_amount_claim_errors(text, source_text))
+        errors.extend(_untrusted_output_errors(text, source_text))
 
     attention_body = _attention_body(text)
     if require_attention_section:
