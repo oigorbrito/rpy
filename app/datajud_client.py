@@ -260,9 +260,9 @@ async def lookup_datajud_metadata(
     secrecy_level: int,
     config: DataJudConfig | None = None,
 ) -> DataJudLookupResult:
-    active = config or datajud_config()
     if secrecy_level > 0:
         return DataJudLookupResult(status="skipped_secrecy")
+    active = config or datajud_config()
     if not active.enabled:
         return DataJudLookupResult(status="disabled")
     if not active.authorized_use or not active.api_key:
