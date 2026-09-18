@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import ipaddress
 import os
 import re
@@ -49,7 +50,7 @@ def _connect_timeout() -> float:
     return value
 
 
-def _parse_connect_target(target: str) -> tuple[str, int]:
+def _parse_connect_target(target: str) -> str:
     if target.count(":") != 1:
         raise ValueError("CONNECT target must be hostname:port")
     raw_host, raw_port = target.rsplit(":", 1)
@@ -72,7 +73,7 @@ def _parse_connect_target(target: str) -> tuple[str, int]:
         raise ValueError("invalid CONNECT port") from exc
     if port != 443:
         raise ValueError("only TLS port 443 is allowed")
-    return host, port
+    return host
 
 
 async def _write_response(writer: asyncio.StreamWriter, status: str) -> None:
@@ -142,13 +143,21 @@ async def _handle_client(
         if method != "CONNECT":
             await _write_response(writer, "405 Method Not Allowed")
             return
-        host, port = _parse_connect_target(target)
-        if host not in allowed_hosts:
+        requested_host = _parse_connect_target(target)
+        authorized_host = next(
+            (
+                configured_host
+                for configured_host in allowed_hosts
+                if hmac.compare_digest(requested_host, configured_host)
+            ),
+            None,
+        )
+        if authorized_host is None:
             await _write_response(writer, "403 Forbidden")
             return
         try:
             upstream_reader, upstream_writer = await asyncio.wait_for(
-                asyncio.open_connection(host, port),
+                asyncio.open_connection(authorized_host, 443),
                 timeout=timeout_seconds,
             )
         except (OSError, TimeoutError):
