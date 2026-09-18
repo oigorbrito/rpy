@@ -1,6 +1,6 @@
-# Offline release candidate
+# Offline release evidence — v0.1.0
 
-Este documento consolida o que está evidenciado para um release offline e não substitui validação no ambiente de destino.
+Este documento registra a qualificação offline do release histórico `v0.1.0` e não substitui validação no ambiente de destino. O estado do `main` posterior a essa tag é acompanhado separadamente em `docs/release/next-release.md`.
 
 ## Caminho canônico
 
@@ -36,8 +36,9 @@ O fresh clone foi validado em Windows fora do ambiente de desenvolvimento anteri
 a imagem foi reconstruída, migrations 001-014 foram aplicadas e o smoke terminou com
 `RPY OFFLINE SMOKE: PASS`, `summary=valid`, `jobs=complete` e `providers=0`.
 
-A versão formal deste primeiro release offline é `0.1.0`, em linha com o valor já
-declarado em `pyproject.toml`. A tag prevista é `v0.1.0`.
+A versão formal deste primeiro release offline é `0.1.0`. A tag histórica
+`v0.1.0` já existe e é imutável; nenhuma mudança posterior de `main` faz parte
+desse release. O identificador do próximo release permanece `TBD`.
 
 ## Matriz de evidências
 
