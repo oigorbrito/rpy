@@ -81,5 +81,5 @@ async def test_generate_sends_volume_profile_in_real_user_prompt(monkeypatch) ->
     prompt = client.messages.request["messages"][0]["content"]
     assert "<perfil_de_extensao>" in prompt
     assert "Processo longo (mais de 60 movimentos)" in prompt
-    assert "<processo>" in prompt
-    assert "<movimentos>" in prompt
+    assert "<processo_json>" in prompt
+    assert "<movimentos_json>" in prompt
