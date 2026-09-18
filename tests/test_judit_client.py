@@ -155,3 +155,127 @@ def test_timeout_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("JUDIT_TIMEOUT_SECONDS", "61")
     with pytest.raises(RuntimeError, match="between 0 and 60"):
         judit_client._timeout_seconds()
+
+
+
+def test_create_request_can_explicitly_enable_attachments(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = {}
+    monkeypatch.setenv("JUDIT_API_KEY", "secret-provider-key")
+    monkeypatch.setenv("JUDIT_ATTACHMENTS_ENABLED", "true")
+    monkeypatch.setattr(
+        judit_client.urllib.request,
+        "urlopen",
+        lambda request, timeout: captured.update(request=request, timeout=timeout)
+        or _Response(b'{"request_id":"req-attachments"}'),
+    )
+
+    result = judit_client._create_request_sync("0000000-00.2026.8.21.0001")
+
+    assert result.request_id == "req-attachments"
+    assert json.loads(captured["request"].data)["with_attachments"] is True
+
+
+class _AttachmentResponse:
+    status = 200
+
+    def __init__(self, body: bytes, *, content_type: str, url: str):
+        self.body = body
+        self.headers = {"Content-Type": content_type}
+        self._url = url
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+    def read(self, limit: int):
+        return self.body[:limit]
+
+    def geturl(self):
+        return self._url
+
+
+def test_attachment_url_uses_canonical_lawsuits_api_key_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = {}
+    monkeypatch.setenv("JUDIT_API_KEY", "attachment-api-key")
+    monkeypatch.delenv("JUDIT_LAWSUITS_URL", raising=False)
+    monkeypatch.setattr(
+        judit_client.urllib.request,
+        "urlopen",
+        lambda request, timeout: captured.update(request=request, timeout=timeout)
+        or _Response(b'{"attachment_url":"https://signed.example/file.pdf"}', status=200),
+    )
+
+    url = judit_client._attachment_url_sync(
+        "0000000-00.2026.8.21.0001",
+        1,
+        "attachment/id",
+    )
+
+    request = captured["request"]
+    assert url == "https://signed.example/file.pdf"
+    assert request.full_url == (
+        "https://lawsuits.production.judit.io/lawsuits/"
+        "0000000-00.2026.8.21.0001/1/attachments/attachment%2Fid"
+    )
+    assert request.get_header("Api-key") == "attachment-api-key"
+    assert request.get_header("Authorization") is None
+
+
+def test_signed_attachment_download_never_forwards_judit_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = {}
+    monkeypatch.setenv("JUDIT_API_KEY", "must-not-leak")
+    data = b"%PDF-1.4\nsynthetic"
+    signed_url = "https://signed-storage.example/file"
+    monkeypatch.setattr(
+        judit_client.urllib.request,
+        "urlopen",
+        lambda request, timeout: captured.update(request=request, timeout=timeout)
+        or _AttachmentResponse(
+            data,
+            content_type="application/octet-stream",
+            url=signed_url,
+        ),
+    )
+
+    result = judit_client._download_signed_attachment_sync(signed_url, 1024)
+
+    request = captured["request"]
+    assert request.get_header("Api-key") is None
+    assert request.get_header("Authorization") is None
+    assert result.content_type == "application/pdf"
+    assert result.data == data
+
+
+def test_signed_attachment_download_rejects_oversize_and_https_downgrade(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    signed_url = "https://signed-storage.example/file"
+    monkeypatch.setattr(
+        judit_client.urllib.request,
+        "urlopen",
+        lambda request, timeout: _AttachmentResponse(
+            b"123456",
+            content_type="application/octet-stream",
+            url=signed_url,
+        ),
+    )
+    with pytest.raises(judit_client.JuditRequestError, match="safe size"):
+        judit_client._download_signed_attachment_sync(signed_url, 5)
+
+    monkeypatch.setattr(
+        judit_client.urllib.request,
+        "urlopen",
+        lambda request, timeout: _AttachmentResponse(
+            b"ok",
+            content_type="text/plain",
+            url="http://downgraded.example/file",
+        ),
+    )
+    with pytest.raises(judit_client.JuditRequestError, match="unsafe signed attachment redirect"):
+        judit_client._download_signed_attachment_sync(signed_url, 10)
