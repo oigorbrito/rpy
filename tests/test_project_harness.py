@@ -61,3 +61,18 @@ def test_guardrail_failure_is_observable_not_raised(
     assert observation.kind == "guardrail"
     assert "guardrail stdout" in observation.detail
     assert "guardrail stderr" in observation.detail
+
+
+def test_release_workflow_observations_cover_image_publish_evidence() -> None:
+    observations = project_harness._release_workflow_observations()
+    by_name = {item.name: item for item in observations}
+
+    expected = {
+        "image-project-harness",
+        "image-unit-tests",
+        "image-postgres-integration",
+        "published-image-smoke",
+    }
+
+    assert expected <= by_name.keys()
+    assert all(by_name[name].status == "pass" for name in expected)
