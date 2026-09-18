@@ -72,6 +72,8 @@ def test_release_workflow_observations_cover_image_publish_evidence() -> None:
         "image-unit-tests",
         "image-postgres-integration",
         "published-image-smoke",
+        "published-image-attestation",
+        "published-image-attestation-digest",
     }
 
     assert expected <= by_name.keys()
