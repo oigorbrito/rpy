@@ -6,7 +6,7 @@ This repository is being assembled rapidly from verified open-source building bl
 
 Agents must distinguish **invariants**, **hypotheses**, and **evidence**.
 
-- An invariant is a property whose violation can corrupt data, leak data, duplicate side effects, break recovery, or violate an explicit product contract. Encode stable, machine-checkable invariants in tests, database constraints/triggers, or `scripts/migration_harness.py`.
+- An invariant is a property whose violation can corrupt data, leak data, duplicate side effects, break recovery, or violate an explicit product contract. Encode stable, machine-checkable invariants in tests, database constraints/triggers, or the appropriate cheap guardrail. `scripts/project_harness.py` is the project-level entrypoint; `scripts/migration_harness.py` and `scripts/release_harness.py` remain specialized guardrails.
 - A hypothesis is an engineering belief not yet demonstrated in Rpy. Do not turn a hypothesis into a permanent harness rule merely because it is conventional wisdom.
 - Evidence is a reproducible observation: a test, CI run, restore drill, benchmark, production metric, incident, or relevant empirical study. Record enough context to reproduce or challenge it.
 
@@ -31,7 +31,7 @@ For non-trivial changes:
 5. For schema evolution, preserve compatibility with the currently deployable application during rolling deployment. Prefer additive/expand-migrate-contract changes; destructive contraction requires explicit evidence that old readers/writers are gone and a rollback/recovery plan.
 6. For retries and externally repeated events, prove idempotency at the durable boundary. A retry must not mutate finalized historical source data, duplicate irreversible side effects, or renew retention clocks without new activity.
 7. For privacy/security boundaries, minimize data before the external boundary and test the exact outbound payload. Secret judicial cases must not call an external LLM.
-8. Run the migration harness, unit tests, container smoke, migration/restore checks, and PostgreSQL integration tests applicable to the change. Never report green until the actual CI run is green.
+8. Run the project harness plus the unit, container, migration/restore, frontend, evaluation, and PostgreSQL evidence applicable to the change. Never report green until the actual CI run is green.
 9. Update operational or migration documentation when the change alters a durable invariant, deployment assumption, recovery procedure, retention behavior, or external data boundary.
 10. Keep rollback explicit. If a migration is intentionally irreversible, document why and how service/data recovery works instead.
 
@@ -50,7 +50,7 @@ Before transplanting code from another repository:
 7. Remove donor UI, dashboards, marketing, telemetry, deployment assumptions, unrelated APIs, demo tasks, sample data, and provider-specific abstractions unless Rpy requires them.
 8. Preserve attribution/license files when legally required. Do not remove notices that must remain with copied code.
 9. Add or update tests that prove the transplanted behavior in Rpy.
-10. Run the migration harness before considering the transplant complete.
+10. Run the project harness before considering the transplant complete; use the migration harness directly when diagnosing architectural/migration violations.
 
 ## Donor allowlist
 
@@ -157,7 +157,7 @@ A change is complete only when:
 - no denied dependency was introduced;
 - imported files have an explicit reason to exist;
 - the relevant expensive/risky behavior is covered at the appropriate test level;
-- `python scripts/migration_harness.py` passes;
+- `python scripts/project_harness.py` passes (including its migration/release guardrails);
 - migrations are compatible/recoverable according to the change protocol;
 - durable invariants and operational consequences are documented;
 - the actual CI head is green;
