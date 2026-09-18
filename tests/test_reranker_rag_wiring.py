@@ -35,8 +35,8 @@ async def test_secret_context_never_checks_or_loads_reranker(monkeypatch) -> Non
     monkeypatch.setattr(rag, "_load_process", fake_load_process)
     monkeypatch.setattr(
         rag,
-        "bge_reranker_enabled",
-        lambda: (_ for _ in ()).throw(AssertionError("reranker flag must not be read")),
+        "configured_reranker_scorer",
+        lambda: (_ for _ in ()).throw(AssertionError("reranker config must not be read")),
     )
 
     context = await rag._load_context(_Pool(), uuid4(), uuid4())
@@ -65,10 +65,9 @@ async def test_short_process_never_constructs_reranker(monkeypatch) -> None:
 
     monkeypatch.setattr(rag, "_load_process", fake_load_process)
     monkeypatch.setattr(rag, "load_steps", fake_load_steps)
-    monkeypatch.setattr(rag, "bge_reranker_enabled", lambda: True)
     monkeypatch.setattr(
         rag,
-        "BGERerankerScorer",
+        "configured_reranker_scorer",
         lambda: (_ for _ in ()).throw(AssertionError("short process must not construct reranker")),
     )
 
@@ -110,8 +109,7 @@ async def test_long_process_enabled_uses_top_50_and_configured_scorer(monkeypatc
     monkeypatch.setattr(rag, "load_steps", fake_load_steps)
     monkeypatch.setattr(rag, "lexical_search", fake_lexical_search)
     monkeypatch.setattr(rag, "vector_retrieval_configured", lambda: False)
-    monkeypatch.setattr(rag, "bge_reranker_enabled", lambda: True)
-    monkeypatch.setattr(rag, "BGERerankerScorer", lambda: scorer)
+    monkeypatch.setattr(rag, "configured_reranker_scorer", lambda: scorer)
     monkeypatch.setattr(rag, "select_context_steps", fake_select_context_steps)
 
     context = await rag._load_context(_Pool(), uuid4(), uuid4())
