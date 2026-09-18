@@ -65,6 +65,7 @@ jobs:
           JUDIT_WEBHOOK_TOKEN: ci-judit-token
           RPY_BEARER_TOKENS: '{"ci-bearer-token":"00000000-0000-0000-0000-000000000001"}'
           RPY_OPS_TOKEN: ci-ops-token
+          EGRESS_PROXY_ALLOWED_HOSTS: api.anthropic.com,api.openai.com,requests.production.judit.io,tracking.production.judit.io
         run: |
           python scripts/validate_deploy_env.py
           docker compose -f compose.production.yaml config --format json > /tmp/rpy-production-compose.json
