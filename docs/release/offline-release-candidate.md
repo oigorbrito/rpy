@@ -22,7 +22,7 @@ e leitura autenticada. Usa dados sintéticos e não exige chaves pagas.
 
 - [x] clone novo validado em ambiente externo limpo com Git + Docker + Docker Compose;
 - [x] pré-requisitos documentados;
-- [x] migration harness, unitários, integração PostgreSQL, image smoke e backup/restore verdes;
+- [x] project harness (incluindo guardrails de migration/release), unitários, integração PostgreSQL, image smoke e backup/restore verdes;
 - [x] smoke offline termina com `RPY OFFLINE SMOKE: PASS` e `providers=0`;
 - [x] invariantes de dados, concorrência/recovery e sigilo evidenciados;
 - [x] caminho vetorial com mais de 40 movimentos evidenciado offline;
@@ -42,7 +42,7 @@ declarado em `pyproject.toml`. A tag prevista é `v0.1.0`.
 
 | Capacidade | Evidência | Offline | Estado |
 |---|---|---:|---|
-| Migrations | `scripts/migration_harness.py` | sim | repository gate |
+| Guardrails de projeto | `scripts/project_harness.py` (inclui migration/release harness) | sim | repository gate |
 | Fila/recovery | testes PostgreSQL de queue/worker | sim | repository gate |
 | Retrieval >40 | E2E PostgreSQL com embeddings fake/pgvector | sim | repository gate |
 | Sigilo | testes E2E/local determinístico | sim | repository gate |
