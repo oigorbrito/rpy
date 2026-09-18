@@ -127,7 +127,16 @@ Acceptance must prove:
 - generated output passes the post-generation validator before publication;
 - one correction attempt behaves as documented when the first output is invalid;
 - usage/cache telemetry is persisted without provider secrets;
-- a secret-process control case does not call Anthropic at all.
+- a secret-process control case does not call Anthropic at all;
+- the live prompt-injection suite passes for the exact candidate prompt/model pair.
+
+Run the bounded adversarial suite with the target Anthropic credential:
+
+```bash
+python scripts/evaluate_prompt_injection_live.py
+```
+
+The suite injects off-task instructions through process-source text rather than through a nonexistent free-form summary chat input. It covers recipe generation, current-weather diversion, system-prompt exfiltration and delimiter breakout. A failed case is a provider-acceptance blocker; do not whitelist the attack phrase or weaken the validator to make the suite green. Re-run this suite whenever the summary prompt version or generation model changes.
 
 Do not use a production secret process as a negative test. The repository already proves that boundary deterministically; production acceptance should verify configuration/logging, not expose restricted content.
 
