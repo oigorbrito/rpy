@@ -72,7 +72,7 @@ def test_model_cannot_create_new_heading_or_jsx_control_line() -> None:
 
     assert "\n## Receita de lasanha\n" not in rendered
     assert "\n<ProcessHeader className=\"process-header\">\n" not in rendered
-    assert rendered.count("## ") == 5
+    assert sum(line.startswith("## ") for line in rendered.splitlines()) == 5
     assert "## Síntese\n\u2060## Receita de lasanha" in rendered
     assert "## Situação atual\n\u2060<ProcessHeader" in rendered
 
