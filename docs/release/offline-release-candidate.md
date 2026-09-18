@@ -53,15 +53,18 @@ declarado em `pyproject.toml`. A tag prevista é `v0.1.0`.
 | Fresh clone externo | smoke em checkout limpo no Windows | sim | passed |
 | Provenance da imagem | GitHub artifact attestation do digest publicado | não | release workflow |
 | Judit real | provider acceptance controlado | não | deferred |
-| Anthropic/OpenAI reais | provider acceptance controlado | não | deferred |
+| Anthropic real | provider acceptance controlado | não | deferred |
+| OpenAI legacy real | provider acceptance controlado, somente se selecionado | não | deferred |
+| Cohere Embed/Rerank reais | autorização específica + provider acceptance | não | deferred |
+| BGE embeddings/reranker reais | artifact/verifier/reindex/benchmark conforme aplicável | sim | deferred operational evidence |
 
 ## Provider Acceptance — POST-OFFLINE-RELEASE / NON-BLOCKING
 
-Somente com credenciais e orçamento controlados: realizar uma aquisição Judit,
-confirmar callback/finalização, gerar um summary Anthropic, opcionalmente testar
-um cenário >40 com embedding OpenAI, verificar logs/custos e confirmar ausência
-de duplicidade. Não executar isso em CI e não considerar pré-requisito do smoke
-offline.
+A aceitação real é ambiente-específica e segue `docs/release/provider-acceptance.md`.
+Ela deve usar credenciais rotacionáveis, orçamento controlado, processo/tenant
+explicitamente autorizado e evidência sanitizada. Não executar chamadas pagas no CI
+nem tratar a qualificação offline como autorização para indexação em massa ou uso de
+providers externos.
 
 ## Segurança e operação
 
