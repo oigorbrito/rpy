@@ -10,7 +10,7 @@ Rpy separates three kinds of verification:
 2. **Behavioral evidence** — executable tests of user-visible or domain behavior. These belong in unit, frontend and PostgreSQL integration suites.
 3. **Operational evidence** — drills and runtime probes that exercise built artifacts or recovery paths. These belong in container smoke, backup/restore and offline release smoke.
 
-The project harness executes only the cheap guardrails and verifies that the stronger evidence layers are still wired into the canonical CI workflow. It deliberately does not re-run the stronger suites itself.
+The project harness executes only the cheap guardrails and verifies that the stronger evidence layers are still wired into the canonical CI workflow and the image publication workflow. It deliberately does not re-run the stronger suites itself.
 
 ## What the project harness observes
 
@@ -35,6 +35,8 @@ Current project-level observations include:
 - backup/restore drill wired in CI;
 - PostgreSQL integration tests wired in CI;
 - offline release smoke wired in CI;
+- image/tag workflow runs the project harness, unit tests and PostgreSQL integration before publish;
+- published image digest is runtime-smoke-tested after build/push;
 - empirical-engineering and contributor contracts present.
 
 This verifies the **existence and connection of evidence**, not the truth of an operational claim. For example, confirming that the restore drill is wired into CI is not evidence of production RTO; the drill result is the evidence for the tested environment.

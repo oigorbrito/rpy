@@ -9,6 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CI = ROOT / ".github" / "workflows" / "ci.yml"
+IMAGE_WORKFLOW = ROOT / ".github" / "workflows" / "image.yml"
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +89,45 @@ def _ci_gate_observations() -> list[Observation]:
     return observations
 
 
+
+def _release_workflow_observations() -> list[Observation]:
+    if not IMAGE_WORKFLOW.is_file():
+        return [
+            Observation(
+                name="image-workflow",
+                kind="evidence-wiring",
+                status="fail",
+                evidence=str(IMAGE_WORKFLOW.relative_to(ROOT)),
+                detail="image release workflow is missing",
+            )
+        ]
+
+    text = IMAGE_WORKFLOW.read_text(encoding="utf-8")
+    expected = {
+        "image-project-harness": "python scripts/project_harness.py",
+        "image-unit-tests": "pytest -q tests --ignore=tests/integration",
+        "image-postgres-integration": "pytest -q tests/integration",
+        "published-image-smoke": "sh scripts/verify_image_runtime.sh",
+    }
+    observations: list[Observation] = []
+    for name, command_fragment in expected.items():
+        present = command_fragment in text
+        observations.append(
+            Observation(
+                name=name,
+                kind="evidence-wiring",
+                status="pass" if present else "fail",
+                evidence=str(IMAGE_WORKFLOW.relative_to(ROOT)),
+                detail=(
+                    f"wired command contains: {command_fragment}"
+                    if present
+                    else f"missing release evidence command: {command_fragment}"
+                ),
+            )
+        )
+    return observations
+
+
 def _documentation_observations() -> list[Observation]:
     required = (
         "AGENTS.md",
@@ -116,6 +156,7 @@ def collect_observations() -> list[Observation]:
         _run_guardrail("release-harness", "scripts/release_harness.py"),
     ]
     observations.extend(_ci_gate_observations())
+    observations.extend(_release_workflow_observations())
     observations.extend(_documentation_observations())
     return observations
 
