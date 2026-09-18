@@ -122,23 +122,26 @@ class _FakeMessages:
             ),
             None,
         )
-        lines = [
-            "# Resumo do processo",
-            "",
-            "## Síntese",
-            f"O processo possui {int(process.get('step_count') or 0)} movimentos.",
-        ]
-        if milestone:
-            lines.extend(["", "## Linha do tempo relevante", f"- {milestone}."])
-        if not force_first_failure:
-            lines.extend(["", "## Pontos de atenção"])
-            warnings = process.get("source_warnings") or []
-            if warnings:
-                lines.extend(f"- {warning}" for warning in warnings)
-            else:
-                lines.append("Nenhuma divergência objetiva identificada.")
-
-        text = "\n".join(lines)
+        warnings = process.get("source_warnings") or []
+        payload = {
+            "synthesis": f"O processo possui {int(process.get('step_count') or 0)} movimentos.",
+            "timeline": [f"{milestone}."] if milestone else [],
+            "current_status": (
+                "Recomendo que a parte tome providências."
+                if force_first_failure
+                else "Situação atual registrada nos autos."
+            ),
+            "attention": (
+                [str(warning) for warning in warnings]
+                if warnings
+                else ["Nenhuma divergência objetiva identificada."]
+            ),
+            "decisions": [],
+            "deadlines": [],
+            "related_processes": [],
+            "attachments": [],
+        }
+        text = json.dumps(payload, ensure_ascii=False)
         return SimpleNamespace(content=[SimpleNamespace(type="text", text=text)])
 
 
