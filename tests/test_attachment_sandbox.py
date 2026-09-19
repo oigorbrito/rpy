@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import pytest
 
-from app.attachment_processing import AttachmentProcessingError
+from app.attachment_processing import AttachmentProcessingError, AttachmentProcessingLimits
 from app.attachment_sandbox import (
     _handle_client,
     _parse_request,
@@ -86,3 +86,92 @@ async def test_sandbox_missing_socket_is_attachment_local(tmp_path) -> None:
         )
     assert exc_info.value.status == "unreadable"
     assert exc_info.value.error_code == "parser_unavailable"
+
+
+
+@pytest.mark.asyncio
+async def test_sandbox_applies_server_limits_when_worker_requests_more(monkeypatch) -> None:
+    import base64
+    from app import attachment_processing as processing
+
+    monkeypatch.setattr(
+        processing,
+        "attachment_processing_limits",
+        lambda: AttachmentProcessingLimits(max_bytes=4, chunk_chars=16),
+    )
+    response = await _parse_request(
+        {
+            "version": 1,
+            "content_type": "application/pdf",
+            "max_bytes": 50_000,
+            "chunk_chars": 256,
+            "data_b64": base64.b64encode(b"%PDF-1.4\n").decode("ascii"),
+        }
+    )
+    assert response["ok"] is False
+    assert response["status"] == "unreadable"
+    assert response["error_code"] == "attachment_too_large"
+
+
+@pytest.mark.asyncio
+async def test_sandbox_server_times_out_stalled_client(monkeypatch) -> None:
+    from app import attachment_sandbox as sandbox
+
+    class Reader:
+        async def readexactly(self, size):
+            await asyncio.sleep(1)
+            return b""
+
+    class Writer:
+        def __init__(self):
+            self.payload = bytearray()
+            self.closed = False
+
+        def write(self, data):
+            self.payload.extend(data)
+
+        async def drain(self):
+            return None
+
+        def close(self):
+            self.closed = True
+
+        async def wait_closed(self):
+            return None
+
+    monkeypatch.setattr(sandbox, "server_request_timeout_seconds", lambda: 0.01)
+    writer = Writer()
+    await _handle_client(Reader(), writer)
+
+    assert writer.closed is True
+    assert b"parser_timeout" in bytes(writer.payload)
+
+
+@pytest.mark.asyncio
+async def test_sandbox_rejects_missing_resource_limits_as_protocol_error(tmp_path) -> None:
+    import base64
+    import json
+    import struct
+
+    socket_path = tmp_path / "parser.sock"
+    server = await asyncio.start_unix_server(_handle_client, path=str(socket_path))
+    try:
+        reader, writer = await asyncio.open_unix_connection(str(socket_path))
+        body = json.dumps(
+            {
+                "version": 1,
+                "content_type": "application/pdf",
+                "data_b64": base64.b64encode(b"%PDF-1.4\n").decode("ascii"),
+            }
+        ).encode("utf-8")
+        writer.write(struct.pack("!I", len(body)) + body)
+        await writer.drain()
+        size = struct.unpack("!I", await reader.readexactly(4))[0]
+        response = json.loads((await reader.readexactly(size)).decode("utf-8"))
+        assert response["ok"] is False
+        assert response["error_code"] == "parser_protocol_error"
+        writer.close()
+        await writer.wait_closed()
+    finally:
+        server.close()
+        await server.wait_closed()
