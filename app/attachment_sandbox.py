@@ -139,6 +139,7 @@ async def _parse_request(request: dict[str, Any]) -> dict[str, Any]:
         AttachmentProcessingLimits,
         OCR_IMAGE_CONTENT_TYPES,
         attachment_ocr_config,
+        attachment_processing_limits,
         normalize_content_type,
         parse_image_attachment_ocr,
         parse_pdf_attachment,
@@ -152,9 +153,10 @@ async def _parse_request(request: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(data_b64, str):
         raise ValueError("missing parser payload")
     data = base64.b64decode(data_b64.encode("ascii"), validate=True)
+    configured_limits = attachment_processing_limits()
     limits = AttachmentProcessingLimits(
-        max_bytes=int(request["max_bytes"]),
-        chunk_chars=int(request["chunk_chars"]),
+        max_bytes=min(int(request["max_bytes"]), configured_limits.max_bytes),
+        chunk_chars=min(int(request["chunk_chars"]), configured_limits.chunk_chars),
     )
     normalized_type = normalize_content_type(content_type)
 
