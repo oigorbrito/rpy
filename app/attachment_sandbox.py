@@ -99,6 +99,8 @@ async def parse_attachment_sandboxed(
 
     try:
         response = await asyncio.wait_for(_exchange(), timeout=timeout)
+    except AttachmentProcessingError:
+        raise
     except TimeoutError as exc:
         raise AttachmentProcessingError(
             status="unreadable", error_code="parser_timeout"
