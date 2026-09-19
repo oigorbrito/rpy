@@ -13,6 +13,7 @@ from app.attachments import AttachmentChunkInput
 
 DEFAULT_SOCKET_PATH = "/run/rpy-parser/parser.sock"
 DEFAULT_TIMEOUT_SECONDS = 45.0
+DEFAULT_SERVER_REQUEST_TIMEOUT_SECONDS = 45.0
 MAX_FRAME_BYTES = 20 * 1024 * 1024
 PROTOCOL_VERSION = 1
 
@@ -29,6 +30,24 @@ def parser_timeout_seconds() -> float:
         raise RuntimeError("ATTACHMENT_PARSER_TIMEOUT_SECONDS must be numeric") from exc
     if value <= 0:
         raise RuntimeError("ATTACHMENT_PARSER_TIMEOUT_SECONDS must be greater than zero")
+    return value
+
+
+def server_request_timeout_seconds() -> float:
+    raw = str(
+        os.getenv("ATTACHMENT_PARSER_REQUEST_TIMEOUT_SECONDS")
+        or DEFAULT_SERVER_REQUEST_TIMEOUT_SECONDS
+    )
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise RuntimeError(
+            "ATTACHMENT_PARSER_REQUEST_TIMEOUT_SECONDS must be numeric"
+        ) from exc
+    if value <= 0:
+        raise RuntimeError(
+            "ATTACHMENT_PARSER_REQUEST_TIMEOUT_SECONDS must be greater than zero"
+        )
     return value
 
 
@@ -155,10 +174,19 @@ async def _parse_request(request: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(data_b64, str):
         raise ValueError("missing parser payload")
     data = base64.b64decode(data_b64.encode("ascii"), validate=True)
+    raw_max_bytes = request.get("max_bytes")
+    raw_chunk_chars = request.get("chunk_chars")
+    try:
+        requested_max_bytes = int(raw_max_bytes)
+        requested_chunk_chars = int(raw_chunk_chars)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("invalid parser resource limits") from exc
+    if requested_max_bytes <= 0 or requested_chunk_chars <= 0:
+        raise ValueError("parser resource limits must be positive")
     configured_limits = attachment_processing_limits()
     limits = AttachmentProcessingLimits(
-        max_bytes=min(int(request["max_bytes"]), configured_limits.max_bytes),
-        chunk_chars=min(int(request["chunk_chars"]), configured_limits.chunk_chars),
+        max_bytes=min(requested_max_bytes, configured_limits.max_bytes),
+        chunk_chars=min(requested_chunk_chars, configured_limits.chunk_chars),
     )
     normalized_type = normalize_content_type(content_type)
 
@@ -209,9 +237,21 @@ async def _parse_request(request: dict[str, Any]) -> dict[str, Any]:
 async def _handle_client(
     reader: asyncio.StreamReader, writer: asyncio.StreamWriter
 ) -> None:
-    try:
+    async def _serve_request() -> dict[str, Any]:
         request = await _read_frame(reader)
-        response = await _parse_request(request)
+        return await _parse_request(request)
+
+    try:
+        response = await asyncio.wait_for(
+            _serve_request(), timeout=server_request_timeout_seconds()
+        )
+    except TimeoutError:
+        response = {
+            "version": PROTOCOL_VERSION,
+            "ok": False,
+            "status": "unreadable",
+            "error_code": "parser_timeout",
+        }
     except Exception:
         response = {
             "version": PROTOCOL_VERSION,
@@ -233,7 +273,7 @@ async def serve() -> None:
     if socket_path.exists():
         socket_path.unlink()
     server = await asyncio.start_unix_server(_handle_client, path=str(socket_path))
-    os.chmod(socket_path, 0o660)
+    os.chmod(socket_path, 0o600)
     async with server:
         await server.serve_forever()
 
