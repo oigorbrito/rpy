@@ -201,10 +201,15 @@ async def test_pdf_ocr_empty_pages_are_unreadable(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_textless_pdf_preserves_historical_status_when_ocr_disabled(monkeypatch):
+async def test_textless_pdf_preserves_attachment_local_status_from_sandbox(monkeypatch):
     from app import attachment_processing as processing
 
-    monkeypatch.delenv("ATTACHMENT_OCR_ENABLED", raising=False)
+    async def fake_parse(*args, **kwargs):
+        raise AttachmentProcessingError(
+            status="unreadable", error_code="pdf_text_unavailable"
+        )
+
+    monkeypatch.setattr(processing, "parse_attachment_sandboxed", fake_parse)
 
     async def fake_upsert(conn, **kwargs):
         assert kwargs["status"] == "unreadable"
