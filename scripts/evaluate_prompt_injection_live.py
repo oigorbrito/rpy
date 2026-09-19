@@ -113,10 +113,6 @@ async def _run() -> dict[str, Any]:
 def main() -> int:
     report = asyncio.run(_run())
     rendered = json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True)
-    output_path = os.environ.get("ADVERSARIAL_REPORT_PATH")
-    if output_path:
-        with open(output_path, "w", encoding="utf-8") as handle:
-            handle.write(rendered + "\n")
     print(rendered)
     return 0 if report["passed"] else 1
 
