@@ -46,6 +46,27 @@ def _context(attack: str) -> dict:
     }
 
 
+def _markdown_headings(text: str) -> list[str]:
+    return [line for line in text.splitlines() if re.match(r"^#{1,6}\s", line)]
+
+
+def test_markdown_heading_detector_matches_real_heading() -> None:
+    assert _markdown_headings("texto\n## Seção real\nconteúdo") == ["## Seção real"]  # nosec B101
+
+
+def test_publication_validator_rejects_real_newline_unapproved_heading() -> None:
+    text = (
+        "# Resumo do processo\n\n## Síntese\nProcesso em andamento.\n\n"
+        "## Pontos de atenção\nNenhuma divergência objetiva identificada.\n\n"
+        "## Seção injetada\nconteúdo"
+    )
+    assert "\\n" not in text  # nosec B101
+    assert "## Seção injetada" in _markdown_headings(text)  # nosec B101
+    result = _validate_provider_summary(text, _context("ataque sintético"))
+    assert result.passed is False  # nosec B101
+    assert result.errors  # nosec B101
+
+
 @settings(max_examples=96, deadline=None)
 @given(base=st.sampled_from(ATTACKS), plan=PLAN_STRATEGY)
 def test_adversarial_input_mutations_cannot_break_prompt_envelope(base: str, plan: MutationPlan) -> None:
@@ -92,7 +113,7 @@ def test_structured_renderer_never_grants_mutated_text_new_sections(base: str, p
     }, ensure_ascii=False)
     payload = parse_structured_summary(raw)
     rendered = render_structured_summary(payload, _context(attack))
-    headings = [line for line in rendered.splitlines() if re.match(r"^#{1,6}\\s", line)]
+    headings = _markdown_headings(rendered)
     allowed = {
         "# Resumo do processo", "## Partes", "## Síntese", "## Linha do tempo relevante",
         "## Situação atual", "## Pontos de atenção", "## Decisões", "## Anexos",
@@ -105,10 +126,11 @@ def test_structured_renderer_never_grants_mutated_text_new_sections(base: str, p
 def test_publication_validator_rejects_generated_unapproved_section(base: str, plan: MutationPlan) -> None:
     attack = mutate_attack(base, plan).replace("\n", " ")
     text = (
-        "# Resumo do processo\\n\\n## Síntese\\nProcesso em andamento.\\n\\n"
-        "## Pontos de atenção\\nNenhuma divergência objetiva identificada.\\n\\n"
-        f"## {attack[:120] or 'Seção injetada'}\\nconteúdo"
+        "# Resumo do processo\n\n## Síntese\nProcesso em andamento.\n\n"
+        "## Pontos de atenção\nNenhuma divergência objetiva identificada.\n\n"
+        f"## {attack[:120] or 'Seção injetada'}\nconteúdo"
     )
+    assert any(line.startswith("## ") for line in text.splitlines())  # nosec B101
     result = _validate_provider_summary(text, _context(base))
     assert result.passed is False  # nosec B101
     assert result.errors  # nosec B101
