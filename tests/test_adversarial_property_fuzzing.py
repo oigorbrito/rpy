@@ -112,3 +112,43 @@ def test_publication_validator_rejects_generated_unapproved_section(base: str, p
     result = _validate_provider_summary(text, _context(base))
     assert result.passed is False  # nosec B101
     assert result.errors  # nosec B101
+
+
+@settings(max_examples=48, deadline=None)
+@given(
+    bases=st.lists(st.sampled_from(ATTACKS), min_size=2, max_size=4),
+    plan=PLAN_STRATEGY,
+)
+def test_mutations_span_multiple_movements_and_attachments(
+    bases: list[str], plan: MutationPlan
+) -> None:
+    attacks = [mutate_attack(base, plan) for base in bases]
+    context = _context(attacks[0])
+    context["steps"] = [
+        {
+            "step_number": index,
+            "occurred_at": None,
+            "title": "Movimento sintético",
+            "text": attack,
+        }
+        for index, attack in enumerate(attacks, start=1)
+    ]
+    context["step_count"] = len(attacks)
+    _, steps = _provider_payload(context)
+
+    chunks = [
+        {
+            "source_attachment_id": f"synthetic-{index}",
+            "page_start": index,
+            "page_end": index,
+            "char_start": 0,
+            "char_end": len(attack),
+            "text": attack,
+        }
+        for index, attack in enumerate(attacks, start=1)
+    ]
+    rendered_chunks = serialize_attachment_chunks(chunks, total_text_limit=40000)
+
+    assert len(steps) == len(attacks)  # nosec B101
+    assert len(rendered_chunks) == len(attacks)  # nosec B101
+    assert [chunk["text"] for chunk in chunks] == attacks  # nosec B101
