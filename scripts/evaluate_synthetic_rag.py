@@ -166,7 +166,8 @@ def load_baseline(path: Path = DEFAULT_BASELINE) -> dict[str, Any]:
 def _git_blob_sha(path: Path) -> str:
     data = path.read_bytes()
     header = f"blob {len(data)}\0".encode()
-    return hashlib.sha1(header + data, usedforsecurity=False).hexdigest()
+    # Git blob object IDs use SHA-1 by definition; this is compatibility, not a security primitive.
+    return hashlib.sha1(header + data, usedforsecurity=False).hexdigest()  # nosemgrep: python.lang.security.insecure-hash-algorithms.insecure-hash-algorithm-sha1
 
 
 def runtime_metadata() -> dict[str, Any]:
