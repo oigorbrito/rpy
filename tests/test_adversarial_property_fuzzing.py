@@ -8,7 +8,7 @@ from hypothesis import given, settings, strategies as st
 from app.attachment_context import serialize_attachment_chunks
 from app.rag import _prompt_json, _provider_payload, _validate_provider_summary
 from app.summary_output import parse_structured_summary, render_structured_summary
-from scripts.adversarial_mutations import MutationPlan, load_corpus, mutate_attack
+from app.adversarial_mutations import MutationPlan, load_corpus, mutate_attack
 
 
 CORPUS = load_corpus()
