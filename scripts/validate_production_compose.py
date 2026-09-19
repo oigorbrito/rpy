@@ -97,6 +97,7 @@ WORKER_REQUIRED_ENV = {
 }
 PARSER_REQUIRED_ENV = {
     "ATTACHMENT_PARSER_SOCKET",
+    "ATTACHMENT_PARSER_REQUEST_TIMEOUT_SECONDS",
     "ATTACHMENT_MAX_BYTES",
     "ATTACHMENT_CHUNK_CHARS",
     "ATTACHMENT_OCR_ENABLED",
@@ -397,6 +398,14 @@ def _validate_attachment_parser_contract(
         _fail("attachment-parser socket path must remain fixed inside the sandbox")
     if parser_env.get("ATTACHMENT_OCR_BINARY") != "tesseract":
         _fail("attachment-parser OCR binary must remain the packaged tesseract binary")
+    try:
+        parser_request_timeout = float(
+            parser_env.get("ATTACHMENT_PARSER_REQUEST_TIMEOUT_SECONDS")
+        )
+    except (TypeError, ValueError):
+        _fail("attachment-parser request timeout must be numeric")
+    if parser_request_timeout <= 0:
+        _fail("attachment-parser request timeout must be positive")
     _forbid_env(
         services,
         "attachment-parser",
