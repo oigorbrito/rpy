@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
-
 import pytest
 
 from app.attachment_processing import AttachmentProcessingError
@@ -88,15 +86,3 @@ async def test_sandbox_missing_socket_is_attachment_local(tmp_path) -> None:
         )
     assert exc_info.value.status == "unreadable"
     assert exc_info.value.error_code == "parser_unavailable"
-
-
-def test_sandbox_module_does_not_define_provider_credentials() -> None:
-    forbidden = {
-        "ANTHROPIC_API_KEY",
-        "OPENAI_API_KEY",
-        "COHERE_API_KEY",
-        "JUDIT_API_KEY",
-        "DATAJUD_API_KEY",
-        "LANGFUSE_SECRET_KEY",
-    }
-    assert not (forbidden & set(os.environ)) or True
