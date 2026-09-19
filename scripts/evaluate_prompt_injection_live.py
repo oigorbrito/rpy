@@ -7,7 +7,7 @@ from typing import Any
 
 from app.providers import anthropic_client
 from app.rag import PROMPT_VERSION, SONNET_MODEL, _generate, _validate_provider_summary
-from scripts.adversarial_mutations import deterministic_live_plan, load_corpus, mutate_attack
+from app.adversarial_mutations import deterministic_live_plan, load_corpus, mutate_attack
 
 
 _CASES = tuple(load_corpus())
