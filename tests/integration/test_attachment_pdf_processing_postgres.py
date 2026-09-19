@@ -6,7 +6,7 @@ from uuid import uuid4
 import asyncpg
 import pytest
 
-from app.attachment_processing import AttachmentProcessingLimits, process_attachment_bytes
+from app.attachment_processing import AttachmentProcessingLimits, parse_pdf_attachment, process_attachment_bytes
 from app.migrations import migrate
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
@@ -86,7 +86,17 @@ async def _fixture(conn: asyncpg.Connection):
 
 
 @pytest.mark.asyncio
-async def test_pdf_processing_persists_page_aware_ready_chunks() -> None:
+async def test_pdf_processing_persists_page_aware_ready_chunks(monkeypatch) -> None:
+    from app import attachment_processing as processing
+
+    async def fake_sandbox(data, *, content_type, max_bytes, chunk_chars):
+        return parse_pdf_attachment(
+            data,
+            content_type=content_type,
+            limits=AttachmentProcessingLimits(max_bytes=max_bytes, chunk_chars=chunk_chars),
+        )
+
+    monkeypatch.setattr(processing, "parse_attachment_sandboxed", fake_sandbox)
     assert TEST_DATABASE_URL is not None
     await migrate(TEST_DATABASE_URL)
     conn = await asyncpg.connect(TEST_DATABASE_URL)
@@ -125,7 +135,17 @@ async def test_pdf_processing_persists_page_aware_ready_chunks() -> None:
 
 
 @pytest.mark.asyncio
-async def test_invalid_pdf_is_attachment_local_corrupt_state() -> None:
+async def test_invalid_pdf_is_attachment_local_corrupt_state(monkeypatch) -> None:
+    from app import attachment_processing as processing
+
+    async def fake_sandbox(data, *, content_type, max_bytes, chunk_chars):
+        return parse_pdf_attachment(
+            data,
+            content_type=content_type,
+            limits=AttachmentProcessingLimits(max_bytes=max_bytes, chunk_chars=chunk_chars),
+        )
+
+    monkeypatch.setattr(processing, "parse_attachment_sandboxed", fake_sandbox)
     assert TEST_DATABASE_URL is not None
     await migrate(TEST_DATABASE_URL)
     conn = await asyncpg.connect(TEST_DATABASE_URL)
