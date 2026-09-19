@@ -13,10 +13,11 @@ The parser service:
 - runs as uid/gid 10001 with a read-only root filesystem, all Linux capabilities dropped and `no-new-privileges`;
 - keeps writable parser scratch space on private `/tmp` tmpfs;
 - is bounded to 0.75 CPU, 768 MiB memory and 64 PIDs;
+- enforces a server-side wall-clock timeout for each Unix-socket request, including frame reads;
 - retains the application byte limit, PDF OCR page limit and Tesseract timeout;
 - applies its own configured byte/chunk limits even if a worker requests looser values.
 
-The worker applies an independent wall-clock timeout to the complete Unix-socket request. Socket absence, timeout, malformed protocol responses and parser failures remain attachment-local `unreadable`/`corrupt` states.
+The worker applies an independent wall-clock timeout to the complete Unix-socket request. The parser also applies its own request timeout so a stalled client cannot retain a server task indefinitely. Socket absence, timeout, malformed protocol responses and parser failures remain attachment-local `unreadable`/`corrupt` states.
 
 ## Data handling
 
@@ -24,7 +25,7 @@ Only authorized attachment bytes cross the parser socket. The response contains 
 
 ## Operational contract
 
-Production Compose validation fails if the parser gains Docker network access, receives provider/database secrets, loses runtime confinement, changes resource budgets, stops using the tmpfs-backed Unix socket, or if either worker stops waiting for parser health.
+Production Compose validation fails if the parser gains Docker network access, receives provider/database secrets, loses runtime confinement, changes resource budgets, loses its positive request timeout, stops using the tmpfs-backed Unix socket, or if either worker stops waiting for parser health. The socket itself is chmod `0600`; both containers deliberately run as UID 10001.
 
 The production image includes the OCR runtime dependencies (`pypdfium2`, Pillow, Tesseract and Portuguese language data) so the isolated OCR path is executable when `ATTACHMENT_OCR_ENABLED=true`.
 
