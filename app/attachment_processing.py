@@ -564,8 +564,6 @@ def parse_attachment(
     normalized_type = normalize_content_type(content_type)
     if normalized_type == "text/plain":
         return parse_text_attachment(data, content_type=content_type, limits=limits)
-    if normalized_type == "application/pdf":
-        return parse_pdf_attachment(data, content_type=content_type, limits=limits)
     raise AttachmentProcessingError(
         status="unreadable",
         error_code="unsupported_content_type",
