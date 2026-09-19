@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal, Sequence
@@ -25,10 +25,15 @@ class TPUDefinition:
     publisher: str
     source: str
     source_ref: str
+    # Pre-computed SHA-256 hash of `definition` stored on creation to avoid re-encoding
+    # and re-hashing the string every time `definition_sha256`, `as_context()`, or
+    # `as_provenance()` is accessed. Field is excluded from __init__, equality, and repr.
+    definition_sha256: str = field(init=False, compare=False, repr=False)
 
-    @property
-    def definition_sha256(self) -> str:
-        return hashlib.sha256(self.definition.encode("utf-8")).hexdigest()
+    def __post_init__(self) -> None:
+        digest = hashlib.sha256(self.definition.encode("utf-8")).hexdigest()
+        # Since dataclass is frozen, use object.__setattr__ to initialize definition_sha256
+        object.__setattr__(self, "definition_sha256", digest)
 
     def as_context(self) -> dict[str, str]:
         return {
