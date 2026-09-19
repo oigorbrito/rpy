@@ -251,11 +251,15 @@ services:
     pids_limit: 256
     command: ["python", "-m", "app.worker"]
     environment: *worker-env
+    volumes:
+      - parser_socket:/run/rpy-parser
     stop_grace_period: ${WORKER_STOP_GRACE_PERIOD:-40s}
     depends_on:
       migrate:
         condition: service_completed_successfully
       egress-proxy:
+        condition: service_healthy
+      attachment-parser:
         condition: service_healthy
     networks:
       - backend
