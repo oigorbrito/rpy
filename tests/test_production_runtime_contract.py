@@ -146,6 +146,7 @@ def test_proxy_cannot_receive_provider_secrets_by_contract() -> None:
 def _parser_contract_services() -> dict:
     parser_env = {
         "ATTACHMENT_PARSER_SOCKET": "/run/rpy-parser/parser.sock",
+        "ATTACHMENT_PARSER_REQUEST_TIMEOUT_SECONDS": "45",
         "ATTACHMENT_MAX_BYTES": "10485760",
         "ATTACHMENT_CHUNK_CHARS": "4000",
         "ATTACHMENT_OCR_ENABLED": "false",
@@ -233,3 +234,13 @@ def test_attachment_parser_resource_budgets_are_mechanical(
     services["attachment-parser"][field] = value
     with pytest.raises(SystemExit, match=message):
         contract._validate_runtime_confinement(services)
+
+
+
+def test_attachment_parser_contract_rejects_nonpositive_request_timeout() -> None:
+    services = _parser_contract_services()
+    services["attachment-parser"]["environment"][
+        "ATTACHMENT_PARSER_REQUEST_TIMEOUT_SECONDS"
+    ] = "0"
+    with pytest.raises(SystemExit, match="request timeout must be positive"):
+        contract._validate_attachment_parser_contract(services, _parser_volume())
