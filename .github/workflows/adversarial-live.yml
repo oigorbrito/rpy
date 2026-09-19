@@ -41,4 +41,3 @@ jobs:
             exit 0
           fi
           python scripts/evaluate_prompt_injection_live.py
-          cat "$ADVERSARIAL_REPORT_PATH"
