@@ -32,6 +32,9 @@ _BEARER_RE = re.compile(r"(?i)(authorization\s*[:=]\s*bearer\s+)([^\s,;]+)")
 _QUERY_SECRET_RE = re.compile(
     r"(?i)(\b(?:api[_-]?key|token|access[_-]?token|password|secret)\s*[=:]\s*)([^\s,;&]+)"
 )
+# Redact application API keys (sk_live_... / sk_test_...) even when not configured in env
+# or when appearing without authorization headers or query parameter names.
+_API_KEY_TOKEN_RE = re.compile(r"\bsk_(?:live|test)_[a-zA-Z0-9_-]+\b")
 
 
 def _configured_secret_values() -> list[str]:
@@ -56,6 +59,7 @@ def sanitize_error_message(value: object, *, max_chars: int = MAX_ERROR_MESSAGE_
     )
     text = _BEARER_RE.sub(lambda match: f"{match.group(1)}{REDACTED}", text)
     text = _QUERY_SECRET_RE.sub(lambda match: f"{match.group(1)}{REDACTED}", text)
+    text = _API_KEY_TOKEN_RE.sub(REDACTED, text)
 
     if max_chars <= 0:
         return ""
