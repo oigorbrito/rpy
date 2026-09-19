@@ -6,7 +6,6 @@ on:
 
 permissions:
   contents: read
-  checks: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -38,12 +37,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Diagnostic Codacy annotation
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh api repos/${{ github.repository }}/check-runs/105802876449/annotations --jq '.[] | {path, start_line, end_line, annotation_level, title, message}'
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
