@@ -92,7 +92,9 @@ async def _run() -> dict[str, Any]:
     families: dict[str, dict[str, int | float]] = {}
     for item in results:
         family = str(item["family"])
-        aggregate = families.setdefault(family, {"passed": 0, "total": 0, "pass_rate": 0.0})
+        aggregate = families.setdefault(  # nosec B105 - pass_rate is a numeric metric, not a credential
+            family, {"passed": 0, "total": 0, "pass_rate": 0.0}
+        )
         aggregate["total"] = int(aggregate["total"]) + 1
         if item["passed"]:
             aggregate["passed"] = int(aggregate["passed"]) + 1
