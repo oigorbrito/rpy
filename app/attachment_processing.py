@@ -15,6 +15,7 @@ import asyncpg
 from pypdf import PdfReader
 from pypdf.errors import FileNotDecryptedError, PdfReadError
 
+from app.attachment_sandbox import parse_attachment_sandboxed
 from app.attachments import AttachmentChunkInput, replace_attachment_chunks, upsert_attachment_state
 
 DEFAULT_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024
@@ -586,31 +587,13 @@ async def process_attachment_bytes(
     digest = hashlib.sha256(data).hexdigest()
     try:
         normalized_type = normalize_content_type(content_type)
-        if normalized_type in OCR_IMAGE_CONTENT_TYPES:
-            chunks = await parse_image_attachment_ocr(
+        if normalized_type in OCR_IMAGE_CONTENT_TYPES or normalized_type == "application/pdf":
+            chunks = await parse_attachment_sandboxed(
                 data,
                 content_type=content_type,
-                limits=effective_limits,
+                max_bytes=effective_limits.max_bytes,
+                chunk_chars=effective_limits.chunk_chars,
             )
-        elif normalized_type == "application/pdf":
-            try:
-                chunks = parse_pdf_attachment(
-                    data,
-                    content_type=content_type,
-                    limits=effective_limits,
-                )
-            except AttachmentProcessingError as exc:
-                if exc.error_code != "pdf_text_unavailable":
-                    raise
-                ocr_config = attachment_ocr_config()
-                if not ocr_config.enabled:
-                    raise
-                chunks = await parse_pdf_attachment_ocr(
-                    data,
-                    content_type=content_type,
-                    limits=effective_limits,
-                    config=ocr_config,
-                )
         else:
             chunks = parse_attachment(
                 data,
