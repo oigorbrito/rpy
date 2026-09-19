@@ -4,7 +4,7 @@ Rpy combines fixed regression attacks with property-based mutation around the su
 
 ## Offline contract
 
-The synthetic corpus is stored in `scripts/adversarial_summary_corpus.json`. It contains no real process data. `scripts/adversarial_mutations.py` applies composable mutations for casing, spacing, markup, delimiter nesting and Unicode zero-width/bidi/homoglyph variants.
+The synthetic corpus is stored in `scripts/adversarial_summary_corpus.json`. It contains no real process data. `app/adversarial_mutations.py` applies composable mutations for casing, spacing, markup, delimiter nesting and Unicode zero-width/bidi/homoglyph variants.
 
 `tests/test_adversarial_property_fuzzing.py` uses Hypothesis to generate mutation combinations across:
 - process movement/header input;
