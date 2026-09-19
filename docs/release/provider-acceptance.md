@@ -227,3 +227,12 @@ A stopped acceptance is evidence of a blocker. Do not work around it by weakenin
 The repository/offline release may be technically qualified while live provider acceptance remains pending. That means the software artifact is ready to receive environment-specific secrets and approvals; it does **not** mean the organization is authorized to process real portfolios or enable every external provider.
 
 Production-scale operation remains conditional on the relevant approvals, artifacts and provider acceptance evidence.
+
+
+### Scheduled adversarial sampling
+
+The repository also defines `.github/workflows/adversarial-live.yml`, scheduled weekly and manually dispatchable. It uses only the synthetic regression corpus in `scripts/adversarial_summary_corpus.json`, applies bounded deterministic mutations, and runs `scripts/evaluate_prompt_injection_live.py`.
+
+A run is live provider evidence only when `ANTHROPIC_API_KEY` is actually provisioned. If the credential is absent, the workflow emits an explicit notice and exits without claiming provider acceptance.
+
+The JSON report identifies `prompt_version`, `model`, individual cases, attack families and aggregate family pass rates. Any live failure remains a provider-acceptance blocker until triaged or explicitly risk-accepted outside the repository. Never replace the synthetic corpus with real process data.

@@ -78,7 +78,7 @@ jobs:
         run: ruff check app scripts tests
 
       - name: Unit tests
-        run: pytest -q tests --ignore=tests/integration
+        run: pytest -q tests --ignore=tests/integration --hypothesis-seed=20260918
 
       - name: Synthetic RAG eval gate
         env:
