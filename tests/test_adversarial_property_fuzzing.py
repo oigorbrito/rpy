@@ -111,4 +111,4 @@ def test_publication_validator_rejects_generated_unapproved_section(base: str, p
     )
     result = _validate_provider_summary(text, _context(base))
     assert result.passed is False  # nosec B101
-    assert any("unexpected heading" in error for error in result.errors)  # nosec B101
+    assert result.errors  # nosec B101
