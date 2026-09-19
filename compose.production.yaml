@@ -77,6 +77,19 @@ x-worker-env: &worker-env
   no_proxy: postgres,localhost,127.0.0.1
   HF_HOME: /tmp/huggingface
   XDG_CACHE_HOME: /tmp/.cache
+  ATTACHMENT_PARSER_SOCKET: /run/rpy-parser/parser.sock
+  ATTACHMENT_PARSER_TIMEOUT_SECONDS: ${ATTACHMENT_PARSER_TIMEOUT_SECONDS:-45}
+
+x-parser-env: &parser-env
+  ATTACHMENT_PARSER_SOCKET: /run/rpy-parser/parser.sock
+  ATTACHMENT_MAX_BYTES: ${ATTACHMENT_MAX_BYTES:-10485760}
+  ATTACHMENT_CHUNK_CHARS: ${ATTACHMENT_CHUNK_CHARS:-4000}
+  ATTACHMENT_OCR_ENABLED: ${ATTACHMENT_OCR_ENABLED:-false}
+  ATTACHMENT_OCR_BINARY: tesseract
+  ATTACHMENT_OCR_LANGUAGE: ${ATTACHMENT_OCR_LANGUAGE:-por}
+  ATTACHMENT_OCR_TIMEOUT_SECONDS: ${ATTACHMENT_OCR_TIMEOUT_SECONDS:-30}
+  ATTACHMENT_PDF_OCR_SCALE: ${ATTACHMENT_PDF_OCR_SCALE:-2.0}
+  ATTACHMENT_PDF_OCR_MAX_PAGES: ${ATTACHMENT_PDF_OCR_MAX_PAGES:-100}
 
 x-scheduler-env: &scheduler-env
   DATABASE_URL: ${SCHEDULER_DATABASE_URL:?SCHEDULER_DATABASE_URL is required}
@@ -182,6 +195,31 @@ services:
       - egress
     restart: unless-stopped
 
+  attachment-parser:
+    <<: *app-runtime
+    image: *rpy-image
+    cpus: 0.75
+    mem_limit: 768m
+    pids_limit: 64
+    command: ["python", "-m", "app.attachment_sandbox"]
+    environment: *parser-env
+    network_mode: "none"
+    volumes:
+      - parser_socket:/run/rpy-parser
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=256m
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import os; raise SystemExit(0 if os.path.exists('/run/rpy-parser/parser.sock') else 1)"
+      interval: 5s
+      timeout: 2s
+      retries: 12
+      start_period: 2s
+    restart: unless-stopped
+
   worker-1:
     <<: *app-runtime
     image: *rpy-image
@@ -190,11 +228,15 @@ services:
     pids_limit: 256
     command: ["python", "-m", "app.worker"]
     environment: *worker-env
+    volumes:
+      - parser_socket:/run/rpy-parser
     stop_grace_period: ${WORKER_STOP_GRACE_PERIOD:-40s}
     depends_on:
       migrate:
         condition: service_completed_successfully
       egress-proxy:
+        condition: service_healthy
+      attachment-parser:
         condition: service_healthy
     networks:
       - backend
@@ -244,3 +286,9 @@ networks:
 
 volumes:
   rpy_pgdata:
+  parser_socket:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: "uid=10001,gid=10001,mode=0770,size=1m"
