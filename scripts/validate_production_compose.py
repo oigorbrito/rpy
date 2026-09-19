@@ -12,6 +12,7 @@ EXPECTED_SERVICES = {
     "migrate",
     "api",
     "egress-proxy",
+    "attachment-parser",
     "worker-1",
     "worker-2",
     "scheduler",
@@ -20,6 +21,7 @@ APPLICATION_SERVICES = (
     "migrate",
     "api",
     "egress-proxy",
+    "attachment-parser",
     "worker-1",
     "worker-2",
     "scheduler",
@@ -90,6 +92,19 @@ WORKER_REQUIRED_ENV = {
     "no_proxy",
     "HF_HOME",
     "XDG_CACHE_HOME",
+    "ATTACHMENT_PARSER_SOCKET",
+    "ATTACHMENT_PARSER_TIMEOUT_SECONDS",
+}
+PARSER_REQUIRED_ENV = {
+    "ATTACHMENT_PARSER_SOCKET",
+    "ATTACHMENT_MAX_BYTES",
+    "ATTACHMENT_CHUNK_CHARS",
+    "ATTACHMENT_OCR_ENABLED",
+    "ATTACHMENT_OCR_BINARY",
+    "ATTACHMENT_OCR_LANGUAGE",
+    "ATTACHMENT_OCR_TIMEOUT_SECONDS",
+    "ATTACHMENT_PDF_OCR_SCALE",
+    "ATTACHMENT_PDF_OCR_MAX_PAGES",
 }
 SCHEDULER_REQUIRED_ENV = {
     "DATABASE_URL",
@@ -222,6 +237,7 @@ _RUNTIME_LIMITS = {
     "migrate": {"cpus": 1.0, "mem_limit": 512 * 1024 * 1024, "pids_limit": 128},
     "api": {"cpus": 1.0, "mem_limit": 512 * 1024 * 1024, "pids_limit": 128},
     "egress-proxy": {"cpus": 0.5, "mem_limit": 256 * 1024 * 1024, "pids_limit": 128},
+    "attachment-parser": {"cpus": 0.75, "mem_limit": 768 * 1024 * 1024, "pids_limit": 64},
     "worker-1": {"cpus": 2.0, "mem_limit": 8 * 1024 * 1024 * 1024, "pids_limit": 256},
     "worker-2": {"cpus": 2.0, "mem_limit": 8 * 1024 * 1024 * 1024, "pids_limit": 256},
     "scheduler": {"cpus": 0.5, "mem_limit": 256 * 1024 * 1024, "pids_limit": 64},
@@ -353,6 +369,72 @@ def _validate_egress_topology(services: dict[str, Any], networks: dict[str, Any]
             _fail(f"{service_name} no_proxy must remain limited to local/backend names")
 
 
+def _volume_mount(service: dict[str, Any], *, source: str, target: str) -> bool:
+    for item in service.get("volumes") or []:
+        if isinstance(item, dict):
+            if item.get("source") == source and item.get("target") == target:
+                return True
+        elif str(item).split(":")[:2] == [source, target]:
+            return True
+    return False
+
+
+def _validate_attachment_parser_contract(
+    services: dict[str, Any], volumes: dict[str, Any]
+) -> None:
+    parser = services["attachment-parser"]
+    if str(parser.get("network_mode") or "") != "none":
+        _fail("attachment-parser must use network_mode none")
+    if parser.get("networks"):
+        _fail("attachment-parser must not join any Docker network")
+    if parser.get("command") != ["python", "-m", "app.attachment_sandbox"]:
+        _fail("attachment-parser command must run the sandbox server")
+
+    parser_env = _require_env(services, "attachment-parser", PARSER_REQUIRED_ENV)
+    if set(parser_env) != PARSER_REQUIRED_ENV:
+        _fail("attachment-parser must receive only parser settings")
+    if parser_env.get("ATTACHMENT_PARSER_SOCKET") != "/run/rpy-parser/parser.sock":
+        _fail("attachment-parser socket path must remain fixed inside the sandbox")
+    if parser_env.get("ATTACHMENT_OCR_BINARY") != "tesseract":
+        _fail("attachment-parser OCR binary must remain the packaged tesseract binary")
+    _forbid_env(
+        services,
+        "attachment-parser",
+        HTTP_SECRETS | PROVIDER_SECRETS | MIGRATE_REQUIRED_ENV | {"DATABASE_URL"},
+    )
+
+    if not _volume_mount(parser, source="parser_socket", target="/run/rpy-parser"):
+        _fail("attachment-parser must mount the private parser_socket volume")
+
+    socket_volume = volumes.get("parser_socket") or {}
+    driver_opts = socket_volume.get("driver_opts") or {}
+    if socket_volume.get("driver") != "local":
+        _fail("parser_socket must use the local volume driver")
+    if driver_opts.get("type") != "tmpfs" or driver_opts.get("device") != "tmpfs":
+        _fail("parser_socket must be backed by tmpfs")
+    options = str(driver_opts.get("o") or "")
+    for required in ("uid=10001", "gid=10001", "mode=0770", "size=1m"):
+        if required not in options:
+            _fail(f"parser_socket tmpfs must include {required}")
+
+    for service_name in ("worker-1", "worker-2"):
+        worker = services[service_name]
+        env = _environment(services, service_name)
+        if env.get("ATTACHMENT_PARSER_SOCKET") != "/run/rpy-parser/parser.sock":
+            _fail(f"{service_name} must use the private parser Unix socket")
+        try:
+            parser_timeout = float(env.get("ATTACHMENT_PARSER_TIMEOUT_SECONDS"))
+        except (TypeError, ValueError):
+            _fail(f"{service_name} ATTACHMENT_PARSER_TIMEOUT_SECONDS must be numeric")
+        if parser_timeout <= 0:
+            _fail(f"{service_name} ATTACHMENT_PARSER_TIMEOUT_SECONDS must be positive")
+        if not _volume_mount(worker, source="parser_socket", target="/run/rpy-parser"):
+            _fail(f"{service_name} must mount the private parser_socket volume")
+        dependency = (worker.get("depends_on") or {}).get("attachment-parser") or {}
+        if dependency.get("condition") != "service_healthy":
+            _fail(f"{service_name} must wait for attachment-parser health")
+
+
 def _duration_seconds(value: Any) -> float:
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         seconds = float(value)
@@ -474,13 +556,18 @@ def validate(config: dict[str, Any]) -> None:
     networks = config.get("networks") or {}
     if not isinstance(networks, dict):
         _fail("networks must be an object")
+    volumes = config.get("volumes") or {}
+    if not isinstance(volumes, dict):
+        _fail("volumes must be an object")
     _validate_egress_topology(services, networks)
     _validate_runtime_confinement(services)
+    _validate_attachment_parser_contract(services, volumes)
 
     _require_env(services, "api", API_REQUIRED_ENV)
     for service_name in ("worker-1", "worker-2"):
         _require_env(services, service_name, WORKER_REQUIRED_ENV)
     _require_env(services, "scheduler", SCHEDULER_REQUIRED_ENV)
+    _require_env(services, "attachment-parser", PARSER_REQUIRED_ENV)
     _validate_worker_shutdown(services)
     _validate_worker_embedding_contract(services)
 
