@@ -30,6 +30,7 @@ def _runtime_services() -> dict:
         "migrate": _runtime_service(cpus=1.0, mem_limit="512m", pids_limit=128),
         "api": _runtime_service(cpus=1.0, mem_limit="512m", pids_limit=128),
         "egress-proxy": _runtime_service(cpus=0.5, mem_limit="256m", pids_limit=128),
+        "attachment-parser": _runtime_service(cpus=0.75, mem_limit="768m", pids_limit=64),
         "worker-1": _runtime_service(cpus=2.0, mem_limit="8g", pids_limit=256),
         "worker-2": _runtime_service(cpus=2.0, mem_limit="8g", pids_limit=256),
         "scheduler": _runtime_service(cpus=0.5, mem_limit="256m", pids_limit=64),
@@ -139,3 +140,107 @@ def test_proxy_cannot_receive_provider_secrets_by_contract() -> None:
                 "egress": {},
             },
         )
+
+
+
+def _parser_contract_services() -> dict:
+    parser_env = {
+        "ATTACHMENT_PARSER_SOCKET": "/run/rpy-parser/parser.sock",
+        "ATTACHMENT_PARSER_REQUEST_TIMEOUT_SECONDS": "45",
+        "ATTACHMENT_MAX_BYTES": "10485760",
+        "ATTACHMENT_CHUNK_CHARS": "4000",
+        "ATTACHMENT_OCR_ENABLED": "false",
+        "ATTACHMENT_OCR_BINARY": "tesseract",
+        "ATTACHMENT_OCR_LANGUAGE": "por",
+        "ATTACHMENT_OCR_TIMEOUT_SECONDS": "30",
+        "ATTACHMENT_PDF_OCR_SCALE": "2.0",
+        "ATTACHMENT_PDF_OCR_MAX_PAGES": "100",
+    }
+    worker_env = {
+        "ATTACHMENT_PARSER_SOCKET": "/run/rpy-parser/parser.sock",
+        "ATTACHMENT_PARSER_TIMEOUT_SECONDS": "45",
+    }
+    return {
+        "attachment-parser": {
+            "network_mode": "none",
+            "command": ["python", "-m", "app.attachment_sandbox"],
+            "environment": parser_env,
+            "volumes": [
+                {"type": "volume", "source": "parser_socket", "target": "/run/rpy-parser"}
+            ],
+        },
+        "worker-1": {
+            "environment": dict(worker_env),
+            "volumes": [
+                {"type": "volume", "source": "parser_socket", "target": "/run/rpy-parser"}
+            ],
+            "depends_on": {"attachment-parser": {"condition": "service_healthy"}},
+        },
+        "worker-2": {
+            "environment": dict(worker_env),
+            "volumes": [
+                {"type": "volume", "source": "parser_socket", "target": "/run/rpy-parser"}
+            ],
+            "depends_on": {"attachment-parser": {"condition": "service_healthy"}},
+        },
+    }
+
+
+def _parser_volume() -> dict:
+    return {
+        "parser_socket": {
+            "driver": "local",
+            "driver_opts": {
+                "type": "tmpfs",
+                "device": "tmpfs",
+                "o": "uid=10001,gid=10001,mode=0770,size=1m",
+            },
+        }
+    }
+
+
+def test_attachment_parser_contract_accepts_no_network_tmpfs_socket() -> None:
+    contract._validate_attachment_parser_contract(
+        _parser_contract_services(), _parser_volume()
+    )
+
+
+def test_attachment_parser_contract_rejects_network_access() -> None:
+    services = _parser_contract_services()
+    services["attachment-parser"]["network_mode"] = "bridge"
+    with pytest.raises(SystemExit, match="network_mode none"):
+        contract._validate_attachment_parser_contract(services, _parser_volume())
+
+
+def test_attachment_parser_contract_rejects_provider_secret() -> None:
+    services = _parser_contract_services()
+    services["attachment-parser"]["environment"]["ANTHROPIC_API_KEY"] = "secret"
+    with pytest.raises(SystemExit, match="only parser settings"):
+        contract._validate_attachment_parser_contract(services, _parser_volume())
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("cpus", 1.0, "cpus must equal 0.75"),
+        ("mem_limit", "1g", "mem_limit does not match"),
+        ("pids_limit", 128, "pids_limit does not match"),
+    ],
+)
+def test_attachment_parser_resource_budgets_are_mechanical(
+    field: str, value: object, message: str
+) -> None:
+    services = _runtime_services()
+    services["attachment-parser"][field] = value
+    with pytest.raises(SystemExit, match=message):
+        contract._validate_runtime_confinement(services)
+
+
+
+def test_attachment_parser_contract_rejects_nonpositive_request_timeout() -> None:
+    services = _parser_contract_services()
+    services["attachment-parser"]["environment"][
+        "ATTACHMENT_PARSER_REQUEST_TIMEOUT_SECONDS"
+    ] = "0"
+    with pytest.raises(SystemExit, match="request timeout must be positive"):
+        contract._validate_attachment_parser_contract(services, _parser_volume())

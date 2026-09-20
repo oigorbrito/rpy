@@ -73,11 +73,13 @@ def test_pdf_text_layer_is_extracted_with_page_positions():
     assert chunks[0].char_end == len(chunks[0].text)
 
 
-def test_dispatcher_accepts_pdf_and_text():
+def test_worker_dispatcher_keeps_binary_formats_outside_process():
     limits = AttachmentProcessingLimits(max_bytes=50_000, chunk_chars=256)
-    assert parse_attachment(
-        _text_pdf("PDF"), content_type="application/pdf", limits=limits
-    )[0].page_start == 1
+    with pytest.raises(AttachmentProcessingError) as exc_info:
+        parse_attachment(
+            _text_pdf("PDF"), content_type="application/pdf", limits=limits
+        )
+    assert exc_info.value.error_code == "unsupported_content_type"
     assert parse_attachment(
         b"texto", content_type="text/plain; charset=utf-8", limits=limits
     )[0].text == "texto"
@@ -201,10 +203,15 @@ async def test_pdf_ocr_empty_pages_are_unreadable(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_textless_pdf_preserves_historical_status_when_ocr_disabled(monkeypatch):
+async def test_textless_pdf_preserves_attachment_local_status_from_sandbox(monkeypatch):
     from app import attachment_processing as processing
 
-    monkeypatch.delenv("ATTACHMENT_OCR_ENABLED", raising=False)
+    async def fake_parse(*args, **kwargs):
+        raise AttachmentProcessingError(
+            status="unreadable", error_code="pdf_text_unavailable"
+        )
+
+    monkeypatch.setattr(processing, "parse_attachment_sandboxed", fake_parse)
 
     async def fake_upsert(conn, **kwargs):
         assert kwargs["status"] == "unreadable"
