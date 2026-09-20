@@ -107,6 +107,14 @@ jobs:
       - name: Frontend behavior tests
         run: node tests/frontend_behavior_test.mjs
 
+      - name: Install browser smoke tooling
+        run: |
+          python -m pip install playwright==1.55.0
+          python -m playwright install --with-deps chromium
+
+      - name: Frontend browser smoke
+        run: python tests/frontend_browser_smoke.py
+
       - name: Container image smoke
         run: |
           docker build -t "rpy-ci:${GITHUB_SHA}" .
