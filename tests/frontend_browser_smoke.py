@@ -150,8 +150,9 @@ def run() -> None:
             fill_lookup(page)
             page.locator("#request-process").wait_for(state="visible")
             page.locator("#request-process").click()
-            page.locator("#status-title").wait_for()
-            assert "Consulta registrada" in page.locator("#status-title").inner_text()
+            page.wait_for_function(
+                'document.querySelector("#status-title").textContent.includes("Consulta registrada")'
+            )
 
             assert console_errors == [], console_errors
             assert page_errors == [], page_errors
