@@ -11,7 +11,7 @@ This document tracks the current `main` after the historical `v0.1.0` release. I
 | Project guardrails | `scripts/project_harness.py`, migration/release guardrails | ready |
 | Unit/integration | unit + PostgreSQL integration suites in CI | ready |
 | Retrieval/generation evals | synthetic/offline evaluation gates | ready |
-| Frontend | empirical behavioral harness | ready |
+| Frontend | behavioral harness + real Chromium smoke (Playwright) | ready |
 | Container runtime | local image smoke + published digest smoke | ready |
 | Backup/recovery | PostgreSQL backup/restore drill | ready |
 | Release smoke | provider-free offline release smoke | ready |
@@ -42,7 +42,7 @@ This document tracks the current `main` after the historical `v0.1.0` release. I
 
 A **release blocker** prevents creation of a new software release artifact. An **activation blocker** prevents enabling a particular provider/data boundary in a target environment.
 
-At present, the repository has no newly identified code/CI blocker for producing another **offline-qualified software artifact**. The unresolved open issues are primarily activation/acceptance/domain-governance blockers, except that product may choose to require #113/#114 completion as a release criterion.
+At present, the repository has no known code/CI blocker for producing another **offline-qualified software artifact**. The private/secrecy retrieval hard-filter follow-up (#265) is closed with PostgreSQL integration evidence across load, lexical, vector and embedding paths. The unresolved open issues are primarily activation/acceptance/domain-governance or additional hardening work, except that product may choose to require #113/#114 completion as a release criterion.
 
 Before a formal new tag, two release-owner decisions remain explicit:
 
@@ -50,6 +50,12 @@ Before a formal new tag, two release-owner decisions remain explicit:
 2. decide whether the unresolved document-contract work (#113/#114) is required for that release or remains a documented post-release product acceptance item.
 
 Engineering must not silently resolve either decision.
+
+## Current repository-qualified candidate
+
+The current repository-qualified candidate is `a1d754dd8fe054642a56d904bb000e70e970639c`. Its exact-head CI, CodeQL and vulnerability scan are green. The frontend gate now includes a real headless Chromium smoke that exercises the checked-in HTML/CSS/JavaScript, authorization header behavior, successful process/summary rendering, inert JSX handling and explicit missing-process acquisition.
+
+This commit is a **repository/offline candidate**, not a production activation decision. Any later code change creates a new candidate and must repeat the exact-head gates.
 
 ## Final release-preparation checklist
 
