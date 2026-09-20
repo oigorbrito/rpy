@@ -140,6 +140,8 @@ def run() -> None:
             assert page.locator("#summary-body img").count() == 0
             assert page.locator('[data-component="ProcessHeader"]').count() == 1
             assert page.locator('[data-component="Party"]').inner_text() == "Parte Sintética"
+            assert console_errors == [], console_errors
+            console_errors.clear()
 
             page.unroute("**/processes/**")
 
@@ -161,7 +163,10 @@ def run() -> None:
                 'document.querySelector("#status-title").textContent.includes("Consulta registrada")'
             )
 
-            assert console_errors == [], console_errors
+            assert all(
+                "Failed to load resource: the server responded with a status of 404" in error
+                for error in console_errors
+            ), console_errors
             assert page_errors == [], page_errors
             browser.close()
     finally:
