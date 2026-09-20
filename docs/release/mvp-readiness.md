@@ -31,7 +31,7 @@ A candidate is repository-ready only when CI is green for its exact head and cov
 - Project harness, including migration/release guardrails and evidence-wiring checks;
 - unit tests and offline evaluation gates;
 - production compose/deploy preflight contract;
-- frontend behavioral harness;
+- frontend behavioral harness plus real Chromium smoke over the checked-in assets;
 - local application image runtime smoke;
 - backup/restore drill;
 - PostgreSQL integration and E2E tests;
