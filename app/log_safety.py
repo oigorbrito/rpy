@@ -32,9 +32,9 @@ _BEARER_RE = re.compile(r"(?i)(authorization\s*[:=]\s*bearer\s+)([^\s,;]+)")
 _QUERY_SECRET_RE = re.compile(
     r"(?i)(\b(?:api[_-]?key|token|access[_-]?token|password|secret)\s*[=:]\s*)([^\s,;&]+)"
 )
-# Redact application API keys (sk_live_... / sk_test_...) even when not configured in env
+# Redact application and provider API keys (sk_live_..., sk_test_..., sk-ant-api...) even when not configured in env
 # or when appearing without authorization headers or query parameter names.
-_API_KEY_TOKEN_RE = re.compile(r"\bsk_(?:live|test)_[a-zA-Z0-9_-]+\b")
+_API_KEY_TOKEN_RE = re.compile(r"\b(?:sk_(?:live|test)|sk-ant-api)[a-zA-Z0-9_-]+\b")
 
 
 def _configured_secret_values() -> list[str]:

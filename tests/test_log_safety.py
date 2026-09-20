@@ -50,9 +50,11 @@ def test_sanitize_error_message_is_bounded() -> None:
 
 def test_sanitize_error_message_redacts_api_key_tokens() -> None:
     rendered = sanitize_error_message(
-        "Failed authentication for sk_live_abc1234567890abcdef and sk_test_xyz9876543210fedcba"
+        "Failed authentication for sk_live_abc1234567890abcdef, sk_test_xyz9876543210fedcba, "
+        "and sk-ant-api03-abcdef1234567890-xyz"
     )
 
     assert "sk_live_abc1234567890abcdef" not in rendered
     assert "sk_test_xyz9876543210fedcba" not in rendered
-    assert rendered == f"Failed authentication for {REDACTED} and {REDACTED}"
+    assert "sk-ant-api03-abcdef1234567890-xyz" not in rendered
+    assert rendered == f"Failed authentication for {REDACTED}, {REDACTED}, and {REDACTED}"
