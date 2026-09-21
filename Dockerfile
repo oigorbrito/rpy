@@ -24,6 +24,7 @@ RUN python -m pip install pip==26.2.1 setuptools==80.9.0 \
               /usr/local/lib/python3.12/site-packages/setuptools \
               /usr/local/lib/python3.12/site-packages/setuptools-*.dist-info \
               /usr/local/lib/python3.12/site-packages/_distutils_hack \
+              /usr/local/lib/python3.12/site-packages/distutils-precedence.pth \
     && rm -f /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.12
 
 COPY data ./data
