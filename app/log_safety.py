@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 
@@ -42,6 +43,16 @@ def _configured_secret_values() -> list[str]:
     for name in _SECRET_ENV_NAMES:
         value = os.environ.get(name)
         if value and len(value) >= 4:
+            if name == "RPY_BEARER_TOKENS":
+                try:
+                    parsed = json.loads(value)
+                    if isinstance(parsed, dict):
+                        for token in parsed:
+                            if isinstance(token, str) and len(token) >= 4:
+                                values.append(token)
+                        continue
+                except (json.JSONDecodeError, TypeError):
+                    pass
             values.append(value)
     return sorted(set(values), key=len, reverse=True)
 

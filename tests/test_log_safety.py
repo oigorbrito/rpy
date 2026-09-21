@@ -56,3 +56,17 @@ def test_sanitize_error_message_redacts_api_key_tokens() -> None:
     assert "sk_live_abc1234567890abcdef" not in rendered
     assert "sk_test_xyz9876543210fedcba" not in rendered
     assert rendered == f"Failed authentication for {REDACTED} and {REDACTED}"
+
+
+def test_sanitize_error_message_redacts_bearer_tokens_env_json(monkeypatch) -> None:
+    monkeypatch.setenv(
+        "RPY_BEARER_TOKENS",
+        '{"my-custom-bearer-token-123": "3fa85f64-5717-4562-b3fc-2c963f66afa6"}',
+    )
+
+    rendered = sanitize_error_message(
+        "Request failed using token my-custom-bearer-token-123"
+    )
+
+    assert "my-custom-bearer-token-123" not in rendered
+    assert REDACTED in rendered
