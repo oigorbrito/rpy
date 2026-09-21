@@ -8,6 +8,16 @@ fi
 
 image=$1
 
+# Python startup itself must be clean. A stale .pth file can emit a site
+# initialization traceback and still return exit code 0, so capture stderr
+# explicitly before exercising application imports.
+startup_output=$(docker run --rm --entrypoint python "$image" -c 'pass' 2>&1)
+if [ -n "$startup_output" ]; then
+  echo "python runtime emitted unexpected startup output:" >&2
+  echo "$startup_output" >&2
+  exit 1
+fi
+
 # Exercise the exact runtime artifact, not the checkout. This catches missing
 # packaged/static files and accidental root execution before publication.
 docker run --rm --entrypoint python "$image" - <<'PY'
