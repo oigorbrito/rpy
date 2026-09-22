@@ -89,6 +89,21 @@ BEGIN
         RAISE EXCEPTION 'claim evidence scope does not match claim';
     END IF;
 
+    IF NEW.source_kind = 'process'
+       AND NEW.evidence_ref <> 'p-' || replace(NEW.version_id::text, '-', '') THEN
+        RAISE EXCEPTION 'claim process evidence ref does not match version';
+    END IF;
+
+    IF NEW.source_kind = 'movement'
+       AND NEW.evidence_ref <> 'm-' || replace(NEW.step_id::text, '-', '') THEN
+        RAISE EXCEPTION 'claim movement evidence ref does not match step';
+    END IF;
+
+    IF NEW.source_kind = 'attachment'
+       AND NEW.evidence_ref <> 'a-' || replace(NEW.attachment_chunk_id::text, '-', '') THEN
+        RAISE EXCEPTION 'claim attachment evidence ref does not match chunk';
+    END IF;
+
     IF NEW.source_kind = 'movement' AND NOT EXISTS (
         SELECT 1
         FROM process_summary_sources
