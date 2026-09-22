@@ -27,7 +27,7 @@ dev = [
   "pytest-asyncio>=1.1,<2",
   "hypothesis>=6.168,<7",
   "httpx>=0.28,<1",
-  "ruff>=0.16,<0.17",
+  "ruff>=0.16.8,<0.17",
   "pypdfium2>=5.13,<6",
   "Pillow>=12.3,<13",
 ]
