@@ -778,7 +778,13 @@ async def _load_publishable_summary(
         )
         if row is None:
             return None
-        if int(row["secrecy_level"] or 0) <= 0:
+        if int(row["secrecy_level"] or 0) > 0:
+            if (
+                row["model"] != SECRET_MODEL
+                or row["prompt_version"] != SECRET_PROMPT_VERSION
+            ):
+                return None
+        else:
             claim_evidence = await load_summary_claim_evidence(
                 conn, summary_id=row["id"]
             )
