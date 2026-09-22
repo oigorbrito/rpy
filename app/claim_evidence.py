@@ -76,6 +76,22 @@ def expected_material_claims(payload: dict[str, Any]) -> dict[str, str]:
     return expected
 
 
+def build_material_claims(
+    payload: dict[str, Any],
+    *,
+    evidence_refs: list[str] | tuple[str, ...],
+) -> list[dict[str, Any]]:
+    refs = [str(ref) for ref in evidence_refs]
+    return [
+        {
+            "claim_id": claim_id,
+            "text": text,
+            "evidence_refs": list(refs),
+        }
+        for claim_id, text in expected_material_claims(payload).items()
+    ]
+
+
 def evidence_catalog(context: dict[str, Any]) -> dict[str, EvidenceSource]:
     catalog: dict[str, EvidenceSource] = {}
     process_ref = str(context.get("_process_evidence_ref") or "")
