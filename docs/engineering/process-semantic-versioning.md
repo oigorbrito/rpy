@@ -4,10 +4,10 @@ Rpy preserves each authorized Judit lawsuit response as a raw staged `process_ve
 
 ## Semantic document
 
-The comparison is computed from normalized data after Judit normalization, not from callback envelopes or raw JSON bytes. The current semantic schema is version `1` and includes:
+The comparison is computed from normalized data after Judit normalization, not from callback envelopes or raw JSON bytes. The current semantic schema is version `3` and includes:
 
 - normalized process `court`, `class_name`, `secrecy_level` and `header`;
-- normalized `parties` and `subjects`;
+- normalized `parties`, `representatives` and `subjects`;
 - movement order and normalized `step_number`;
 - localized movement instant, title and normalized text;
 - source movement number, privacy flag, movement secrecy level and tags.
@@ -32,7 +32,7 @@ The finalizer reports `finalized_unchanged` for this case.
 
 ## Changed response
 
-A changed normalized movement, relevant structured field, privacy/secrecy metadata or other field included in semantic schema version 1 produces a different fingerprint. Normal version ordering then applies: a non-stale candidate is promoted, its steps are persisted and a non-cached response may enqueue summary generation.
+A changed normalized movement, relevant structured field, privacy/secrecy metadata or other field included in semantic schema version 3 produces a different fingerprint. Normal version ordering then applies: a non-stale candidate is promoted, its steps are persisted and a non-cached response may enqueue summary generation.
 
 Explicit Judit cached responses retain the existing no-generation rule independently of semantic comparison.
 
