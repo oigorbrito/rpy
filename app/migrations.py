@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
 
 import asyncpg
 
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATIONS_DIR = ROOT / "sql"
+MIGRATIONS_DIR_ENV = "RPY_MIGRATIONS_DIR"
 MIGRATION_LOCK_KEY = 0x525059  # ASCII-ish stable key for "RPY".
 
 CREATE_LEDGER_SQL = """
@@ -26,8 +28,26 @@ def _checksum(sql: str) -> str:
     return hashlib.sha256(sql.encode("utf-8")).hexdigest()
 
 
+def resolve_migrations(
+    migrations_dir: Path | None = None,
+) -> tuple[Path, list[Path]]:
+    if migrations_dir is not None:
+        directory = migrations_dir
+    else:
+        configured = os.getenv(MIGRATIONS_DIR_ENV)
+        directory = Path(configured) if configured else MIGRATIONS_DIR
+
+    if not directory.is_dir():
+        raise RuntimeError(f"migration directory does not exist: {directory}")
+
+    paths = sorted(directory.glob("*.sql"))
+    if not paths:
+        raise RuntimeError(f"migration directory contains no SQL files: {directory}")
+    return directory, paths
+
+
 async def migrate(database_url: str, *, migrations_dir: Path | None = None) -> None:
-    directory = migrations_dir or MIGRATIONS_DIR
+    directory, paths = resolve_migrations(migrations_dir)
     conn = await asyncpg.connect(database_url)
     locked = False
     try:
@@ -35,7 +55,7 @@ async def migrate(database_url: str, *, migrations_dir: Path | None = None) -> N
         locked = True
         await conn.execute(CREATE_LEDGER_SQL)
 
-        for path in sorted(directory.glob("*.sql")):
+        for path in paths:
             sql = path.read_text(encoding="utf-8")
             checksum = _checksum(sql)
             recorded = await conn.fetchval(
