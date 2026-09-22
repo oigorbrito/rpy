@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -45,6 +46,9 @@ _REPRESENTATIVE_PERSON_TYPES = {
     "REPRESENTANTE",
     "REPRESENTATIVE",
     "LEGAL_REPRESENTATIVE",
+    "REPRESENTANTE_LEGAL",
+    "ADVOGADO_A",
+    "PROCURADOR_A",
     "DEFENSOR",
     "DEFENSORA",
     "DEFENSOR_PUBLICO",
@@ -209,7 +213,9 @@ def _masked_personal_id(value: str) -> str:
 
 
 def _normalized_person_type(value: Any) -> str:
-    return re.sub(r"[^A-Z0-9]+", "_", str(value or "").strip().upper()).strip("_")
+    rendered = unicodedata.normalize("NFKD", str(value or "").strip())
+    ascii_value = "".join(character for character in rendered if not unicodedata.combining(character))
+    return re.sub(r"[^A-Z0-9]+", "_", ascii_value.upper()).strip("_")
 
 
 def _is_representative(party: dict[str, Any]) -> bool:
