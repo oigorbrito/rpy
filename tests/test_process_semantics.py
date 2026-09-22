@@ -27,6 +27,7 @@ def _fields() -> dict:
         "court": "TJRS",
         "class_name": "Procedimento Comum",
         "secrecy_level": 0,
+        "representatives": [],
     }
 
 
@@ -56,7 +57,7 @@ def test_semantic_fingerprint_changes_for_relevant_structured_metadata() -> None
 
 
 def test_semantic_schema_version_tracks_attachment_manifest_contract() -> None:
-    assert SEMANTIC_SCHEMA_VERSION == 2
+    assert SEMANTIC_SCHEMA_VERSION == 3
 
 
 def test_semantic_fingerprint_changes_when_attachment_manifest_changes() -> None:
@@ -87,3 +88,18 @@ def test_local_attachment_processing_status_is_not_semantic() -> None:
     right["attachments"] = [dict(attachment, status="ready")]
 
     assert semantic_fingerprint(**left) == semantic_fingerprint(**right)
+
+
+def test_semantic_fingerprint_changes_when_representatives_change() -> None:
+    left = _fields()
+    right = _fields()
+    right["representatives"] = [
+        {
+            "name": "Advogado Exemplo",
+            "side": "Active",
+            "person_type": "ADVOGADO",
+            "represents": "Parte Sintética",
+        }
+    ]
+
+    assert semantic_fingerprint(**left) != semantic_fingerprint(**right)
