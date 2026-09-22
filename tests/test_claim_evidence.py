@@ -203,3 +203,14 @@ def test_publication_completeness_rejects_legacy_or_duplicate_provenance() -> No
         _structured_output(payload),
         [*complete, dict(complete[0])],
     ) is False
+
+
+def test_duplicate_material_claim_id_is_rejected() -> None:
+    payload = _payload()
+    ref = movement_evidence_ref(STEP_ID)
+    payload["claims"] = build_material_claims(payload, evidence_refs=[ref])
+    payload["claims"].append(dict(payload["claims"][0]))
+
+    _, errors = validate_claim_evidence(payload, _context())
+
+    assert "duplicate claim_id: synthesis" in errors
