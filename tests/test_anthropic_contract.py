@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 from typing import Any
+from uuid import UUID
 
 import pytest
 
@@ -28,6 +29,18 @@ _STRUCTURED = json.dumps(
         "deadlines": [],
         "related_processes": [],
         "attachments": [],
+        "claims": [
+            {
+                "claim_id": "synthesis",
+                "text": "Síntese válida.",
+                "evidence_refs": ["p-00000000000000000000000000000601"],
+            },
+            {
+                "claim_id": "current_status",
+                "text": "Situação atual registrada.",
+                "evidence_refs": ["p-00000000000000000000000000000601"],
+            },
+        ],
     },
     ensure_ascii=False,
 )
@@ -79,6 +92,9 @@ def _context(*, step_count: int) -> dict[str, Any]:
         "secrecy_level": 0,
         "step_count": step_count,
         "steps": [{"step_number": 1, "title": "DISTRIBUIÇÃO", "text": "Distribuído."}],
+        "_process_evidence_ref": "p-00000000000000000000000000000601",
+        "_selected_sources": [],
+        "_attachment_sources": [],
     }
 
 
@@ -95,7 +111,7 @@ async def test_sonnet_5_request_uses_cacheable_system_prompt_without_custom_samp
     request = client.messages.calls[0]
     assert request["model"] == MODEL == SONNET_MODEL == "claude-sonnet-5"
     assert request["max_tokens"] == MAX_TOKENS == 4000
-    assert PROMPT_VERSION == "process-summary-v4"
+    assert PROMPT_VERSION == "process-summary-v5"
     assert REQUESTED_TEMPERATURE == 0.2
     assert "temperature" not in request
     assert "top_p" not in request
@@ -207,6 +223,9 @@ async def test_secret_case_sends_only_class_and_allowed_header_to_provider() -> 
                 "text": "CONTEUDO-SECRETO",
             }
         ],
+        "_process_evidence_ref": "p-ffffffffffffffffffffffffffffffff",
+        "_selected_sources": [],
+        "_attachment_sources": [],
     }
 
     await _generate(client, context)
@@ -229,6 +248,8 @@ async def test_secret_case_sends_only_class_and_allowed_header_to_provider() -> 
         "parties",
         "subjects",
         "court",
+        "evidence_ref",
+        "p-ffffffffffffffffffffffffffffffff",
     ):
         assert forbidden not in user_content
 
