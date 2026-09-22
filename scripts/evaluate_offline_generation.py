@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
+from app.claim_evidence import build_material_claims, process_evidence_ref
 from app.rag import (
     EMPTY_STEPS_WARNING,
     _generate,
@@ -90,6 +91,9 @@ def _context(case: dict[str, Any]) -> tuple[dict[str, Any], str | None]:
         "header": {"instance": int(case.get("instance", 1))},
         "step_count": count,
         "steps": _serialize_steps(ranked),
+        "_process_evidence_ref": process_evidence_ref(
+            uuid5(NAMESPACE_URL, f"rpy:generation:{case_id}:version")
+        ),
     }
     if not steps:
         context["source_warnings"] = [EMPTY_STEPS_WARNING]
@@ -141,6 +145,10 @@ class _FakeMessages:
             "related_processes": [],
             "attachments": [],
         }
+        payload["claims"] = build_material_claims(
+            payload,
+            evidence_refs=[str(process["evidence_ref"])],
+        )
         text = json.dumps(payload, ensure_ascii=False)
         return SimpleNamespace(content=[SimpleNamespace(type="text", text=text)])
 
