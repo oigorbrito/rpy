@@ -171,7 +171,8 @@ def parse_structured_summary(raw: str) -> dict[str, Any]:
         raise ValueError("provider structured summary is not valid JSON") from exc
     if not isinstance(payload, dict):
         raise ValueError("provider structured summary must be a JSON object")
-    if set(payload) != _REQUIRED_KEYS:
+    legacy_required = _REQUIRED_KEYS - {"claims"}
+    if not legacy_required.issubset(payload) or not set(payload).issubset(_REQUIRED_KEYS):
         raise ValueError("provider structured summary keys do not match the contract")
 
     synthesis = payload.get("synthesis")
@@ -198,7 +199,7 @@ def parse_structured_summary(raw: str) -> dict[str, Any]:
             payload.get("related_processes"), key="related_processes"
         ),
         "attachments": _string_list(payload.get("attachments"), key="attachments"),
-        "claims": _claims(payload.get("claims")),
+        "claims": _claims(payload.get("claims", [])),
     }
 
 
