@@ -43,6 +43,23 @@ def _response(payload: dict[str, Any], *, principal: RequestPrincipal, status_co
     return response
 
 
+def _summary_format(value: Any) -> str:
+    rendered = str(value or "jsx").strip().lower()
+    if rendered not in {"jsx", "json"}:
+        raise HTTPException(status_code=400, detail="format must be 'jsx' or 'json'")
+    return rendered
+
+
+def _summary_representation(
+    *, markdown: str | None, structured_output: Any, response_format: str
+) -> Any:
+    if response_format == "jsx":
+        return markdown
+    if structured_output is None:
+        return None
+    return _json_object(structured_output)
+
+
 def _summary_usage(row: asyncpg.Record) -> dict[str, Any] | None:
     if row["model"] is None:
         return None
@@ -188,7 +205,8 @@ async def _job_payload(
                ps.generation_ms,
                ps.usage AS provider_usage,
                ps.cache_hit,
-               ps.cost_usd
+               ps.cost_usd,
+               ps.structured_output
         FROM public_summary_requests psr
         LEFT JOIN process_summaries ps ON ps.id = psr.summary_id
         WHERE psr.id = $1 AND psr.tenant_id = $2
@@ -227,7 +245,16 @@ async def _job_payload(
         "usage": _summary_usage(row),
         "flags": flags,
         "validation": validation,
-        "iaSummary": row["markdown"] if validation and validation.get("passed") is True else None,
+        "format": str(row["response_format"]),
+        "iaSummary": (
+            _summary_representation(
+                markdown=row["markdown"],
+                structured_output=row["structured_output"],
+                response_format=str(row["response_format"]),
+            )
+            if validation and validation.get("passed") is True
+            else None
+        ),
         "error_code": row["error_code"],
     }
     return row, payload
@@ -238,14 +265,15 @@ async def _latest_summary_payload(
     *,
     tenant_id: UUID,
     code: str,
+    response_format: str = "jsx",
 ) -> dict[str, Any] | None:
     process = await get_authorized_process(conn, tenant_id=tenant_id, code=code)
     if process is None or process["current_version_id"] is None:
         return None
     summary = await conn.fetchrow(
         """
-        SELECT id, markdown, validation, model, prompt_version, generation_ms,
-               usage AS provider_usage, cache_hit, cost_usd, created_at
+        SELECT id, markdown, structured_output, validation, model, prompt_version,
+               generation_ms, usage AS provider_usage, cache_hit, cost_usd, created_at
         FROM process_summaries
         WHERE process_id = $1
           AND version_id = $2
@@ -278,7 +306,12 @@ async def _latest_summary_payload(
         "usage": _summary_usage(summary),
         "flags": flags,
         "validation": validation,
-        "iaSummary": summary["markdown"],
+        "format": response_format,
+        "iaSummary": _summary_representation(
+            markdown=summary["markdown"],
+            structured_output=summary["structured_output"],
+            response_format=response_format,
+        ),
     }
 
 
@@ -297,6 +330,7 @@ async def create_summary_job(request: Request):
         code = normalize_cnj(raw_code)
     except ValueError:
         raise HTTPException(status_code=400, detail="invalid process code") from None
+    response_format = _summary_format(body.get("format"))
 
     idempotency_key = request.headers.get("Idempotency-Key", "").strip()
     if not idempotency_key:
@@ -307,6 +341,7 @@ async def create_summary_job(request: Request):
     principal = await principal_from_request(request, process_code=code)
     normalized_body = dict(body)
     normalized_body["cnj"] = code
+    normalized_body["format"] = response_format
     fingerprint = request_fingerprint(normalized_body)
     pool: asyncpg.Pool = request.app.state.pool
 
@@ -318,6 +353,7 @@ async def create_summary_job(request: Request):
                 process_code=code,
                 idempotency_key=idempotency_key,
                 fingerprint=fingerprint,
+                response_format=response_format,
             )
     except IdempotencyConflictError:
         raise HTTPException(
@@ -394,6 +430,7 @@ async def get_latest_summary(code: str, request: Request):
         canonical_code = normalize_cnj(code)
     except ValueError:
         raise HTTPException(status_code=400, detail="invalid process code") from None
+    response_format = _summary_format(request.query_params.get("format"))
     tenant_id = tenant_from_request(request)
     pool: asyncpg.Pool = request.app.state.pool
     async with pool.acquire() as conn:
@@ -401,6 +438,7 @@ async def get_latest_summary(code: str, request: Request):
             conn,
             tenant_id=tenant_id,
             code=canonical_code,
+            response_format=response_format,
         )
         if payload is None:
             raise HTTPException(status_code=404, detail="summary not found")

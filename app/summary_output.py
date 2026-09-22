@@ -146,6 +146,47 @@ def _append_list(lines: list[str], title: str, items: list[str]) -> None:
     lines.extend(["", f"## {title}", *(f"- {item}" for item in items)])
 
 
+def structured_summary_document(
+    payload: dict[str, Any], context: dict[str, Any]
+) -> dict[str, Any]:
+    header = context.get("header") if isinstance(context.get("header"), dict) else {}
+    parties = context.get("parties")
+    normalized_parties = [
+        {
+            key: item.get(key)
+            for key in ("name", "side", "person_type", "masked_person_id")
+            if item.get(key) is not None
+        }
+        for item in parties
+        if isinstance(item, dict)
+    ] if isinstance(parties, list) else []
+
+    return {
+        "schema_version": 1,
+        "process": {
+            "cnj": _inline(context.get("code")),
+            "class_name": _inline(context.get("class_name")) or None,
+            "court": _inline(context.get("court")) or None,
+            "header": {
+                key: header.get(key)
+                for key, _ in _HEADER_FIELDS
+                if header.get(key) is not None
+            },
+            "parties": normalized_parties,
+        },
+        "summary": {
+            "synthesis": payload["synthesis"],
+            "timeline": list(payload["timeline"]),
+            "current_status": payload["current_status"],
+            "attention": list(payload["attention"]),
+            "decisions": list(payload["decisions"]),
+            "deadlines": list(payload["deadlines"]),
+            "related_processes": list(payload["related_processes"]),
+            "attachments": list(payload["attachments"]),
+        },
+    }
+
+
 def render_structured_summary(payload: dict[str, Any], context: dict[str, Any]) -> str:
     lines = ["# Resumo do processo", "", '<ProcessHeader className="process-header">']
     lines.append(f"- Processo: {_inline(context.get('code'))}")

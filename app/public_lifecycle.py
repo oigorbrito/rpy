@@ -42,6 +42,7 @@ class PublicSummaryRequest:
     process_code: str
     idempotency_key: str
     request_fingerprint: str
+    response_format: str
     status: str
     tenant_judit_request_id: UUID | None
     process_id: UUID | None
@@ -67,6 +68,7 @@ def _as_request(row: asyncpg.Record) -> PublicSummaryRequest:
         process_code=str(row["process_code"]),
         idempotency_key=str(row["idempotency_key"]),
         request_fingerprint=str(row["request_fingerprint"]),
+        response_format=str(row["response_format"]),
         status=str(row["status"]),
         tenant_judit_request_id=row["tenant_judit_request_id"],
         process_id=row["process_id"],
@@ -83,19 +85,22 @@ async def create_or_get_summary_request(
     process_code: str,
     idempotency_key: str,
     fingerprint: str,
+    response_format: str = "jsx",
 ) -> tuple[PublicSummaryRequest, bool]:
     """Create a durable public request or return the exact idempotent replay."""
     if not idempotency_key.strip():
         raise ValueError("idempotency key must not be empty")
+    if response_format not in {"jsx", "json"}:
+        raise ValueError("unsupported summary response format")
 
     async with conn.transaction():
         row = await conn.fetchrow(
             """
             INSERT INTO public_summary_requests (
                 tenant_id, process_code, idempotency_key, request_fingerprint,
-                status, completed_at
+                response_format, status, completed_at
             )
-            VALUES ($1, $2, $3, $4, 'queued', NULL)
+            VALUES ($1, $2, $3, $4, $5, 'queued', NULL)
             ON CONFLICT (tenant_id, idempotency_key) DO NOTHING
             RETURNING *
             """,
@@ -103,6 +108,7 @@ async def create_or_get_summary_request(
             process_code,
             idempotency_key,
             fingerprint,
+            response_format,
         )
         if row is not None:
             return _as_request(row), True

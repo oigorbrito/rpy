@@ -18,7 +18,8 @@ Requirements:
 
 - `Authorization: Bearer ...`;
 - `Idempotency-Key` header;
-- JSON object containing `cnj`.
+- JSON object containing `cnj`;
+- optional `format`, either `jsx` (default) or `json`.
 
 The normalized request body is fingerprinted. Reusing the same key and payload returns the same `job_id` without duplicating the Judit acquisition. Reusing the key with a different normalized payload returns `409`.
 
@@ -33,6 +34,7 @@ Response fields include:
 - `usage`;
 - `flags`;
 - `validation`;
+- `format`;
 - `iaSummary`;
 - `error_code`.
 
@@ -73,6 +75,10 @@ Movement text is not part of this provenance response. Secret processes already 
 When a valid summary exists, `usage` exposes only local persisted generation metadata (`model`, `prompt_version`, `generation_ms`). Token accounting is not fabricated when it is not persisted.
 
 `validation` is the persisted post-generation validation envelope. `iaSummary` is populated only when that validation passed.
+
+`format=jsx` is the default and returns the deterministic Markdown/allowlisted-JSX document in `iaSummary`. `format=json` returns the persisted structured representation built from the same validated provider payload and normalized process identity. Selecting JSON does not invoke the model again and does not parse the rendered JSX. The JSON representation is versioned with `schema_version`; its top-level fields are `process` and `summary`.
+
+The selected format participates in the normalized idempotency fingerprint and is stored with the public request. Polling `GET /v1/resumos/{job_id}` therefore keeps the representation chosen when the job was created. `GET /v1/processos/{cnj}/resumo` also accepts `?format=jsx|json` for representation selection of an already validated summary.
 
 ## Health and metrics equivalence
 

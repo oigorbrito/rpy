@@ -106,6 +106,7 @@ async def test_v1_idempotency_states_authorization_and_sanitized_sources(monkeyp
             created_body = created.json()
             assert created_body["status"] == "queued"
             assert created_body["cnj"] == code
+            assert created_body["format"] == "jsx"
             job_id = created_body["job_id"]
             assert created_body["poll_url"] == f"/v1/resumos/{job_id}"
 
@@ -124,12 +125,35 @@ async def test_v1_idempotency_states_authorization_and_sanitized_sources(monkeyp
             )
             assert conflict.status_code == 409
 
+            json_headers = {
+                "Authorization": f"Bearer {token_a}",
+                "Idempotency-Key": "idem-v1-create-json",
+            }
+            json_created = await client.post(
+                "/v1/resumos",
+                headers=json_headers,
+                json={"cnj": code, "mode": "default", "format": "json"},
+            )
+            assert json_created.status_code == 202
+            assert json_created.json()["format"] == "json"
+            assert json_created.json()["job_id"] != job_id
+
+            invalid_format = await client.post(
+                "/v1/resumos",
+                headers={
+                    "Authorization": f"Bearer {token_a}",
+                    "Idempotency-Key": "idem-invalid-format",
+                },
+                json={"cnj": code, "format": "xml"},
+            )
+            assert invalid_format.status_code == 400
+
         async with pool.acquire() as conn:
             assert await conn.fetchval(
                 "SELECT count(*) FROM public_summary_requests WHERE tenant_id=$1 AND process_code=$2",
                 tenant_a,
                 code,
-            ) == 1
+            ) == 2
             assert await conn.fetchval(
                 "SELECT count(*) FROM tenant_judit_requests WHERE tenant_id=$1 AND process_code=$2",
                 tenant_a,
@@ -209,16 +233,38 @@ async def test_v1_idempotency_states_authorization_and_sanitized_sources(monkeyp
             summary_id = await conn.fetchval(
                 """
                 INSERT INTO process_summaries (
-                    process_id, version_id, markdown, validation,
+                    process_id, version_id, markdown, structured_output, validation,
                     model, prompt_version, generation_ms
                 )
-                VALUES ($1,$2,'# Resumo válido',
+                VALUES ($1,$2,'# Resumo válido',$3::jsonb,
                         '{"passed": true, "errors": []}'::jsonb,
                         'fake-offline','test-v1',12)
                 RETURNING id
                 """,
                 process_id,
                 version_id,
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "process": {
+                            "cnj": other_code,
+                            "class_name": "Procedimento Comum",
+                            "court": "TJRS",
+                            "header": {},
+                            "parties": [],
+                        },
+                        "summary": {
+                            "synthesis": "Resumo válido",
+                            "timeline": [],
+                            "current_status": "Situação registrada.",
+                            "attention": ["Nenhuma divergência objetiva identificada."],
+                            "decisions": [],
+                            "deadlines": [],
+                            "related_processes": [],
+                            "attachments": [],
+                        },
+                    }
+                ),
             )
             completed_request, _ = await create_or_get_summary_request(
                 conn,
@@ -236,6 +282,23 @@ async def test_v1_idempotency_states_authorization_and_sanitized_sources(monkeyp
                 summary_id=summary_id,
                 source_updated_at=datetime.now(timezone.utc),
                 flags={"reused_existing_summary": False},
+            )
+            json_request, _ = await create_or_get_summary_request(
+                conn,
+                tenant_id=tenant_a,
+                process_code=other_code,
+                idempotency_key="idem-completed-json",
+                fingerprint=request_fingerprint({"cnj": other_code, "format": "json"}),
+                response_format="json",
+            )
+            await transition_summary_request(
+                conn,
+                request_id=json_request.id,
+                status="completed",
+                process_id=process_id,
+                version_id=version_id,
+                summary_id=summary_id,
+                source_updated_at=datetime.now(timezone.utc),
             )
 
             state_ids: dict[str, str] = {}
@@ -294,6 +357,7 @@ async def test_v1_idempotency_states_authorization_and_sanitized_sources(monkeyp
             assert completed_job.status_code == 200
             completed_body = completed_job.json()
             assert completed_body["status"] == "completed"
+            assert completed_body["format"] == "jsx"
             assert completed_body["iaSummary"] == "# Resumo válido"
             assert completed_body["validation"]["passed"] is True
             assert completed_body["flags"]["reused_existing_summary"] is False
@@ -319,6 +383,15 @@ async def test_v1_idempotency_states_authorization_and_sanitized_sources(monkeyp
             assert raw_sentinel not in rendered_job
             assert "source_payload" not in rendered_job
 
+            json_job = await client.get(
+                f"/v1/resumos/{json_request.id}", headers=auth_a
+            )
+            assert json_job.status_code == 200
+            assert json_job.json()["format"] == "json"
+            assert json_job.json()["iaSummary"]["schema_version"] == 1
+            assert json_job.json()["iaSummary"]["process"]["cnj"] == other_code
+            assert json_job.json()["iaSummary"]["summary"]["synthesis"] == "Resumo válido"
+
             summary = await client.get(
                 f"/v1/processos/{other_code}/resumo", headers=auth_a
             )
@@ -327,6 +400,18 @@ async def test_v1_idempotency_states_authorization_and_sanitized_sources(monkeyp
             assert summary.json()["validation"]["passed"] is True
             assert summary.json()["flags"]["attachments"]["degraded"] is True
             assert summary.json()["flags"]["attachments"]["status_counts"]["pending"] == 1
+
+            json_summary = await client.get(
+                f"/v1/processos/{other_code}/resumo?format=json", headers=auth_a
+            )
+            assert json_summary.status_code == 200
+            assert json_summary.json()["format"] == "json"
+            assert json_summary.json()["iaSummary"] == json_job.json()["iaSummary"]
+
+            invalid_format = await client.get(
+                f"/v1/processos/{other_code}/resumo?format=xml", headers=auth_a
+            )
+            assert invalid_format.status_code == 400
 
             sources = await client.get(
                 f"/v1/processos/{other_code}/fontes", headers=auth_a
