@@ -34,6 +34,26 @@ SUMMARY_OUTPUT_SCHEMA: dict[str, Any] = {
             "type": "array",
             "items": {"type": "string"},
         },
+        "claims": {
+            "type": "array",
+            "maxItems": 80,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "claim_id": {"type": "string", "maxLength": 64},
+                    "text": {"type": "string", "maxLength": 6000},
+                    "evidence_refs": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 32,
+                        "uniqueItems": True,
+                        "items": {"type": "string", "maxLength": 34},
+                    },
+                },
+                "required": ["claim_id", "text", "evidence_refs"],
+                "additionalProperties": False,
+            },
+        },
     },
     "required": [
         "synthesis",
@@ -44,6 +64,7 @@ SUMMARY_OUTPUT_SCHEMA: dict[str, Any] = {
         "deadlines",
         "related_processes",
         "attachments",
+        "claims",
     ],
     "additionalProperties": False,
 }
@@ -103,6 +124,46 @@ def _string_list(value: Any, *, key: str, require_nonempty: bool = False) -> lis
     return rendered
 
 
+def _claims(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list) or len(value) > 80:
+        raise ValueError("structured summary claims must be a bounded array")
+    claims: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict) or set(item) != {
+            "claim_id",
+            "text",
+            "evidence_refs",
+        }:
+            raise ValueError("structured summary claim keys do not match the contract")
+        claim_id = _inline(item.get("claim_id"))
+        text = item.get("text")
+        refs = item.get("evidence_refs")
+        if not claim_id or len(claim_id) > 64:
+            raise ValueError("structured summary claim_id is invalid")
+        if not isinstance(text, str) or not _inline(text):
+            raise ValueError("structured summary claim text must be non-empty")
+        if len(text) > _MAX_SYNTHESIS_CHARS:
+            raise ValueError("structured summary claim text is too long")
+        if (
+            not isinstance(refs, list)
+            or not refs
+            or len(refs) > 32
+            or any(not isinstance(ref, str) or not _inline(ref) for ref in refs)
+        ):
+            raise ValueError("structured summary claim evidence_refs are invalid")
+        rendered_refs = [_inline(ref) for ref in refs]
+        if len(set(rendered_refs)) != len(rendered_refs):
+            raise ValueError("structured summary claim evidence_refs must be unique")
+        claims.append(
+            {
+                "claim_id": claim_id,
+                "text": _prose_line(text),
+                "evidence_refs": rendered_refs,
+            }
+        )
+    return claims
+
+
 def parse_structured_summary(raw: str) -> dict[str, Any]:
     try:
         payload = json.loads(raw)
@@ -137,6 +198,7 @@ def parse_structured_summary(raw: str) -> dict[str, Any]:
             payload.get("related_processes"), key="related_processes"
         ),
         "attachments": _string_list(payload.get("attachments"), key="attachments"),
+        "claims": _claims(payload.get("claims")),
     }
 
 
@@ -162,7 +224,7 @@ def structured_summary_document(
     ] if isinstance(parties, list) else []
 
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "process": {
             "cnj": _inline(context.get("code")),
             "class_name": _inline(context.get("class_name")) or None,
@@ -183,6 +245,7 @@ def structured_summary_document(
             "deadlines": list(payload["deadlines"]),
             "related_processes": list(payload["related_processes"]),
             "attachments": list(payload["attachments"]),
+            "claims": [dict(item) for item in payload.get("claims", [])],
         },
     }
 
