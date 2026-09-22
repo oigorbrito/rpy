@@ -125,12 +125,35 @@ async def test_v1_idempotency_states_authorization_and_sanitized_sources(monkeyp
             )
             assert conflict.status_code == 409
 
+            json_headers = {
+                "Authorization": f"Bearer {token_a}",
+                "Idempotency-Key": "idem-v1-create-json",
+            }
+            json_created = await client.post(
+                "/v1/resumos",
+                headers=json_headers,
+                json={"cnj": code, "mode": "default", "format": "json"},
+            )
+            assert json_created.status_code == 202
+            assert json_created.json()["format"] == "json"
+            assert json_created.json()["job_id"] != job_id
+
+            invalid_format = await client.post(
+                "/v1/resumos",
+                headers={
+                    "Authorization": f"Bearer {token_a}",
+                    "Idempotency-Key": "idem-invalid-format",
+                },
+                json={"cnj": code, "format": "xml"},
+            )
+            assert invalid_format.status_code == 400
+
         async with pool.acquire() as conn:
             assert await conn.fetchval(
                 "SELECT count(*) FROM public_summary_requests WHERE tenant_id=$1 AND process_code=$2",
                 tenant_a,
                 code,
-            ) == 1
+            ) == 2
             assert await conn.fetchval(
                 "SELECT count(*) FROM tenant_judit_requests WHERE tenant_id=$1 AND process_code=$2",
                 tenant_a,
