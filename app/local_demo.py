@@ -54,6 +54,7 @@ async def seed_demo(database_url: str) -> None:
                         WHERE process_id = $1
                           AND version_id = $2
                           AND COALESCE((validation->>'passed')::boolean, false)
+                          AND structured_output IS NOT NULL
                     )
                     """,
                     existing["id"],
