@@ -3,7 +3,7 @@ import fs from "node:fs";
 import vm from "node:vm";
 
 const APP_PATH = "app/frontend/app.js";
-const CSS_PATH = "app/frontend/styles.css";
+const CSS_PATH = "app/frontend/app.css";
 const VALID_CODE = "0000000-00.2026.8.21.0001";
 const TOKEN = "test-token";
 
