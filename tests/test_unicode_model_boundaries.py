@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from uuid import uuid4
 
 import app.embeddings as embeddings
 from app.attachment_context import serialize_attachment_chunks
@@ -31,6 +32,7 @@ def test_attachment_model_view_is_hardened_without_mutating_source_chunk() -> No
     source = "ordem\u202e oculta p\u0430ypal"
     chunks = [
         {
+            "chunk_id": uuid4(),
             "source_attachment_id": "doc-1",
             "page_start": 1,
             "page_end": 1,
