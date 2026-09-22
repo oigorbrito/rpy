@@ -186,10 +186,10 @@ def runtime_metadata() -> dict[str, Any]:
         "retrieval": {
             "short_process_all_steps_max": SHORT_PROCESS_ALL_STEPS_MAX,
             "default_rank_limit": DEFAULT_RANK_LIMIT,
-            "lexical_source": "postgresql_fts_portuguese",
+            "lexical_source": "literal_bm25",
             "lexical_weight": LEXICAL_WEIGHT,
             "vector_weight": VECTOR_WEIGHT,
-            "bm25_role": "in_memory_fallback_and_comparison",
+            "postgresql_fts_role": "candidate_discovery_and_index_verification_only",
             "vector_optional_when_unconfigured": True,
             "recency_boost_max": RECENCY_BOOST_MAX,
             "mandatory_recent_steps": MANDATORY_RECENT_STEPS,
