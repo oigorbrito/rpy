@@ -212,3 +212,89 @@ Nenhuma divergência objetiva identificada."""
         assert stored["validation"]["passed"] is True
     finally:
         await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_public_summary_is_not_reused_after_process_becomes_secret(monkeypatch) -> None:
+    assert TEST_DATABASE_URL is not None
+    pool = await create_pool(TEST_DATABASE_URL, min_size=1, max_size=2)
+    try:
+        async with pool.acquire() as conn:
+            process_id, version_id, code = await _fixture(conn)
+            claim_context, payload, claims = _claim_material(code, version_id)
+            assert await _persist_summary(
+                conn,
+                process_id=process_id,
+                version_id=version_id,
+                text="public summary that must not survive secrecy",
+                validation={"passed": True, "errors": []},
+                generation_ms=123,
+                structured_output=structured_summary_document(
+                    payload, claim_context
+                ),
+                claims=claims,
+                evidence_sources=evidence_catalog(claim_context),
+            )
+            await conn.execute(
+                "UPDATE processes SET secrecy_level = 1 WHERE id = $1",
+                process_id,
+            )
+
+        context_calls = 0
+
+        async def secret_context(*args, **kwargs):
+            nonlocal context_calls
+            context_calls += 1
+            return {
+                "code": code,
+                "court": None,
+                "class_name": "Ação sigilosa",
+                "subjects": [],
+                "parties": [],
+                "validation_parties": [],
+                "secrecy_level": 1,
+                "header": {},
+                "step_count": 0,
+                "steps": [],
+                "_selected_sources": [],
+                "_attachment_sources": [],
+                "_glossary_sources": [],
+            }
+
+        def fail_provider(*args, **kwargs):
+            raise AssertionError("secret regeneration must not create an Anthropic client")
+
+        monkeypatch.setattr("app.rag._load_context", secret_context)
+        monkeypatch.setattr("app.rag.anthropic_client", fail_provider)
+
+        result = await generate_summary(pool, process_id, version_id)
+
+        async with pool.acquire() as conn:
+            stored = await conn.fetchrow(
+                """
+                SELECT markdown, model, prompt_version
+                FROM process_summaries
+                WHERE process_id = $1 AND version_id = $2
+                """,
+                process_id,
+                version_id,
+            )
+            claim_count = await conn.fetchval(
+                "SELECT count(*) FROM process_summary_claims WHERE summary_id = ("
+                "SELECT id FROM process_summaries WHERE process_id = $1 AND version_id = $2"
+                ")",
+                process_id,
+                version_id,
+            )
+
+        assert context_calls == 1
+        assert result["model"] == "local-deterministic"
+        assert result["persisted"] is True
+        assert result["reused"] is False
+        assert stored is not None
+        assert stored["model"] == "local-deterministic"
+        assert stored["prompt_version"] == "secret-summary-v1"
+        assert "detalhes processuais foram restringidos por sigilo" in stored["markdown"]
+        assert claim_count == 0
+    finally:
+        await pool.close()
