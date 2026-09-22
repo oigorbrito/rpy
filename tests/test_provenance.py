@@ -20,6 +20,7 @@ def test_selected_movement_sources_contains_only_safe_metadata() -> None:
 
     assert sources == [
         {
+            "evidence_ref": f"m-{step.id.hex}",
             "step_id": step.id,
             "step_number": 7,
             "occurred_at": None,
