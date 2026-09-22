@@ -7,6 +7,7 @@ from uuid import UUID
 
 import asyncpg
 
+from app.claim_evidence import attachment_evidence_ref, movement_evidence_ref
 from app.retrieval import RankedStep
 from app.unicode_security import model_view_text
 
@@ -34,6 +35,7 @@ def selected_movement_sources(ranked: Sequence[RankedStep]) -> list[dict[str, An
         flags = list(dict.fromkeys((*text_view.flags, *title_view.flags)))
         sources.append(
             {
+                "evidence_ref": movement_evidence_ref(item.step.id),
                 "step_id": item.step.id,
                 "step_number": int(item.step.step_number),
                 "occurred_at": item.step.occurred_at,
@@ -52,6 +54,7 @@ def selected_attachment_sources(chunks: Sequence[dict[str, Any]]) -> list[dict[s
         view = model_view_text(str(chunk.get("text") or ""))
         sources.append(
             {
+                "evidence_ref": attachment_evidence_ref(chunk["chunk_id"]),
                 "attachment_id": chunk["attachment_id"],
                 "attachment_chunk_id": chunk["chunk_id"],
                 "source_attachment_id": str(chunk["source_attachment_id"]),
