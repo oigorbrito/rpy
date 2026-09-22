@@ -5,9 +5,16 @@ from uuid import uuid4
 
 import pytest
 
+from app.claim_evidence import (
+    build_material_claims,
+    evidence_catalog,
+    process_evidence_ref,
+    validate_claim_evidence,
+)
 from app.db import create_pool
 from app.migrations import migrate
 from app.rag import _persist_summary, generate_summary
+from app.summary_output import structured_summary_document
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(
@@ -46,13 +53,45 @@ async def _fixture(conn):
     return process_id, version_id, code
 
 
+
+def _claim_material(code: str, version_id):
+    context = {
+        "code": code,
+        "class_name": None,
+        "court": None,
+        "header": {},
+        "parties": [],
+        "_process_evidence_ref": process_evidence_ref(version_id),
+        "_selected_sources": [],
+        "_attachment_sources": [],
+    }
+    payload = {
+        "synthesis": "Resumo válido sem dados sensíveis.",
+        "timeline": [],
+        "current_status": "Situação atual registrada.",
+        "attention": ["Nenhuma divergência objetiva identificada."],
+        "decisions": [],
+        "deadlines": [],
+        "related_processes": [],
+        "attachments": [],
+    }
+    payload["claims"] = build_material_claims(
+        payload,
+        evidence_refs=[context["_process_evidence_ref"]],
+    )
+    claims, errors = validate_claim_evidence(payload, context)
+    assert errors == []
+    return context, payload, claims
+
+
 @pytest.mark.asyncio
 async def test_existing_valid_summary_skips_context_retrieval_and_providers(monkeypatch) -> None:
     assert TEST_DATABASE_URL is not None
     pool = await create_pool(TEST_DATABASE_URL, min_size=1, max_size=2)
     try:
         async with pool.acquire() as conn:
-            process_id, version_id, _ = await _fixture(conn)
+            process_id, version_id, code = await _fixture(conn)
+            claim_context, payload, claims = _claim_material(code, version_id)
             assert await _persist_summary(
                 conn,
                 process_id=process_id,
@@ -60,6 +99,11 @@ async def test_existing_valid_summary_skips_context_retrieval_and_providers(monk
                 text="accepted summary",
                 validation={"passed": True, "errors": []},
                 generation_ms=123,
+                structured_output=structured_summary_document(
+                    payload, claim_context
+                ),
+                claims=claims,
+                evidence_sources=evidence_catalog(claim_context),
             )
 
         async def fail_context(*args, **kwargs):
@@ -125,11 +169,19 @@ Nenhuma divergência objetiva identificada."""
                 "header": {},
                 "step_count": 0,
                 "steps": [],
+                "_process_evidence_ref": process_evidence_ref(version_id),
+                "_selected_sources": [],
+                "_attachment_sources": [],
             }
 
         async def fake_generate(client, context, validation_errors=None):
             nonlocal generation_calls
             generation_calls += 1
+            _, payload, _ = _claim_material(code, version_id)
+            context["_parsed_summary"] = payload
+            context["_structured_summary"] = structured_summary_document(
+                payload, context
+            )
             return valid_summary
 
         monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
