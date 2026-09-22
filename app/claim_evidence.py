@@ -187,6 +187,41 @@ def validate_claim_evidence(
     return claims, errors
 
 
+def claim_evidence_is_complete(
+    structured_output: dict[str, Any] | None,
+    claim_evidence: list[dict[str, Any]],
+) -> bool:
+    if not isinstance(structured_output, dict):
+        return False
+    summary = structured_output.get("summary")
+    if not isinstance(summary, dict):
+        return False
+
+    expected = expected_material_claims(summary)
+    if not expected:
+        return False
+
+    observed: dict[str, dict[str, Any]] = {}
+    for item in claim_evidence:
+        if not isinstance(item, dict):
+            return False
+        claim_id = str(item.get("claim_id") or "").strip()
+        text = str(item.get("text") or "").strip()
+        refs = item.get("evidence_refs")
+        if (
+            claim_id not in expected
+            or claim_id in observed
+            or text != expected[claim_id]
+            or not isinstance(refs, list)
+            or not refs
+            or any(not isinstance(ref, str) or not _EVIDENCE_REF_RE.fullmatch(ref) for ref in refs)
+        ):
+            return False
+        observed[claim_id] = item
+
+    return set(observed) == set(expected)
+
+
 async def replace_summary_claim_evidence(
     conn: asyncpg.Connection,
     *,
