@@ -136,12 +136,7 @@ async def seed_demo(database_url: str) -> None:
         )
         summary = (
             f"# Resumo do processo\n\n"
-            f"Processo {DEMO_CODE}. Ambiente sintético local, sem consulta a "
-            "provedores externos. O processo foi distribuído, houve citação e "
-            "foi registrada contestação.\n\n"
-            "## Situação atual\n"
-            "A contestação sintética é o movimento mais recente fornecido para "
-            "esta demonstração.\n\n"
+            f"Processo {DEMO_CODE}. Situação processual registrada.\n\n"
             "## Pontos de atenção\n"
             "Nenhuma divergência objetiva identificada."
         )
