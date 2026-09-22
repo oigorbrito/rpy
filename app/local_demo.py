@@ -8,6 +8,7 @@ from app.auth import configured_bearer_tokens
 from app.db import create_pool
 from app.processes import finalize_version, stage_version
 from app.rag import _load_context, _persist_summary, _validate_provider_summary
+from app.summary_output import structured_summary_document
 
 DEMO_TOKEN = os.getenv("RPY_DEMO_BEARER_TOKEN", "dev-local-token")
 DEMO_CODE = "0000000-00.2026.8.21.0001"
@@ -140,6 +141,19 @@ async def seed_demo(database_url: str) -> None:
             "## Pontos de atenção\n"
             "Nenhuma divergência objetiva identificada."
         )
+        structured_output = structured_summary_document(
+            {
+                "synthesis": f"Processo {DEMO_CODE}. Situação processual registrada.",
+                "timeline": [],
+                "current_status": "Situação processual registrada.",
+                "attention": ["Nenhuma divergência objetiva identificada."],
+                "decisions": [],
+                "deadlines": [],
+                "related_processes": [],
+                "attachments": [],
+            },
+            context,
+        )
         result = _validate_provider_summary(summary, context)
         if not result.passed:
             raise RuntimeError(
@@ -166,6 +180,7 @@ async def seed_demo(database_url: str) -> None:
                 unicode_security_flags=list(
                     context.get("_unicode_security_flags", [])
                 ),
+                structured_output=structured_output,
             )
 
         print("RPY LOCAL DEMO: READY")
