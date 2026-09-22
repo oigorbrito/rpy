@@ -420,7 +420,8 @@ def _provider_payload(context: dict[str, Any]) -> tuple[dict[str, Any], list[Any
         }
         raw_steps = list(context.get("steps", []))
 
-    raw_process["evidence_ref"] = context.get("_process_evidence_ref")
+    if not _is_secret_context(context):
+        raw_process["evidence_ref"] = context.get("_process_evidence_ref")
     rendered, flags = model_view_value(
         {"process": raw_process, "steps": raw_steps}
     )
