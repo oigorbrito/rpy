@@ -40,6 +40,7 @@ from app.summary_output import (
     SUMMARY_OUTPUT_SCHEMA,
     parse_structured_summary,
     render_structured_summary,
+    structured_summary_document,
 )
 from app.tasks import PermanentTaskError, task
 from app.tpu_glossary import resolve_process_tpu_definitions
@@ -630,6 +631,7 @@ async def _generate(
         payload = parse_structured_summary(raw)
     except ValueError as exc:
         raise PermanentTaskError("provider returned an invalid structured summary") from exc
+    context["_structured_summary"] = structured_summary_document(payload, context)
     return render_structured_summary(payload, context)
 
 
@@ -650,14 +652,19 @@ async def _persist_summary(
     attachment_sources: list[dict[str, Any]] | None = None,
     glossary_sources: list[dict[str, Any]] | None = None,
     unicode_security_flags: list[str] | None = None,
+    structured_output: dict[str, Any] | None = None,
 ) -> bool:
     async with conn.transaction():
         row = await conn.fetchrow(
             """
             INSERT INTO process_summaries (
                 process_id, version_id, markdown, validation, model, prompt_version,
-                generation_ms, usage, cache_hit, cost_usd, unicode_security_flags
-            ) VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8::jsonb, $9, $10, $11::jsonb)
+                generation_ms, usage, cache_hit, cost_usd, unicode_security_flags,
+                structured_output
+            ) VALUES (
+                $1, $2, $3, $4::jsonb, $5, $6, $7, $8::jsonb, $9, $10,
+                $11::jsonb, $12::jsonb
+            )
             ON CONFLICT (process_id, version_id)
             DO UPDATE SET markdown = EXCLUDED.markdown,
                           validation = EXCLUDED.validation,
@@ -668,6 +675,7 @@ async def _persist_summary(
                           cache_hit = EXCLUDED.cache_hit,
                           cost_usd = EXCLUDED.cost_usd,
                           unicode_security_flags = EXCLUDED.unicode_security_flags,
+                          structured_output = EXCLUDED.structured_output,
                           created_at = NOW()
             WHERE COALESCE((process_summaries.validation->>'passed')::boolean, false) = false
                OR (
@@ -690,6 +698,7 @@ async def _persist_summary(
             cache_hit,
             cost_usd,
             json.dumps(unicode_security_flags or []),
+            json.dumps(structured_output) if structured_output is not None else None,
         )
         if row is None:
             return False
@@ -781,6 +790,19 @@ async def generate_summary(
     cost_usd: float | None = None
     if _is_secret_context(context):
         text = _secret_summary(context)
+        secret_payload = {
+            "synthesis": "Os detalhes processuais foram restringidos por sigilo.",
+            "timeline": [],
+            "current_status": "O contexto público disponível está limitado pelos dados permitidos para processo sigiloso.",
+            "attention": ["Processo com detalhes restringidos por sigilo."],
+            "decisions": [],
+            "deadlines": [],
+            "related_processes": [],
+            "attachments": [],
+        }
+        context["_structured_summary"] = structured_summary_document(
+            secret_payload, context
+        )
         result: ValidationResult = validar(
             text=text,
             code=context["code"],
@@ -835,6 +857,11 @@ async def generate_summary(
             attachment_sources=list(context.get("_attachment_sources", [])),
             glossary_sources=list(context.get("_glossary_sources", [])),
             unicode_security_flags=list(context.get("_unicode_security_flags", [])),
+            structured_output=(
+                dict(context["_structured_summary"])
+                if isinstance(context.get("_structured_summary"), dict)
+                else None
+            ),
         )
     return {
         "validation": validation,
