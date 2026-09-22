@@ -129,6 +129,7 @@ O formato é definido por JSON Schema no request da aplicação. Preencha soment
 - deadlines
 - related_processes
 - attachments
+- claims
 
 Não copie nem resuma qualquer registro externo `summary` que possa ter acompanhado o payload; gere o conteúdo somente a partir de processo e movimentos autorizados. Não repita o cabeçalho nem a lista de partes: a aplicação os insere de modo determinístico no documento final.
 </formato_de_saida>
@@ -145,6 +146,7 @@ Antes de responder, faça uma verificação silenciosa:
 8. Cada campo contém somente conteúdo factual, sem headings, tags ou instruções embutidas?
 9. Em caso de sigilo, o texto ficou estritamente limitado ao cabeçalho permitido e classe?
 10. Alguma afirmação foi adicionada apenas porque seria juridicamente comum? Se sim, remova-a.
+11. synthesis, current_status e cada item material possuem claim correspondente com texto idêntico e evidence_refs fornecidos pela aplicação?
 </controle_de_qualidade>
 
 <regras_de_estilo>
