@@ -491,11 +491,31 @@ async def test_v1_idempotency_states_authorization_and_sanitized_sources(monkeyp
             assert secret_job.status_code == 200
             assert secret_job.json()["claim_evidence"] == []
 
+            secret_json_job = await client.get(
+                f"/v1/resumos/{json_request.id}", headers=auth_a
+            )
+            assert secret_json_job.status_code == 200
+            assert secret_json_job.json()["claim_evidence"] == []
+            assert "claims" not in secret_json_job.json()["iaSummary"]["summary"]
+            assert "evidence_refs" not in json.dumps(
+                secret_json_job.json()["iaSummary"], ensure_ascii=False
+            )
+
             secret_summary = await client.get(
                 f"/v1/processos/{other_code}/resumo", headers=auth_a
             )
             assert secret_summary.status_code == 200
             assert secret_summary.json()["claim_evidence"] == []
+
+            secret_json_summary = await client.get(
+                f"/v1/processos/{other_code}/resumo?format=json", headers=auth_a
+            )
+            assert secret_json_summary.status_code == 200
+            assert secret_json_summary.json()["claim_evidence"] == []
+            assert "claims" not in secret_json_summary.json()["iaSummary"]["summary"]
+            assert "evidence_refs" not in json.dumps(
+                secret_json_summary.json()["iaSummary"], ensure_ascii=False
+            )
 
             secret_sources = await client.get(
                 f"/v1/processos/{other_code}/fontes", headers=auth_a
