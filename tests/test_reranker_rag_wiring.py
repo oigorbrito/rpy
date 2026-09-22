@@ -77,7 +77,7 @@ async def test_short_process_never_constructs_reranker(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_long_process_enabled_uses_top_50_and_configured_scorer(monkeypatch) -> None:
+async def test_long_process_enabled_uses_configured_scorer(monkeypatch) -> None:
     steps = [Step(id=uuid4(), step_number=i, text=f"movimento {i}") for i in range(1, 61)]
     calls = {}
     scorer = object()
