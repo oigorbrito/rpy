@@ -31,6 +31,16 @@ from app.public_lifecycle import (
 
 router = APIRouter()
 
+_SECRET_SUMMARY_MODEL = "local-deterministic"
+_SECRET_SUMMARY_PROMPT_VERSION = "secret-summary-v1"
+
+
+def _is_secret_safe_summary(row: Any) -> bool:
+    return (
+        row["model"] == _SECRET_SUMMARY_MODEL
+        and row["prompt_version"] == _SECRET_SUMMARY_PROMPT_VERSION
+    )
+
 
 def _json_object(value: Any) -> dict[str, Any]:
     if value is None:
@@ -265,8 +275,11 @@ async def _job_payload(
         validation
         and validation.get("passed") is True
         and (
-            is_secret
-            or claim_evidence_is_complete(structured_output, claim_evidence)
+            (is_secret and _is_secret_safe_summary(row))
+            or (
+                not is_secret
+                and claim_evidence_is_complete(structured_output, claim_evidence)
+            )
         )
     )
     public_claim_evidence = claim_evidence if publishable and not is_secret else []
@@ -330,10 +343,11 @@ async def _latest_summary_payload(
         if summary["structured_output"] is not None
         else None
     )
-    if (
-        int(process["secrecy_level"] or 0) <= 0
-        and not claim_evidence_is_complete(structured_output, claim_evidence)
-    ):
+    is_secret = int(process["secrecy_level"] or 0) > 0
+    if is_secret:
+        if not _is_secret_safe_summary(summary):
+            return None
+    elif not claim_evidence_is_complete(structured_output, claim_evidence):
         return None
     sources = await _load_sources(
         conn,
@@ -341,7 +355,6 @@ async def _latest_summary_payload(
         version_id=process["current_version_id"],
         summary_id=summary["id"],
     )
-    is_secret = int(process["secrecy_level"] or 0) > 0
     flags = {"secrecy": is_secret}
     flags.update(
         await _load_attachment_flags(
@@ -527,7 +540,7 @@ async def get_summary_sources(code: str, request: Request):
         if process["current_version_id"] is not None:
             summary_row = await conn.fetchrow(
                 """
-                SELECT id, structured_output
+                SELECT id, structured_output, model, prompt_version
                 FROM process_summaries
                 WHERE process_id = $1
                   AND version_id = $2
@@ -537,12 +550,14 @@ async def get_summary_sources(code: str, request: Request):
                 process["current_version_id"],
             )
             if summary_row is not None:
-                summary_id = summary_row["id"]
-                summary_structured_output = (
-                    _json_object(summary_row["structured_output"])
-                    if summary_row["structured_output"] is not None
-                    else None
-                )
+                is_secret = int(process["secrecy_level"] or 0) > 0
+                if not is_secret or _is_secret_safe_summary(summary_row):
+                    summary_id = summary_row["id"]
+                    summary_structured_output = (
+                        _json_object(summary_row["structured_output"])
+                        if summary_row["structured_output"] is not None
+                        else None
+                    )
         sources = await _load_sources(
             conn,
             process_id=process["id"],
