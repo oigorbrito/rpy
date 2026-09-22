@@ -138,7 +138,13 @@ def test_extract_current_judit_steps_and_sanitizes_parties() -> None:
 
 @pytest.mark.parametrize(
     "representative_type",
-    [\n        "ADVOGADO",\n        "advogada",\n        "PROCURADOR",\n        "representante",\n        "LEGAL REPRESENTATIVE",\n    ],
+    [
+        "ADVOGADO",
+        "advogada",
+        "PROCURADOR",
+        "representante",
+        "LEGAL REPRESENTATIVE",
+    ],
 )
 def test_separates_representatives_from_process_parties(representative_type: str) -> None:
     fields = extract_promotable_fields(
