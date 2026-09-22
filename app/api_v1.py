@@ -17,7 +17,7 @@ from app.api_key_auth import (
 )
 from app.attachment_signals import attachment_status_flags
 from app.auth import principal_from_request, principal_from_request_unscoped, tenant_from_request
-from app.claim_evidence import load_summary_claim_evidence
+from app.claim_evidence import claim_evidence_is_complete, load_summary_claim_evidence
 from app.judit import normalize_cnj
 from app.json_utils import decode_json_object
 from app.process_requests import request_process
@@ -243,12 +243,17 @@ async def _job_payload(
             version_id=row["version_id"],
         )
     )
+    structured_output = (
+        _json_object(row["structured_output"])
+        if row["structured_output"] is not None
+        else None
+    )
     publishable = bool(
         validation
         and validation.get("passed") is True
         and (
             int(row["process_secrecy_level"] or 0) > 0
-            or bool(claim_evidence)
+            or claim_evidence_is_complete(structured_output, claim_evidence)
         )
     )
     payload = {
@@ -295,18 +300,9 @@ async def _latest_summary_payload(
         WHERE process_id = $1
           AND version_id = $2
           AND COALESCE((validation->>'passed')::boolean, false) = true
-          AND (
-                $3::int > 0
-                OR EXISTS (
-                    SELECT 1
-                    FROM process_summary_claims c
-                    WHERE c.summary_id = process_summaries.id
-                )
-          )
         """,
         process["id"],
         process["current_version_id"],
-        int(process["secrecy_level"] or 0),
     )
     if summary is None:
         return None
@@ -314,6 +310,16 @@ async def _latest_summary_payload(
     claim_evidence = await load_summary_claim_evidence(
         conn, summary_id=summary["id"]
     )
+    structured_output = (
+        _json_object(summary["structured_output"])
+        if summary["structured_output"] is not None
+        else None
+    )
+    if (
+        int(process["secrecy_level"] or 0) <= 0
+        and not claim_evidence_is_complete(structured_output, claim_evidence)
+    ):
+        return None
     sources = await _load_sources(
         conn,
         process_id=process["id"],
