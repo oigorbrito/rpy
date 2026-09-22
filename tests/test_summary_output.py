@@ -20,6 +20,23 @@ def _payload() -> dict:
         "deadlines": [],
         "related_processes": [],
         "attachments": [],
+        "claims": [
+            {
+                "claim_id": "synthesis",
+                "text": "Síntese factual.",
+                "evidence_refs": ["p-00000000000000000000000000000001"],
+            },
+            {
+                "claim_id": "current_status",
+                "text": "Situação atual registrada.",
+                "evidence_refs": ["p-00000000000000000000000000000001"],
+            },
+            {
+                "claim_id": "timeline:0",
+                "text": "Movimento relevante registrado.",
+                "evidence_refs": ["m-00000000000000000000000000000002"],
+            },
+        ],
     }
 
 
@@ -105,7 +122,7 @@ def test_json_document_uses_same_validated_payload_and_normalized_identity() -> 
 
     document = structured_summary_document(payload, context)
 
-    assert document["schema_version"] == 1
+    assert document["schema_version"] == 2
     assert document["process"] == {
         "cnj": "0000000-00.2026.8.21.0001",
         "class_name": "Procedimento Comum",
