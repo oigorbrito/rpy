@@ -6,7 +6,7 @@ import asyncpg
 import pytest
 
 from app.migrations import migrate
-from scripts.seed_local_demo import DEMO_CODE, seed_demo
+from app.local_demo import DEMO_CODE, seed_demo
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(
