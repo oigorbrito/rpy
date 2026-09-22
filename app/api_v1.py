@@ -256,7 +256,8 @@ async def _job_payload(
             or claim_evidence_is_complete(structured_output, claim_evidence)
         )
     )
-    public_claim_evidence = claim_evidence if publishable else []
+    is_secret = int(row["process_secrecy_level"] or 0) > 0
+    public_claim_evidence = claim_evidence if publishable and not is_secret else []
     payload = {
         "job_id": str(row["id"]),
         "poll_url": f"/v1/resumos/{row['id']}",
@@ -342,7 +343,9 @@ async def _latest_summary_payload(
         "usage": _summary_usage(summary),
         "flags": flags,
         "validation": validation,
-        "claim_evidence": claim_evidence,
+        "claim_evidence": (
+            [] if int(process["secrecy_level"] or 0) > 0 else claim_evidence
+        ),
         "format": response_format,
         "iaSummary": _summary_representation(
             markdown=summary["markdown"],
@@ -546,11 +549,10 @@ async def get_summary_sources(code: str, request: Request):
             if summary_id is not None
             else []
         )
-        if (
-            int(process["secrecy_level"] or 0) <= 0
-            and not claim_evidence_is_complete(
-                summary_structured_output, claim_evidence
-            )
+        if int(process["secrecy_level"] or 0) > 0:
+            claim_evidence = []
+        elif not claim_evidence_is_complete(
+            summary_structured_output, claim_evidence
         ):
             claim_evidence = []
         flags = {"secrecy": int(process["secrecy_level"] or 0) > 0}
