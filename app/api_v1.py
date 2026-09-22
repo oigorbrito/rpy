@@ -17,6 +17,7 @@ from app.api_key_auth import (
 )
 from app.attachment_signals import attachment_status_flags
 from app.auth import principal_from_request, principal_from_request_unscoped, tenant_from_request
+from app.claim_evidence import load_summary_claim_evidence
 from app.judit import normalize_cnj
 from app.json_utils import decode_json_object
 from app.process_requests import request_process
@@ -206,9 +207,11 @@ async def _job_payload(
                ps.usage AS provider_usage,
                ps.cache_hit,
                ps.cost_usd,
-               ps.structured_output
+               ps.structured_output,
+               p.secrecy_level AS process_secrecy_level
         FROM public_summary_requests psr
         LEFT JOIN process_summaries ps ON ps.id = psr.summary_id
+        LEFT JOIN processes p ON p.id = psr.process_id
         WHERE psr.id = $1 AND psr.tenant_id = $2
         """,
         job_id,
@@ -221,6 +224,11 @@ async def _job_payload(
         process_id=row["process_id"],
         version_id=row["version_id"],
         summary_id=row["summary_id"],
+    )
+    claim_evidence = (
+        await load_summary_claim_evidence(conn, summary_id=row["summary_id"])
+        if row["summary_id"] is not None
+        else []
     )
     validation = (
         _json_object(row["validation"])
@@ -235,6 +243,14 @@ async def _job_payload(
             version_id=row["version_id"],
         )
     )
+    publishable = bool(
+        validation
+        and validation.get("passed") is True
+        and (
+            int(row["process_secrecy_level"] or 0) > 0
+            or bool(claim_evidence)
+        )
+    )
     payload = {
         "job_id": str(row["id"]),
         "poll_url": f"/v1/resumos/{row['id']}",
@@ -245,6 +261,7 @@ async def _job_payload(
         "usage": _summary_usage(row),
         "flags": flags,
         "validation": validation,
+        "claim_evidence": claim_evidence,
         "format": str(row["response_format"]),
         "iaSummary": (
             _summary_representation(
@@ -252,7 +269,7 @@ async def _job_payload(
                 structured_output=row["structured_output"],
                 response_format=str(row["response_format"]),
             )
-            if validation and validation.get("passed") is True
+            if publishable
             else None
         ),
         "error_code": row["error_code"],
@@ -278,13 +295,25 @@ async def _latest_summary_payload(
         WHERE process_id = $1
           AND version_id = $2
           AND COALESCE((validation->>'passed')::boolean, false) = true
+          AND (
+                $3::int > 0
+                OR EXISTS (
+                    SELECT 1
+                    FROM process_summary_claims c
+                    WHERE c.summary_id = process_summaries.id
+                )
+          )
         """,
         process["id"],
         process["current_version_id"],
+        int(process["secrecy_level"] or 0),
     )
     if summary is None:
         return None
     validation = _json_object(summary["validation"])
+    claim_evidence = await load_summary_claim_evidence(
+        conn, summary_id=summary["id"]
+    )
     sources = await _load_sources(
         conn,
         process_id=process["id"],
@@ -306,6 +335,7 @@ async def _latest_summary_payload(
         "usage": _summary_usage(summary),
         "flags": flags,
         "validation": validation,
+        "claim_evidence": claim_evidence,
         "format": response_format,
         "iaSummary": _summary_representation(
             markdown=summary["markdown"],
@@ -496,6 +526,11 @@ async def get_summary_sources(code: str, request: Request):
                 process_code=canonical_code,
                 action="v1_read_sources",
             )
+        claim_evidence = (
+            await load_summary_claim_evidence(conn, summary_id=summary_id)
+            if summary_id is not None
+            else []
+        )
         flags = {"secrecy": int(process["secrecy_level"] or 0) > 0}
         flags.update(
             await _load_attachment_flags(
@@ -508,5 +543,6 @@ async def get_summary_sources(code: str, request: Request):
             "cnj": canonical_code,
             "source_updated_at": process["updated_at"],
             "sources": sources,
+            "claim_evidence": claim_evidence,
             "flags": flags,
         }
