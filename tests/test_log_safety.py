@@ -32,13 +32,19 @@ def test_sanitize_error_message_redacts_all_provider_api_keys(monkeypatch) -> No
 def test_sanitize_error_message_redacts_uri_password_and_bearer() -> None:
     rendered = sanitize_error_message(
         "failed postgresql://rpy_worker:db-super-secret@postgres:5432/rpy "
-        "Authorization: Bearer opaque-token-value"
+        "Authorization: Bearer opaque-token-value "
+        "Authorization: APIKey c3dua2V5LXNlY3JldC12YWx1ZQ== "
+        "Authorization: Basic dXNlcjpwYXNz"
     )
 
     assert "db-super-secret" not in rendered
     assert "opaque-token-value" not in rendered
+    assert "c3dua2V5LXNlY3JldC12YWx1ZQ==" not in rendered
+    assert "dXNlcjpwYXNz" not in rendered
     assert "postgresql://rpy_worker:[REDACTED]@postgres:5432/rpy" in rendered
     assert "Authorization: Bearer [REDACTED]" in rendered
+    assert "Authorization: APIKey [REDACTED]" in rendered
+    assert "Authorization: Basic [REDACTED]" in rendered
 
 
 def test_sanitize_error_message_is_bounded() -> None:

@@ -28,7 +28,9 @@ _SECRET_ENV_NAMES = (
 # Redact credentials embedded in URLs even when the full URL is not available in
 # environment variables (for example when emitted by a lower-level client).
 _URI_CREDENTIALS_RE = re.compile(r"(?P<scheme>[a-zA-Z][a-zA-Z0-9+.-]*://)(?P<user>[^\s/:@]+):(?P<secret>[^\s/@]+)@")
-_BEARER_RE = re.compile(r"(?i)(authorization\s*[:=]\s*bearer\s+)([^\s,;]+)")
+_AUTHORIZATION_RE = re.compile(
+    r"(?i)(authorization\s*[:=]\s*(?:bearer|apikey|basic|token|digest|negotiate|oauth)\s+)([^\s,;]+)"
+)
 _QUERY_SECRET_RE = re.compile(
     r"(?i)(\b(?:api[_-]?key|token|access[_-]?token|password|secret)\s*[=:]\s*)([^\s,;&]+)"
 )
@@ -57,7 +59,7 @@ def sanitize_error_message(value: object, *, max_chars: int = MAX_ERROR_MESSAGE_
         lambda match: f"{match.group('scheme')}{match.group('user')}:{REDACTED}@",
         text,
     )
-    text = _BEARER_RE.sub(lambda match: f"{match.group(1)}{REDACTED}", text)
+    text = _AUTHORIZATION_RE.sub(lambda match: f"{match.group(1)}{REDACTED}", text)
     text = _QUERY_SECRET_RE.sub(lambda match: f"{match.group(1)}{REDACTED}", text)
     text = _API_KEY_TOKEN_RE.sub(REDACTED, text)
 
