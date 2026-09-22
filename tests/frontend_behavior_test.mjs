@@ -3,6 +3,7 @@ import fs from "node:fs";
 import vm from "node:vm";
 
 const APP_PATH = "app/frontend/app.js";
+const CSS_PATH = "app/frontend/styles.css";
 const VALID_CODE = "0000000-00.2026.8.21.0001";
 const TOKEN = "test-token";
 
@@ -256,6 +257,7 @@ await scenario("processing summary remains readable and transitions to published
   await ui.search();
 
   assert.ok(ui.elements["summary-body"].renderedText.includes("sendo preparado"));
+  assert.equal(ui.elements["summary-eyebrow"].hidden, true);
   assert.equal(ui.elements["result"].hidden, false);
   assert.equal(ui.hasTimer(), true);
 
@@ -411,6 +413,11 @@ await scenario("new search and pagehide cancel polling without erasing the in-me
   assert.equal(ui.hasTimer(), true);
   ui.pagehide();
   assert.equal(ui.hasTimer(), false);
+});
+
+await scenario("CNJ heading uses sans-serif tabular numerals for legibility", async () => {
+  const css = fs.readFileSync(CSS_PATH, "utf8");
+  assert.match(css, /\.process-header h2\{[^}]*ui-sans-serif[^}]*font-variant-numeric:tabular-nums/);
 });
 
 console.log("frontend behavior harness: PASS");
