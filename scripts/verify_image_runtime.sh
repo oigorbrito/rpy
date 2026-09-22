@@ -28,6 +28,7 @@ from pathlib import Path
 import app.api
 import app.worker
 import app.scheduler
+from app.migrations import resolve_migrations
 import langfuse
 
 frontend = Path(app.api.__file__).with_name("frontend")
@@ -38,6 +39,12 @@ if missing:
 
 if os.getuid() == 0:
     raise SystemExit("image runtime user must not be root")
+
+migration_dir, migrations = resolve_migrations()
+if migration_dir != Path("/app/sql"):
+    raise SystemExit(f"runtime migration directory mismatch: {migration_dir}")
+if not migrations or migrations[0].name != "001_init.sql":
+    raise SystemExit("runtime migration set is missing 001_init.sql")
 
 for package_manager in ("pip", "setuptools"):
     if importlib.util.find_spec(package_manager) is not None:
