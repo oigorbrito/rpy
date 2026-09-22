@@ -93,5 +93,21 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
 
+  demo-seed:
+    profiles: ["demo"]
+    build: .
+    command: ["python", "scripts/seed_local_demo.py"]
+    environment:
+      DATABASE_URL: postgresql://rpy:rpy@postgres:5432/rpy
+      RPY_BEARER_TOKENS: ${RPY_BEARER_TOKENS:-{}}
+      RPY_DEMO_BEARER_TOKEN: ${RPY_DEMO_BEARER_TOKEN:-dev-local-token}
+      JUDIT_API_KEY: ""
+      ANTHROPIC_API_KEY: ""
+      OPENAI_API_KEY: ""
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: "no"
+
 volumes:
   rpy_pgdata:
