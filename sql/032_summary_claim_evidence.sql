@@ -140,6 +140,6 @@ DROP TRIGGER IF EXISTS process_summary_claim_sources_scope_check
     ON process_summary_claim_sources;
 CREATE TRIGGER process_summary_claim_sources_scope_check
 BEFORE INSERT OR UPDATE OF claim_row_id, summary_id, process_id, version_id,
-    source_kind, step_id, attachment_chunk_id
+    evidence_ref, source_kind, step_id, attachment_chunk_id
 ON process_summary_claim_sources
 FOR EACH ROW EXECUTE FUNCTION enforce_summary_claim_source_scope();
