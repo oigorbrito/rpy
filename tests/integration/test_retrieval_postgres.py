@@ -24,7 +24,7 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.mark.asyncio
-async def test_long_process_hybrid_retrieval_uses_postgres_lexical_pgvector_and_mandatory_steps(
+async def test_long_process_hybrid_retrieval_uses_bm25_pgvector_and_mandatory_steps(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     assert TEST_DATABASE_URL is not None
@@ -141,8 +141,8 @@ async def test_long_process_hybrid_retrieval_uses_postgres_lexical_pgvector_and_
             plan = "\n".join(str(row[0]) for row in plan_rows)
             assert "process_steps_fts_idx" in plan
 
-            # The real production query remains version-scoped; a matching row
-            # from another process/version must not enter either score map.
+            # PostgreSQL FTS remains version-scoped candidate/index evidence; a
+            # matching row from another process/version must not enter its map.
             lexical_scores = await lexical_search(
                 conn,
                 version_id=version_id,
@@ -179,9 +179,9 @@ async def test_long_process_hybrid_retrieval_uses_postgres_lexical_pgvector_and_
         selected_numbers = {item.step.step_number for item in ranked}
 
         assert target_id in selected
-        assert selected[target_id].lexical > 0.0
+        assert selected[target_id].bm25 == pytest.approx(1.0)
+        assert selected[target_id].lexical == selected[target_id].bm25
         assert selected[target_id].vector > 0.99
-        assert selected[target_id].bm25 > 0.0
         assert milestone_id in selected
         assert selected[milestone_id].forced is True
 
@@ -191,8 +191,8 @@ async def test_long_process_hybrid_retrieval_uses_postgres_lexical_pgvector_and_
         assert 45 in selected_numbers
 
         # Long-process retrieval must remain operational when embeddings are
-        # intentionally disabled. In that mode only PostgreSQL lexical retrieval
-        # supplies a scored signal; no embedding provider boundary may be called.
+        # intentionally disabled. Literal BM25 still supplies the lexical signal;
+        # no embedding provider boundary may be called.
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
         async def fail_if_vector_called(*args, **kwargs):
