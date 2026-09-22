@@ -96,25 +96,21 @@ async def test_long_process_enabled_uses_top_50_and_configured_scorer(monkeypatc
     async def fake_load_steps(conn, *, version_id):
         return steps
 
-    async def fake_lexical_search(conn, *, version_id, query, limit):
-        calls["lexical_limit"] = limit
-        return {}
-
-    async def fake_select_context_steps(*, query, steps, lexical_scores, vector_scores, scorer):
+    async def fake_select_context_steps(
+        *, query, steps, vector_scores, scorer, lexical_scores=None
+    ):
         calls["scorer"] = scorer
         calls["step_count"] = len(steps)
         return [RankedStep(step=step, score=1.0) for step in steps[:15]]
 
     monkeypatch.setattr(rag, "_load_process", fake_load_process)
     monkeypatch.setattr(rag, "load_steps", fake_load_steps)
-    monkeypatch.setattr(rag, "lexical_search", fake_lexical_search)
     monkeypatch.setattr(rag, "vector_retrieval_configured", lambda: False)
     monkeypatch.setattr(rag, "configured_reranker_scorer", lambda: scorer)
     monkeypatch.setattr(rag, "select_context_steps", fake_select_context_steps)
 
     context = await rag._load_context(_Pool(), uuid4(), uuid4())
 
-    assert calls["lexical_limit"] == 50
     assert calls["scorer"] is scorer
     assert calls["step_count"] == 60
     assert len(context["steps"]) == 15
