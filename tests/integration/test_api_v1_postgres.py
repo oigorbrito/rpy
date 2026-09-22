@@ -481,6 +481,38 @@ async def test_v1_idempotency_states_authorization_and_sanitized_sources(monkeyp
 
             async with pool.acquire() as conn:
                 await conn.execute(
+                    "UPDATE processes SET secrecy_level=1 WHERE id=$1",
+                    process_id,
+                )
+
+            secret_job = await client.get(
+                f"/v1/resumos/{completed_request.id}", headers=auth_a
+            )
+            assert secret_job.status_code == 200
+            assert secret_job.json()["claim_evidence"] == []
+
+            secret_summary = await client.get(
+                f"/v1/processos/{other_code}/resumo", headers=auth_a
+            )
+            assert secret_summary.status_code == 200
+            assert secret_summary.json()["claim_evidence"] == []
+
+            secret_sources = await client.get(
+                f"/v1/processos/{other_code}/fontes", headers=auth_a
+            )
+            assert secret_sources.status_code == 200
+            assert secret_sources.json()["claim_evidence"] == []
+            assert all(
+                item["kind"] != "movement"
+                for item in secret_sources.json()["sources"]
+            )
+
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE processes SET secrecy_level=0 WHERE id=$1",
+                    process_id,
+                )
+                await conn.execute(
                     """
                     DELETE FROM process_summary_claims
                     WHERE summary_id=$1 AND claim_id='current_status'
