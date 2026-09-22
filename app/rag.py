@@ -15,9 +15,11 @@ from app.attachment_signals import attachment_status_warnings
 from app.claim_evidence import (
     EvidenceSource,
     MaterialClaim,
+    claim_evidence_is_complete,
     evidence_catalog,
     movement_evidence_ref,
     process_evidence_ref,
+    load_summary_claim_evidence,
     replace_summary_claim_evidence,
     validate_claim_evidence,
 )
@@ -760,8 +762,9 @@ async def _load_publishable_summary(
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
-            SELECT ps.validation, ps.model, ps.prompt_version, ps.generation_ms,
-                   ps.usage, ps.cache_hit, ps.cost_usd
+            SELECT ps.id, ps.validation, ps.model, ps.prompt_version, ps.generation_ms,
+                   ps.usage, ps.cache_hit, ps.cost_usd, ps.structured_output,
+                   p.secrecy_level
             FROM process_summaries ps
             JOIN processes p
               ON p.id = ps.process_id
@@ -769,20 +772,21 @@ async def _load_publishable_summary(
             WHERE ps.process_id = $1
               AND ps.version_id = $2
               AND COALESCE((ps.validation->>'passed')::boolean, false) = true
-              AND (
-                    p.secrecy_level > 0
-                    OR EXISTS (
-                        SELECT 1
-                        FROM process_summary_claims c
-                        WHERE c.summary_id = ps.id
-                    )
-              )
             """,
             process_id,
             version_id,
         )
     if row is None:
         return None
+    if int(row["secrecy_level"] or 0) <= 0:
+        claim_evidence = await load_summary_claim_evidence(
+            conn, summary_id=row["id"]
+        )
+        structured_output = decode_json_object(
+            row["structured_output"], label="summary structured output"
+        )
+        if not claim_evidence_is_complete(structured_output, claim_evidence):
+            return None
     return {
         "validation": decode_json_object(row["validation"], label="summary validation"),
         "model": row["model"],
