@@ -84,10 +84,10 @@ def bm25_scores(
     k1: float = 1.5,
     b: float = 0.75,
 ) -> dict[UUID, float]:
-    """Deterministic in-memory lexical fallback and comparison baseline.
+    """Compute the authoritative lexical score used by long-process ranking.
 
-    Production PostgreSQL retrieval supplies lexical_scores from lexical_search().
-    BM25 remains useful for unit tests and evidence-based comparison without DB I/O.
+    PostgreSQL full-text search may still be used for candidate discovery or index
+    verification, but its ranking function is not a substitute for this BM25 score.
     """
     if not steps:
         return {}
@@ -145,7 +145,10 @@ def rank_steps(
         ]
 
     bm25 = _normalize(bm25_scores(query, steps))
-    lexical = _normalize(lexical_scores if lexical_scores is not None else bm25)
+    # BM25 is the authoritative lexical signal. lexical_scores is retained as a
+    # compatibility/candidate-discovery input only and must never replace the
+    # final lexical score (for example with PostgreSQL ts_rank_cd).
+    lexical = bm25
     vector = _normalize(vector_scores or {})
     max_step = max(step.step_number for step in steps) or 1
 
@@ -286,6 +289,12 @@ async def lexical_search(
     query: str,
     limit: int = 40,
 ) -> dict[UUID, float]:
+    """Return version-scoped PostgreSQL FTS candidates.
+
+    The returned ts_rank_cd values are for candidate discovery and index
+    verification only. Final hybrid ranking always recomputes lexical relevance
+    with bm25_scores over the eligible movement corpus.
+    """
     rows = await conn.fetch(
         f"""
         SELECT ps.id,

@@ -179,10 +179,10 @@ def rag_invariant_violations() -> list[str]:
         errors.append("long retrieval must expose PostgreSQL lexical search")
     if "to_tsvector('portuguese'" not in retrieval_text or "websearch_to_tsquery('portuguese'" not in retrieval_text:
         errors.append("PostgreSQL lexical retrieval must use Portuguese text search")
-    if "lexical_scores = await lexical_search(" not in rag_text:
-        errors.append("long RAG retrieval must query PostgreSQL lexical scores")
-    if "lexical_scores=lexical_scores" not in rag_text:
-        errors.append("long RAG retrieval must pass PostgreSQL lexical scores to ranking")
+    if "lexical_scores = await lexical_search(" in rag_text:
+        errors.append("final RAG ranking must not use PostgreSQL ts_rank_cd lexical scores")
+    if "lexical = bm25" not in retrieval_text:
+        errors.append("long retrieval must use literal BM25 as the final lexical signal")
     if "len(steps) > 40" in rag_text and not embeddings.exists():
         errors.append("conditional vector retrieval requires app/embeddings.py")
     return errors
