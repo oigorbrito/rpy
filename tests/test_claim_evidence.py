@@ -5,6 +5,7 @@ from uuid import UUID
 from app.claim_evidence import (
     attachment_evidence_ref,
     build_material_claims,
+    claim_evidence_is_complete,
     evidence_catalog,
     movement_evidence_ref,
     process_evidence_ref,
@@ -162,3 +163,43 @@ def test_deterministic_builder_covers_every_material_field() -> None:
         "attachments:0",
     ]
     assert all(item["evidence_refs"] == refs for item in built)
+
+
+def _structured_output(payload: dict) -> dict:
+    return {
+        "schema_version": 2,
+        "process": {},
+        "summary": payload,
+    }
+
+
+def test_publication_completeness_requires_exact_claim_coverage() -> None:
+    payload = _payload()
+    refs = [movement_evidence_ref(STEP_ID)]
+    complete = build_material_claims(payload, evidence_refs=refs)
+
+    assert claim_evidence_is_complete(_structured_output(payload), complete) is True
+
+    missing = complete[:-1]
+    assert claim_evidence_is_complete(_structured_output(payload), missing) is False
+
+    empty_ref = [dict(item) for item in complete]
+    empty_ref[0] = {**empty_ref[0], "evidence_refs": []}
+    assert claim_evidence_is_complete(_structured_output(payload), empty_ref) is False
+
+    wrong_text = [dict(item) for item in complete]
+    wrong_text[0] = {**wrong_text[0], "text": "Texto diferente."}
+    assert claim_evidence_is_complete(_structured_output(payload), wrong_text) is False
+
+
+def test_publication_completeness_rejects_legacy_or_duplicate_provenance() -> None:
+    payload = _payload()
+    refs = [movement_evidence_ref(STEP_ID)]
+    complete = build_material_claims(payload, evidence_refs=refs)
+
+    assert claim_evidence_is_complete(None, complete) is False
+    assert claim_evidence_is_complete({"schema_version": 1}, complete) is False
+    assert claim_evidence_is_complete(
+        _structured_output(payload),
+        [*complete, dict(complete[0])],
+    ) is False
