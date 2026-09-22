@@ -182,7 +182,7 @@ async def test_semantically_equal_response_reuses_current_version_and_summary(
     assert current_version == first_version
     assert duplicate["finalized"] is True
     assert duplicate["semantic_fingerprint"]
-    assert duplicate["semantic_schema_version"] == 2
+    assert duplicate["semantic_schema_version"] == 3
     assert duplicate["equivalent_to_version_id"] == first_version
     assert duplicate_response in json.dumps(duplicate["source_payload"], ensure_ascii=False)
     assert duplicate_steps == 0
@@ -361,6 +361,6 @@ async def test_new_attachment_manifest_promotes_version_and_persists_pending_met
     assert attachment["provider_status"] == "done"
     assert attachment["status"] == "pending"
     assert attachment["content_sha256"] is None
-    assert schema_version == 2
+    assert schema_version == 3
 
     await pool.close()

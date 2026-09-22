@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
-SEMANTIC_SCHEMA_VERSION = 2
+SEMANTIC_SCHEMA_VERSION = 3
 _SAO_PAULO = ZoneInfo("America/Sao_Paulo")
 
 
@@ -52,6 +52,7 @@ def semantic_document(
     court: str | None,
     class_name: str | None,
     secrecy_level: int,
+    representatives: list[dict[str, Any]] | None = None,
     attachments: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     manifest = attachments or []
@@ -62,6 +63,7 @@ def semantic_document(
         "secrecy_level": int(secrecy_level),
         "header": header,
         "parties": parties,
+        "representatives": representatives or [],
         "subjects": subjects,
         "steps": [_step_semantics(step) for step in steps],
         "attachments": [_attachment_semantics(item) for item in manifest],

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -33,6 +34,32 @@ _PUBLIC_HEADER_KEYS = (
     "name",
     *_SECRET_HEADER_KEYS,
     "amount",
+)
+_REPRESENTATIVE_PERSON_TYPES = {
+    "ADVOGADO",
+    "ADVOGADA",
+    "ATTORNEY",
+    "LAWYER",
+    "COUNSEL",
+    "PROCURADOR",
+    "PROCURADORA",
+    "REPRESENTANTE",
+    "REPRESENTATIVE",
+    "LEGAL_REPRESENTATIVE",
+    "REPRESENTANTE_LEGAL",
+    "ADVOGADO_A",
+    "PROCURADOR_A",
+    "DEFENSOR",
+    "DEFENSORA",
+    "DEFENSOR_PUBLICO",
+    "DEFENSORA_PUBLICA",
+}
+_REPRESENTED_PARTY_KEYS = (
+    "represented_party",
+    "represented_party_name",
+    "party_name",
+    "client",
+    "principal",
 )
 
 
@@ -185,24 +212,67 @@ def _masked_personal_id(value: str) -> str:
     raise ValueError("personal id must contain 11 or 14 digits")
 
 
-def _safe_parties(process: dict[str, Any]) -> list[dict[str, Any]]:
-    safe: list[dict[str, Any]] = []
+def _normalized_person_type(value: Any) -> str:
+    rendered = unicodedata.normalize("NFKD", str(value or "").strip())
+    ascii_value = "".join(
+        character
+        for character in rendered
+        if not unicodedata.combining(character)
+    )
+    return re.sub(r"[^A-Z0-9]+", "_", ascii_value.upper()).strip("_")
+
+
+def _is_representative(party: dict[str, Any]) -> bool:
+    return _normalized_person_type(party.get("person_type")) in _REPRESENTATIVE_PERSON_TYPES
+
+
+def _represented_party_name(party: dict[str, Any]) -> str | None:
+    for key in _REPRESENTED_PARTY_KEYS:
+        value = party.get(key)
+        if isinstance(value, dict):
+            value = value.get("name")
+        if value is None:
+            continue
+        rendered = str(value).strip()
+        if rendered:
+            return rendered
+    return None
+
+
+def _safe_party_entity(party: dict[str, Any]) -> dict[str, Any] | None:
+    name = str(party.get("name") or "").strip()
+    if not name:
+        return None
+    normalized: dict[str, Any] = {
+        "name": name,
+        "side": party.get("side"),
+        "person_type": party.get("person_type"),
+    }
+    personal_id = _party_personal_id(party)
+    if personal_id:
+        normalized["masked_person_id"] = _masked_personal_id(personal_id)
+    return normalized
+
+
+def _safe_parties_and_representatives(
+    process: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    parties: list[dict[str, Any]] = []
+    representatives: list[dict[str, Any]] = []
     for party in process.get("parties") or []:
         if not isinstance(party, dict):
             continue
-        name = str(party.get("name") or "").strip()
-        if not name:
+        normalized = _safe_party_entity(party)
+        if normalized is None:
             continue
-        normalized = {
-            "name": name,
-            "side": party.get("side"),
-            "person_type": party.get("person_type"),
-        }
-        personal_id = _party_personal_id(party)
-        if personal_id:
-            normalized["masked_person_id"] = _masked_personal_id(personal_id)
-        safe.append(normalized)
-    return safe
+        if _is_representative(party):
+            represented_party = _represented_party_name(party)
+            if represented_party:
+                normalized["represents"] = represented_party
+            representatives.append(normalized)
+            continue
+        parties.append(normalized)
+    return parties, representatives
 
 
 def _safe_subjects(process: dict[str, Any]) -> list[dict[str, Any]]:
@@ -322,6 +392,7 @@ def extract_promotable_fields(process: dict[str, Any]) -> dict[str, Any]:
         return {
             "header": header,
             "parties": [],
+            "representatives": [],
             "subjects": [],
             "steps": [],
             "attachments": [],
@@ -367,9 +438,12 @@ def extract_promotable_fields(process: dict[str, Any]) -> dict[str, Any]:
             }
         )
 
+    parties, representatives = _safe_parties_and_representatives(process)
+
     return {
         "header": header,
-        "parties": _safe_parties(process),
+        "parties": parties,
+        "representatives": representatives,
         "subjects": _safe_subjects(process),
         "steps": normalized_steps,
         "attachments": _safe_attachments(process),

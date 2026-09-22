@@ -190,7 +190,7 @@ async def _current_semantic_fingerprint(
 ) -> str | None:
     process = await conn.fetchrow(
         """
-        SELECT court, class_name, subjects, parties, secrecy_level, header
+        SELECT court, class_name, subjects, parties, representatives, secrecy_level, header
         FROM processes
         WHERE id = $1 AND current_version_id = $2
         """,
@@ -232,6 +232,9 @@ async def _current_semantic_fingerprint(
     return semantic_fingerprint(
         header=decode_json_object(process["header"], label="process header"),
         parties=decode_json_list(process["parties"], label="process parties"),
+        representatives=decode_json_list(
+            process["representatives"], label="process representatives"
+        ),
         subjects=decode_json_list(process["subjects"], label="process subjects"),
         steps=steps,
         attachments=attachments,
@@ -250,6 +253,7 @@ async def finalize_version(
     parties: list[dict[str, Any]],
     subjects: list[Any],
     steps: list[dict[str, Any]],
+    representatives: list[dict[str, Any]] | None = None,
     attachments: list[dict[str, Any]] | None = None,
     court: str | None = None,
     class_name: str | None = None,
@@ -260,6 +264,7 @@ async def finalize_version(
     candidate_fingerprint = semantic_fingerprint(
         header=header,
         parties=parties,
+        representatives=representatives or [],
         subjects=subjects,
         steps=steps,
         attachments=attachment_manifest,
@@ -388,9 +393,10 @@ async def finalize_version(
                     class_name = $3,
                     subjects = $4::jsonb,
                     parties = $5::jsonb,
-                    secrecy_level = $6,
-                    header = $7::jsonb,
-                    current_version_id = $8,
+                    representatives = $6::jsonb,
+                    secrecy_level = $7,
+                    header = $8::jsonb,
+                    current_version_id = $9,
                     updated_at = NOW()
                 WHERE id = $1
                 """,
@@ -399,6 +405,7 @@ async def finalize_version(
                 class_name,
                 json.dumps(subjects),
                 json.dumps(parties),
+                json.dumps(representatives or []),
                 secrecy_level,
                 json.dumps(header),
                 version_id,

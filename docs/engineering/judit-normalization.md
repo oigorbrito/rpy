@@ -10,7 +10,9 @@ An external Judit `response_type=summary` is not a RAG source. It may remain in 
 
 ## Parties and personal identifiers
 
-Normalized parties contain only the fields required by the application:
+Normalized process actors are classified before promotion. Entries whose explicit `person_type` identifies a lawyer, attorney, procurador, representative or public defender are removed from `parties` and stored in the separate normalized `representatives` collection. Rpy does not infer a represented party from a shared `side`; a `represents` value is preserved only when the source explicitly supplies a usable relationship field.
+
+Normalized parties and representatives contain only the fields required by the application:
 
 - `name`;
 - `side`;
@@ -18,6 +20,8 @@ Normalized parties contain only the fields required by the application:
 - `masked_person_id`, when the source exposes an 11- or 14-digit personal/company identifier.
 
 `masked_person_id` reveals only the final two digits. Current representations are `***.***.***-NN` for 11 digits and `**.***.***/****-NN` for 14 digits. The complete identifier is not copied into the normalized party representation or provider context. Values that do not reduce to exactly 11 or 14 digits are omitted rather than guessed.
+
+The public process view and deterministic summary renderer continue to consume `parties` only, so a representative cannot become a process party merely because Judit placed the record inside `parties[]`. The RAG context keeps representatives under their own key, while party-name validation remains bound to normalized `parties`.
 
 The raw source payload remains unchanged and can therefore retain the original source value under the repository's existing access, retention and audit controls.
 
