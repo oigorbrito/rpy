@@ -136,6 +136,87 @@ def test_extract_current_judit_steps_and_sanitizes_parties() -> None:
     assert "12345678901" not in str(fields["parties"])
 
 
+@pytest.mark.parametrize(
+    "representative_type",
+    ["ADVOGADO", "advogada", "PROCURADOR", "representante", "LEGAL REPRESENTATIVE"],
+)
+def test_separates_representatives_from_process_parties(representative_type: str) -> None:
+    fields = extract_promotable_fields(
+        {
+            "code": "0000000-00.2026.8.21.0001",
+            "parties": [
+                {
+                    "name": "Pessoa Autora Exemplo",
+                    "side": "Active",
+                    "person_type": "PERSON",
+                },
+                {
+                    "name": "Representante Exemplo",
+                    "side": "Active",
+                    "person_type": representative_type,
+                    "represented_party_name": "Pessoa Autora Exemplo",
+                    "main_document": "12345678901",
+                },
+                {
+                    "name": "Empresa Ré Exemplo",
+                    "side": "Passive",
+                    "person_type": "COMPANY",
+                },
+            ],
+            "steps": [],
+        }
+    )
+
+    assert [party["name"] for party in fields["parties"]] == [
+        "Pessoa Autora Exemplo",
+        "Empresa Ré Exemplo",
+    ]
+    assert fields["representatives"] == [
+        {
+            "name": "Representante Exemplo",
+            "side": "Active",
+            "person_type": representative_type,
+            "masked_person_id": "***.***.***-01",
+            "represents": "Pessoa Autora Exemplo",
+        }
+    ]
+    assert "Representante Exemplo" not in {
+        party["name"] for party in fields["parties"]
+    }
+    assert "12345678901" not in json.dumps(fields, ensure_ascii=False, default=str)
+
+
+def test_representative_without_explicit_relation_is_not_attached_to_a_party() -> None:
+    fields = extract_promotable_fields(
+        {
+            "code": "0000000-00.2026.8.21.0001",
+            "parties": [
+                {
+                    "name": "Pessoa Autora Exemplo",
+                    "side": "Active",
+                    "person_type": "PERSON",
+                },
+                {
+                    "name": "Advogado Exemplo",
+                    "side": "Active",
+                    "person_type": "ADVOGADO",
+                },
+            ],
+            "steps": [],
+        }
+    )
+
+    assert [party["name"] for party in fields["parties"]] == ["Pessoa Autora Exemplo"]
+    assert fields["representatives"] == [
+        {
+            "name": "Advogado Exemplo",
+            "side": "Active",
+            "person_type": "ADVOGADO",
+        }
+    ]
+    assert "represents" not in fields["representatives"][0]
+
+
 def test_normalizes_attachment_manifest_without_copying_arbitrary_fields() -> None:
     fields = extract_promotable_fields(
         {
