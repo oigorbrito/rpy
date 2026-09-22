@@ -48,11 +48,11 @@ def semantic_document(
     header: dict[str, Any],
     parties: list[dict[str, Any]],
     subjects: list[Any],
-    representatives: list[dict[str, Any]] | None = None,
     steps: list[dict[str, Any]],
     court: str | None,
     class_name: str | None,
     secrecy_level: int,
+    representatives: list[dict[str, Any]] | None = None,
     attachments: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     manifest = attachments or []
