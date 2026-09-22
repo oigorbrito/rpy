@@ -13,6 +13,7 @@ from app.claim_evidence import (
     validate_claim_evidence,
 )
 from app.db import create_pool
+from app.json_utils import decode_json_object
 from app.processes import finalize_version, stage_version
 from app.rag import _load_context, _persist_summary, _validate_provider_summary
 from app.summary_output import structured_summary_document
@@ -69,7 +70,10 @@ async def seed_demo(database_url: str) -> None:
                     claim_evidence = await load_summary_claim_evidence(
                         conn, summary_id=summary_row["id"]
                     )
-                    structured_output = summary_row["structured_output"]
+                    structured_output = decode_json_object(
+                        summary_row["structured_output"],
+                        label="demo structured summary",
+                    )
                     summary_ok = claim_evidence_is_complete(
                         structured_output, claim_evidence
                     )
