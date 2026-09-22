@@ -139,3 +139,11 @@ def test_json_document_uses_same_validated_payload_and_normalized_identity() -> 
     }
     assert document["summary"] == payload
     assert "internal" not in json.dumps(document, ensure_ascii=False)
+
+
+def test_parser_rejects_auxiliary_claim_metadata() -> None:
+    payload = _payload()
+    payload["claims"][0]["confidence"] = 0.9
+
+    with pytest.raises(ValueError, match="claim keys do not match"):
+        parse_structured_summary(json.dumps(payload))
