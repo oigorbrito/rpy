@@ -10,7 +10,12 @@ from types import SimpleNamespace
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
-from app.claim_evidence import build_material_claims, process_evidence_ref
+from app.claim_evidence import (
+    build_material_claims,
+    expected_material_claims,
+    process_evidence_ref,
+    validate_claim_evidence,
+)
 from app.rag import (
     EMPTY_STEPS_WARNING,
     _generate,
@@ -171,6 +176,8 @@ async def evaluate_generation(cases: list[dict[str, Any]]) -> dict[str, Any]:
     recovered_retries = 0
     secret_cases = 0
     secret_provider_calls = 0
+    material_claims = 0
+    structurally_unsupported_claims = 0
     per_case: dict[str, dict[str, Any]] = {}
 
     for case in cases:
@@ -203,6 +210,25 @@ async def evaluate_generation(cases: list[dict[str, Any]]) -> dict[str, Any]:
             if validation.passed:
                 recovered_retries += 1
 
+        claim_total = 0
+        claim_unsupported = 0
+        parsed = context.get("_parsed_summary")
+        if isinstance(parsed, dict):
+            expected_claims = expected_material_claims(parsed)
+            claim_total = len(expected_claims)
+            material_claims += claim_total
+            validated_claims, claim_errors = validate_claim_evidence(parsed, context)
+            supported_ids = {
+                claim.claim_id
+                for claim in validated_claims
+                if claim.evidence_refs
+                and claim.text == expected_claims.get(claim.claim_id)
+            }
+            claim_unsupported = claim_total - len(supported_ids)
+            if claim_errors and claim_unsupported == 0:
+                claim_unsupported = claim_total
+            structurally_unsupported_claims += claim_unsupported
+
         if validation.passed:
             final_valid += 1
         if milestone and context["steps"]:
@@ -219,6 +245,8 @@ async def evaluate_generation(cases: list[dict[str, Any]]) -> dict[str, Any]:
             "anchored_milestone_present": (
                 milestone in text if milestone and context["steps"] else None
             ),
+            "material_claims": claim_total,
+            "structurally_unsupported_claims": claim_unsupported,
         }
 
     return {
@@ -234,6 +262,11 @@ async def evaluate_generation(cases: list[dict[str, Any]]) -> dict[str, Any]:
             "secret_provider_call_rate": (
                 secret_provider_calls / secret_cases if secret_cases else 0.0
             ),
+            "structural_unsupported_claim_rate": (
+                structurally_unsupported_claims / material_claims
+                if material_claims
+                else 0.0
+            ),
         },
         "counts": {
             "public_cases": public_cases,
@@ -244,6 +277,8 @@ async def evaluate_generation(cases: list[dict[str, Any]]) -> dict[str, Any]:
             "recovered_retries": recovered_retries,
             "secret_cases": secret_cases,
             "secret_provider_calls": secret_provider_calls,
+            "material_claims": material_claims,
+            "structurally_unsupported_claims": structurally_unsupported_claims,
         },
         "case_metrics": per_case,
     }
