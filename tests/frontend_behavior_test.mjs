@@ -12,7 +12,7 @@ const ids = [
   "status-detail","retry-search","request-process","result","search-submit",
   "copy-summary","new-search","action-feedback","result-code","result-class",
   "result-court","result-updated","result-context","parties-list","subjects-list",
-  "header-data","movements-list","summary-body","summary-provenance",
+  "header-data","movements-list","summary-body","summary-provenance","summary-eyebrow",
 ];
 
 class ClassList {
@@ -218,10 +218,32 @@ await scenario("successful lookup renders public data, focuses result and uses b
   assert.equal(ui.requests[0].options.headers.Accept, "application/json");
   assert.doesNotMatch(ui.requests[0].url, /test-token/);
   assert.ok(ui.elements["summary-body"].renderedText.includes("Resumo pronto"));
+  assert.equal(ui.elements["summary-eyebrow"].textContent, "SÍNTESE GERADA POR IA");
+  assert.ok(ui.elements["summary-provenance"].textContent.includes("gerado por IA"));
   assert.ok(ui.elements["movements-list"].renderedText.includes("Movimento público"));
   assert.equal(ui.elements["result"].hidden, false);
   assert.equal(ui.elements["result-code"].focused, true);
   assert.equal(ui.elements["result"].scrolled, true);
+});
+
+
+await scenario("provider-free demo summary is labeled as synthetic instead of AI-generated", async () => {
+  const ui = createHarness([
+    jsonResponse(200, readyPayload({
+      summary: {
+        markdown: "Resumo pronto",
+        created_at: "2026-09-18T12:00:00Z",
+        model: "local-demo-no-provider",
+      },
+    })),
+  ]);
+
+  await ui.search();
+
+  assert.equal(ui.elements["summary-eyebrow"].textContent, "SÍNTESE DE DEMONSTRAÇÃO");
+  assert.ok(ui.elements["summary-provenance"].textContent.includes("Resumo sintético local"));
+  assert.ok(ui.elements["summary-provenance"].textContent.includes("Nenhum provedor externo"));
+  assert.doesNotMatch(ui.elements["summary-provenance"].textContent, /gerado por IA/i);
 });
 
 await scenario("processing summary remains readable and transitions to published summary", async () => {
