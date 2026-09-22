@@ -34,6 +34,16 @@ def test_bidi_and_zero_width_controls_are_made_explicit() -> None:
     assert view.flags == ("bidi_control", "zero_width", "default_ignorable")
 
 
+def test_soft_hyphen_is_flagged_as_default_ignorable() -> None:
+    source = "soft\u00ad hyphen"
+
+    view = model_view_text(source)
+
+    assert "\u00ad" not in view.text
+    assert "U+00AD SOFT HYPHEN" in view.text
+    assert view.flags == ("default_ignorable",)
+
+
 def test_mixed_latin_cyrillic_token_exposes_cross_script_codepoint() -> None:
     source = "p\u0430ypal"
 
