@@ -6,6 +6,7 @@ from app.summary_output import (
     SUMMARY_OUTPUT_SCHEMA,
     parse_structured_summary,
     render_structured_summary,
+    structured_summary_document,
 )
 
 
@@ -85,3 +86,39 @@ def test_parser_requires_nonempty_attention() -> None:
     payload["attention"] = []
     with pytest.raises(ValueError, match="must not be empty"):
         parse_structured_summary(json.dumps(payload))
+
+
+def test_json_document_uses_same_validated_payload_and_normalized_identity() -> None:
+    payload = _payload()
+    context = _context() | {
+        "header": {"instance": 1, "area": "Cível", "internal": "omit"},
+        "parties": [
+            {
+                "name": "Maria da Silva",
+                "side": "Active",
+                "person_type": "PERSON",
+                "masked_person_id": "***.***.***-01",
+                "internal": "omit",
+            }
+        ],
+    }
+
+    document = structured_summary_document(payload, context)
+
+    assert document["schema_version"] == 1
+    assert document["process"] == {
+        "cnj": "0000000-00.2026.8.21.0001",
+        "class_name": "Procedimento Comum",
+        "court": "TJRS",
+        "header": {"instance": 1, "area": "Cível"},
+        "parties": [
+            {
+                "name": "Maria da Silva",
+                "side": "Active",
+                "person_type": "PERSON",
+                "masked_person_id": "***.***.***-01",
+            }
+        ],
+    }
+    assert document["summary"] == payload
+    assert "internal" not in json.dumps(document, ensure_ascii=False)
