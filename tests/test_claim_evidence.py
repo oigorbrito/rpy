@@ -214,3 +214,55 @@ def test_duplicate_material_claim_id_is_rejected() -> None:
     _, errors = validate_claim_evidence(payload, _context())
 
     assert "duplicate claim_id: synthesis" in errors
+
+
+def test_malformed_and_empty_claim_fields_fail_closed() -> None:
+    payload = _payload()
+    valid_ref = movement_evidence_ref(STEP_ID)
+    payload["claims"] = [
+        {
+            "claim_id": "",
+            "text": payload["synthesis"],
+            "evidence_refs": [valid_ref],
+        },
+        {
+            "claim_id": "current_status",
+            "text": "",
+            "evidence_refs": [valid_ref],
+        },
+        {
+            "claim_id": "timeline:0",
+            "text": payload["timeline"][0],
+            "evidence_refs": ["m-not-a-uuid"],
+        },
+        {
+            "claim_id": "decisions:0",
+            "text": payload["decisions"][0],
+            "evidence_refs": [""],
+        },
+        {
+            "claim_id": "attachments:0",
+            "text": payload["attachments"][0],
+            "evidence_refs": [valid_ref],
+        },
+    ]
+
+    _, errors = validate_claim_evidence(payload, _context())
+
+    assert "invalid claim_id: <empty>" in errors
+    assert "claim text does not match structured field: current_status" in errors
+    assert "invalid evidence ref for timeline:0: m-not-a-uuid" in errors
+    assert "invalid evidence ref for decisions:0: <empty>" in errors
+    assert "missing material claim provenance: synthesis" in errors
+
+
+def test_publication_completeness_rejects_malformed_ref() -> None:
+    payload = _payload()
+    complete = build_material_claims(
+        payload,
+        evidence_refs=[movement_evidence_ref(STEP_ID)],
+    )
+    malformed = [dict(item) for item in complete]
+    malformed[0] = {**malformed[0], "evidence_refs": ["m-not-a-uuid"]}
+
+    assert claim_evidence_is_complete(_structured_output(payload), malformed) is False
