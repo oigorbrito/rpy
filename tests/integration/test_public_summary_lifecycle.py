@@ -8,6 +8,8 @@ import pytest
 
 import app.process_requests as process_requests_module
 import app.rag as rag
+from app.claim_evidence import build_material_claims
+from app.summary_output import structured_summary_document
 from app.api import app
 from app.db import create_pool
 from app.judit_client import JuditRequestError, JuditRequestResult
@@ -21,6 +23,25 @@ from app.public_lifecycle import (
     transition_summary_request,
 )
 from app.worker import Worker, WorkerSettings
+
+
+def _prime_fake_structured_summary(context: dict) -> None:
+    payload = {
+        "synthesis": "Síntese factual de teste.",
+        "timeline": [],
+        "current_status": "Situação atual registrada nos autos.",
+        "attention": ["Nenhuma divergência objetiva identificada."],
+        "decisions": [],
+        "deadlines": [],
+        "related_processes": [],
+        "attachments": [],
+    }
+    payload["claims"] = build_material_claims(
+        payload,
+        evidence_refs=[str(context["_process_evidence_ref"])],
+    )
+    context["_parsed_summary"] = payload
+    context["_structured_summary"] = structured_summary_document(payload, context)
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(
@@ -282,6 +303,7 @@ async def test_public_lifecycle_runs_through_fake_pipeline(
             assert indexing.version_id is not None
 
         async def fake_generate(client, context, validation_errors=None):
+            _prime_fake_structured_summary(context)
             assert validation_errors is None
             async with pool.acquire() as conn:
                 generating = await get_summary_request_for_tenant(
