@@ -52,13 +52,25 @@ def _summary_format(value: Any) -> str:
 
 
 def _summary_representation(
-    *, markdown: str | None, structured_output: Any, response_format: str
+    *,
+    markdown: str | None,
+    structured_output: Any,
+    response_format: str,
+    hide_claim_evidence: bool = False,
 ) -> Any:
     if response_format == "jsx":
         return markdown
     if structured_output is None:
         return None
-    return _json_object(structured_output)
+    rendered = _json_object(structured_output)
+    if not hide_claim_evidence:
+        return rendered
+    summary = rendered.get("summary")
+    if not isinstance(summary, dict) or "claims" not in summary:
+        return rendered
+    public_summary = dict(summary)
+    public_summary.pop("claims", None)
+    return {**rendered, "summary": public_summary}
 
 
 def _summary_usage(row: asyncpg.Record) -> dict[str, Any] | None:
@@ -248,15 +260,15 @@ async def _job_payload(
         if row["structured_output"] is not None
         else None
     )
+    is_secret = int(row["process_secrecy_level"] or 0) > 0
     publishable = bool(
         validation
         and validation.get("passed") is True
         and (
-            int(row["process_secrecy_level"] or 0) > 0
+            is_secret
             or claim_evidence_is_complete(structured_output, claim_evidence)
         )
     )
-    is_secret = int(row["process_secrecy_level"] or 0) > 0
     public_claim_evidence = claim_evidence if publishable and not is_secret else []
     payload = {
         "job_id": str(row["id"]),
@@ -275,6 +287,7 @@ async def _job_payload(
                 markdown=row["markdown"],
                 structured_output=row["structured_output"],
                 response_format=str(row["response_format"]),
+                hide_claim_evidence=is_secret,
             )
             if publishable
             else None
@@ -328,7 +341,8 @@ async def _latest_summary_payload(
         version_id=process["current_version_id"],
         summary_id=summary["id"],
     )
-    flags = {"secrecy": int(process["secrecy_level"] or 0) > 0}
+    is_secret = int(process["secrecy_level"] or 0) > 0
+    flags = {"secrecy": is_secret}
     flags.update(
         await _load_attachment_flags(
             conn,
@@ -351,6 +365,7 @@ async def _latest_summary_payload(
             markdown=summary["markdown"],
             structured_output=summary["structured_output"],
             response_format=response_format,
+            hide_claim_evidence=is_secret,
         ),
     }
 
