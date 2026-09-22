@@ -361,6 +361,6 @@ async def test_new_attachment_manifest_promotes_version_and_persists_pending_met
     assert attachment["provider_status"] == "done"
     assert attachment["status"] == "pending"
     assert attachment["content_sha256"] is None
-    assert schema_version == 2
+    assert schema_version == 3
 
     await pool.close()
