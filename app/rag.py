@@ -776,17 +776,17 @@ async def _load_publishable_summary(
             process_id,
             version_id,
         )
-    if row is None:
-        return None
-    if int(row["secrecy_level"] or 0) <= 0:
-        claim_evidence = await load_summary_claim_evidence(
-            conn, summary_id=row["id"]
-        )
-        structured_output = decode_json_object(
-            row["structured_output"], label="summary structured output"
-        )
-        if not claim_evidence_is_complete(structured_output, claim_evidence):
+        if row is None:
             return None
+        if int(row["secrecy_level"] or 0) <= 0:
+            claim_evidence = await load_summary_claim_evidence(
+                conn, summary_id=row["id"]
+            )
+            structured_output = decode_json_object(
+                row["structured_output"], label="summary structured output"
+            )
+            if not claim_evidence_is_complete(structured_output, claim_evidence):
+                return None
     return {
         "validation": decode_json_object(row["validation"], label="summary validation"),
         "model": row["model"],
