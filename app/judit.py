@@ -214,7 +214,7 @@ def _masked_personal_id(value: str) -> str:
 
 def _normalized_person_type(value: Any) -> str:
     rendered = unicodedata.normalize("NFKD", str(value or "").strip())
-    ascii_value = "".join(character for character in rendered if not unicodedata.combining(character))
+    ascii_value = "".join(\n        character for character in rendered if not unicodedata.combining(character)\n    )
     return re.sub(r"[^A-Z0-9]+", "_", ascii_value.upper()).strip("_")
 
 
