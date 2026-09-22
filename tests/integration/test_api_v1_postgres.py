@@ -479,6 +479,33 @@ async def test_v1_idempotency_states_authorization_and_sanitized_sources(monkeyp
             assert raw_sentinel not in rendered_sources
             assert "source_payload" not in rendered_sources
 
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    DELETE FROM process_summary_claims
+                    WHERE summary_id=$1 AND claim_id='current_status'
+                    """,
+                    summary_id,
+                )
+
+            incomplete_job = await client.get(
+                f"/v1/resumos/{completed_request.id}", headers=auth_a
+            )
+            assert incomplete_job.status_code == 200
+            assert incomplete_job.json()["iaSummary"] is None
+            assert incomplete_job.json()["claim_evidence"] == []
+
+            incomplete_sources = await client.get(
+                f"/v1/processos/{other_code}/fontes", headers=auth_a
+            )
+            assert incomplete_sources.status_code == 200
+            assert incomplete_sources.json()["claim_evidence"] == []
+
+            incomplete_latest = await client.get(
+                f"/v1/processos/{other_code}/resumo", headers=auth_a
+            )
+            assert incomplete_latest.status_code == 404
+
             healthz = await client.get("/healthz")
             readyz = await client.get("/readyz")
             assert healthz.status_code == 200
