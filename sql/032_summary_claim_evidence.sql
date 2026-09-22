@@ -106,22 +106,28 @@ BEGIN
 
     IF NEW.source_kind = 'movement' AND NOT EXISTS (
         SELECT 1
-        FROM process_summary_sources
-        WHERE summary_id = NEW.summary_id
-          AND process_id = NEW.process_id
-          AND version_id = NEW.version_id
-          AND step_id = NEW.step_id
+        FROM process_summary_sources s
+        JOIN process_steps ps ON ps.id = s.step_id
+        WHERE s.summary_id = NEW.summary_id
+          AND s.process_id = NEW.process_id
+          AND s.version_id = NEW.version_id
+          AND s.step_id = NEW.step_id
+          AND ps.process_id = NEW.process_id
+          AND ps.version_id = NEW.version_id
     ) THEN
         RAISE EXCEPTION 'claim movement evidence was not used for summary';
     END IF;
 
     IF NEW.source_kind = 'attachment' AND NOT EXISTS (
         SELECT 1
-        FROM process_summary_attachment_sources
-        WHERE summary_id = NEW.summary_id
-          AND process_id = NEW.process_id
-          AND version_id = NEW.version_id
-          AND attachment_chunk_id = NEW.attachment_chunk_id
+        FROM process_summary_attachment_sources s
+        JOIN attachment_chunks ac ON ac.id = s.attachment_chunk_id
+        WHERE s.summary_id = NEW.summary_id
+          AND s.process_id = NEW.process_id
+          AND s.version_id = NEW.version_id
+          AND s.attachment_chunk_id = NEW.attachment_chunk_id
+          AND ac.process_id = NEW.process_id
+          AND ac.version_id = NEW.version_id
     ) THEN
         RAISE EXCEPTION 'claim attachment evidence was not used for summary';
     END IF;
