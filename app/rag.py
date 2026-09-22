@@ -204,7 +204,7 @@ async def _load_process(
         process = await conn.fetchrow(
             """
             SELECT p.id, p.code, p.court, p.class_name, p.subjects, p.parties,
-                   p.secrecy_level, p.header,
+                   p.representatives, p.secrecy_level, p.header,
                    COALESCE(
                        (
                            SELECT jsonb_agg(dfp.field_name ORDER BY dfp.field_name)
@@ -231,6 +231,9 @@ async def _load_process(
         "class_name": process["class_name"],
         "subjects": decode_json_list(process["subjects"], label="process subjects"),
         "parties": decode_json_list(process["parties"], label="process parties"),
+        "representatives": decode_json_list(
+            process["representatives"], label="process representatives"
+        ),
         "secrecy_level": int(process["secrecy_level"] or 0),
         "header": decode_json_object(process["header"], label="process header"),
         "_datajud_conflict_fields": decode_json_list(
@@ -256,6 +259,7 @@ async def _load_context(
             "header": base["header"],
             "validation_parties": base["parties"],
             "parties": [],
+            "representatives": [],
             "subjects": [],
             "steps": [],
             "_selected_sources": [],
