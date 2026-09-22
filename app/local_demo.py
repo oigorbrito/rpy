@@ -7,7 +7,9 @@ from datetime import datetime, timezone
 from app.auth import configured_bearer_tokens
 from app.claim_evidence import (
     build_material_claims,
+    claim_evidence_is_complete,
     evidence_catalog,
+    load_summary_claim_evidence,
     validate_claim_evidence,
 )
 from app.db import create_pool
@@ -51,24 +53,26 @@ async def seed_demo(database_url: str) -> None:
                 DEMO_CODE,
             )
             if existing is not None and existing["current_version_id"] is not None:
-                summary_ok = await conn.fetchval(
+                summary_row = await conn.fetchrow(
                     """
-                    SELECT EXISTS(
-                        SELECT 1
-                        FROM process_summaries
-                        WHERE process_id = $1
-                          AND version_id = $2
-                          AND COALESCE((validation->>'passed')::boolean, false)
-                          AND structured_output IS NOT NULL
-                          AND EXISTS (
-                              SELECT 1 FROM process_summary_claims c
-                              WHERE c.summary_id = process_summaries.id
-                          )
-                    )
+                    SELECT id, structured_output
+                    FROM process_summaries
+                    WHERE process_id = $1
+                      AND version_id = $2
+                      AND COALESCE((validation->>'passed')::boolean, false)
                     """,
                     existing["id"],
                     existing["current_version_id"],
                 )
+                summary_ok = False
+                if summary_row is not None:
+                    claim_evidence = await load_summary_claim_evidence(
+                        conn, summary_id=summary_row["id"]
+                    )
+                    structured_output = summary_row["structured_output"]
+                    summary_ok = claim_evidence_is_complete(
+                        structured_output, claim_evidence
+                    )
                 if summary_ok:
                     print("RPY LOCAL DEMO: READY")
                     print(f"process={DEMO_CODE}")
