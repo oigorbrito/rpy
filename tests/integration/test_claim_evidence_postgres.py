@@ -439,3 +439,62 @@ async def test_attachment_claim_ref_must_match_authorized_chunk_scope() -> None:
             )
     finally:
         await conn.close()
+
+
+@pytest.mark.asyncio
+async def test_claim_provenance_cascades_when_summary_is_deleted() -> None:
+    assert TEST_DATABASE_URL is not None
+    await migrate(TEST_DATABASE_URL)
+    conn = await asyncpg.connect(TEST_DATABASE_URL)
+    try:
+        await _reset(conn)
+        process_id, version_id = await _process_version(
+            conn, code="0000000-00.2026.8.21.2506"
+        )
+        summary_id = await conn.fetchval(
+            """
+            INSERT INTO process_summaries (
+                process_id, version_id, markdown, validation, model, prompt_version
+            ) VALUES ($1,$2,'# resumo','{"passed":true}'::jsonb,'fake','test-v1')
+            RETURNING id
+            """,
+            process_id,
+            version_id,
+        )
+        claim_row_id = await conn.fetchval(
+            """
+            INSERT INTO process_summary_claims (
+                summary_id, process_id, version_id, claim_id, claim_class, claim_text
+            ) VALUES ($1,$2,$3,'synthesis','synthesis','Síntese.')
+            RETURNING id
+            """,
+            summary_id,
+            process_id,
+            version_id,
+        )
+        await conn.execute(
+            """
+            INSERT INTO process_summary_claim_sources (
+                claim_row_id, summary_id, process_id, version_id,
+                evidence_ref, source_kind, source_order
+            ) VALUES ($1,$2,$3,$4,$5,'process',0)
+            """,
+            claim_row_id,
+            summary_id,
+            process_id,
+            version_id,
+            _ref("p", version_id),
+        )
+
+        await conn.execute("DELETE FROM process_summaries WHERE id=$1", summary_id)
+
+        assert await conn.fetchval(
+            "SELECT count(*) FROM process_summary_claims WHERE summary_id=$1",
+            summary_id,
+        ) == 0
+        assert await conn.fetchval(
+            "SELECT count(*) FROM process_summary_claim_sources WHERE summary_id=$1",
+            summary_id,
+        ) == 0
+    finally:
+        await conn.close()
