@@ -93,6 +93,7 @@ async def test_completion_before_lawsuit_reaches_authenticated_summary_with_work
  async def flaky_generate(client,context,validation_errors=None):
   nonlocal generation_calls; generation_calls+=1
   if generation_calls==1:raise RuntimeError("transient provider failure")
+  _prime_fake_structured_summary(context)
   return f"# Resumo do processo\n\nProcesso {code}. Situação atual registrada nos autos.\n\n## Pontos de atenção\nNenhuma divergência objetiva identificada."
  monkeypatch.setattr(rag,"_generate",flaky_generate); transport=httpx.ASGITransport(app=app)
  try:
