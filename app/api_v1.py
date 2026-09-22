@@ -31,14 +31,14 @@ from app.public_lifecycle import (
 
 router = APIRouter()
 
-_SECRET_SUMMARY_MODEL = "local-deterministic"
-_SECRET_SUMMARY_PROMPT_VERSION = "secret-summary-v1"
+_RESTRICTED_SUMMARY_MODEL = "local-deterministic"
+_RESTRICTED_SUMMARY_PROMPT_VERSION = "secret-summary-v1"
 
 
-def _is_secret_safe_summary(row: Any) -> bool:
+def _is_restricted_local_summary(row: Any) -> bool:
     return (
-        row["model"] == _SECRET_SUMMARY_MODEL
-        and row["prompt_version"] == _SECRET_SUMMARY_PROMPT_VERSION
+        row["model"] == _RESTRICTED_SUMMARY_MODEL
+        and row["prompt_version"] == _RESTRICTED_SUMMARY_PROMPT_VERSION
     )
 
 
@@ -275,7 +275,7 @@ async def _job_payload(
         validation
         and validation.get("passed") is True
         and (
-            (is_secret and _is_secret_safe_summary(row))
+            (is_secret and _is_restricted_local_summary(row))
             or (
                 not is_secret
                 and claim_evidence_is_complete(structured_output, claim_evidence)
@@ -345,7 +345,7 @@ async def _latest_summary_payload(
     )
     is_secret = int(process["secrecy_level"] or 0) > 0
     if is_secret:
-        if not _is_secret_safe_summary(summary):
+        if not _is_restricted_local_summary(summary):
             return None
     elif not claim_evidence_is_complete(structured_output, claim_evidence):
         return None
@@ -551,7 +551,7 @@ async def get_summary_sources(code: str, request: Request):
             )
             if summary_row is not None:
                 is_secret = int(process["secrecy_level"] or 0) > 0
-                if not is_secret or _is_secret_safe_summary(summary_row):
+                if not is_secret or _is_restricted_local_summary(summary_row):
                     summary_id = summary_row["id"]
                     summary_structured_output = (
                         _json_object(summary_row["structured_output"])
