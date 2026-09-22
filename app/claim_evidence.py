@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
+import asyncpg
+
 _EVIDENCE_REF_RE = re.compile(r"^[pma]-[0-9a-f]{32}$")
 _CLAIM_ID_RE = re.compile(
     r"^(?:synthesis|current_status|"
@@ -167,3 +169,106 @@ def validate_claim_evidence(
             errors.append(f"missing material claim provenance: {claim_id}")
 
     return claims, errors
+
+
+async def replace_summary_claim_evidence(
+    conn: asyncpg.Connection,
+    *,
+    summary_id: UUID,
+    process_id: UUID,
+    version_id: UUID,
+    claims: list[MaterialClaim],
+    catalog: dict[str, EvidenceSource],
+) -> None:
+    await conn.execute(
+        "DELETE FROM process_summary_claims WHERE summary_id = $1",
+        summary_id,
+    )
+    if not claims:
+        return
+
+    for claim in claims:
+        claim_row_id = await conn.fetchval(
+            """
+            INSERT INTO process_summary_claims (
+                summary_id, process_id, version_id, claim_id, claim_class, claim_text
+            ) VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING id
+            """,
+            summary_id,
+            process_id,
+            version_id,
+            claim.claim_id,
+            claim.claim_class,
+            claim.text,
+        )
+        if claim_row_id is None:
+            raise RuntimeError("claim row was not returned")
+        records: list[tuple[Any, ...]] = []
+        for source_order, ref in enumerate(claim.evidence_refs):
+            source = catalog.get(ref)
+            if source is None:
+                raise ValueError(f"claim evidence ref is not in validated catalog: {ref}")
+            records.append(
+                (
+                    claim_row_id,
+                    summary_id,
+                    process_id,
+                    version_id,
+                    ref,
+                    source.kind,
+                    source.step_id,
+                    source.attachment_chunk_id,
+                    source_order,
+                )
+            )
+        await conn.executemany(
+            """
+            INSERT INTO process_summary_claim_sources (
+                claim_row_id, summary_id, process_id, version_id,
+                evidence_ref, source_kind, step_id, attachment_chunk_id, source_order
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            """,
+            records,
+        )
+
+
+async def load_summary_claim_evidence(
+    conn: asyncpg.Connection,
+    *,
+    summary_id: UUID,
+) -> list[dict[str, Any]]:
+    rows = await conn.fetch(
+        """
+        SELECT c.id, c.claim_id, c.claim_class, c.claim_text,
+               COALESCE(
+                   jsonb_agg(
+                       jsonb_build_object(
+                           'evidence_ref', s.evidence_ref,
+                           'source_kind', s.source_kind,
+                           'source_order', s.source_order
+                       )
+                       ORDER BY s.source_order
+                   ) FILTER (WHERE s.evidence_ref IS NOT NULL),
+                   '[]'::jsonb
+               ) AS sources
+        FROM process_summary_claims c
+        LEFT JOIN process_summary_claim_sources s ON s.claim_row_id = c.id
+        WHERE c.summary_id = $1
+        GROUP BY c.id, c.claim_id, c.claim_class, c.claim_text
+        ORDER BY c.claim_id
+        """,
+        summary_id,
+    )
+    return [
+        {
+            "claim_id": str(row["claim_id"]),
+            "claim_class": str(row["claim_class"]),
+            "text": str(row["claim_text"]),
+            "evidence_refs": [
+                str(item["evidence_ref"])
+                for item in list(row["sources"] or [])
+            ],
+        }
+        for row in rows
+    ]
