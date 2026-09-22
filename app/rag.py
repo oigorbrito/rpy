@@ -12,6 +12,15 @@ import asyncpg
 
 from app.attachment_context import load_attachment_context, resolve_generation_tenant
 from app.attachment_signals import attachment_status_warnings
+from app.claim_evidence import (
+    EvidenceSource,
+    MaterialClaim,
+    evidence_catalog,
+    movement_evidence_ref,
+    process_evidence_ref,
+    replace_summary_claim_evidence,
+    validate_claim_evidence,
+)
 from app.datajud_provenance import datajud_conflict_warning
 from app.db import create_pool
 from app.embeddings import (
@@ -54,7 +63,7 @@ OPUS_STEP_THRESHOLD = 100
 SHORT_SUMMARY_STEP_MAX = 15
 MEDIUM_SUMMARY_STEP_MAX = 60
 MAX_TOKENS = 4000
-PROMPT_VERSION = "process-summary-v4"
+PROMPT_VERSION = "process-summary-v5"
 SECRET_MODEL = "local-deterministic"
 SECRET_PROMPT_VERSION = "secret-summary-v1"
 REQUESTED_TEMPERATURE = 0.2
@@ -166,6 +175,7 @@ def _serialize_steps(ranked: list[Any]) -> list[dict[str, Any]]:
 
     return [
         {
+            "evidence_ref": movement_evidence_ref(item.step.id),
             "step_number": item.step.step_number,
             "occurred_at": _provider_datetime(item.step.occurred_at),
             "title": (
@@ -251,6 +261,7 @@ async def _load_context(
     tenant_id: UUID | None = None,
 ) -> dict[str, Any]:
     base = await _load_process(pool, process_id, version_id)
+    base["_process_evidence_ref"] = process_evidence_ref(version_id)
 
     if base["secrecy_level"] > 0:
         return {
@@ -263,6 +274,7 @@ async def _load_context(
             "representatives": [],
             "subjects": [],
             "steps": [],
+            "_process_evidence_ref": base["_process_evidence_ref"],
             "_selected_sources": [],
             "_attachment_sources": [],
             "_glossary_sources": [],
@@ -408,6 +420,7 @@ def _provider_payload(context: dict[str, Any]) -> tuple[dict[str, Any], list[Any
         }
         raw_steps = list(context.get("steps", []))
 
+    raw_process["evidence_ref"] = context.get("_process_evidence_ref")
     rendered, flags = model_view_value(
         {"process": raw_process, "steps": raw_steps}
     )
@@ -435,7 +448,7 @@ def _prompt_json(value: Any) -> str:
 
 
 def _validate_provider_summary(text: str, context: dict[str, Any]) -> ValidationResult:
-    return validar(
+    result = validar(
         text=text,
         code=context["code"],
         parties=context.get("parties", []),
@@ -457,6 +470,13 @@ def _validate_provider_summary(text: str, context: dict[str, Any]) -> Validation
             "Anexos",
         ),
     )
+    parsed = context.get("_parsed_summary")
+    if not isinstance(parsed, dict):
+        evidence_errors = ["structured summary claim provenance is unavailable"]
+    else:
+        _, evidence_errors = validate_claim_evidence(parsed, context)
+    errors = [*result.errors, *evidence_errors]
+    return ValidationResult(passed=not errors, errors=errors)
 
 
 def summary_volume_instruction(step_count: int) -> str:
@@ -621,6 +641,7 @@ async def _generate(
         payload = parse_structured_summary(raw)
     except ValueError as exc:
         raise PermanentTaskError("provider returned an invalid structured summary") from exc
+    context["_parsed_summary"] = payload
     context["_structured_summary"] = structured_summary_document(payload, context)
     return render_structured_summary(payload, context)
 
@@ -643,6 +664,8 @@ async def _persist_summary(
     glossary_sources: list[dict[str, Any]] | None = None,
     unicode_security_flags: list[str] | None = None,
     structured_output: dict[str, Any] | None = None,
+    claims: list[MaterialClaim] | None = None,
+    evidence_sources: dict[str, EvidenceSource] | None = None,
 ) -> bool:
     async with conn.transaction():
         row = await conn.fetchrow(
@@ -710,6 +733,14 @@ async def _persist_summary(
             version_id=version_id,
             sources=attachment_sources or [],
         )
+        await replace_summary_claim_evidence(
+            conn,
+            summary_id=row["id"],
+            process_id=process_id,
+            version_id=version_id,
+            claims=claims or [],
+            catalog=evidence_sources or {},
+        )
         await replace_summary_glossary_sources(
             conn,
             summary_id=row["id"],
@@ -737,6 +768,14 @@ async def _load_publishable_summary(
             WHERE ps.process_id = $1
               AND ps.version_id = $2
               AND COALESCE((ps.validation->>'passed')::boolean, false) = true
+              AND (
+                    p.secrecy_level > 0
+                    OR EXISTS (
+                        SELECT 1
+                        FROM process_summary_claims c
+                        WHERE c.summary_id = ps.id
+                    )
+              )
             """,
             process_id,
             version_id,
@@ -832,6 +871,16 @@ async def generate_summary(
                 except (TypeError, ValueError):
                     cost_usd = None
 
+    claims: list[MaterialClaim] = []
+    evidence_sources: dict[str, EvidenceSource] = {}
+    if not _is_secret_context(context) and result.passed:
+        parsed = context.get("_parsed_summary")
+        if isinstance(parsed, dict):
+            claims, claim_errors = validate_claim_evidence(parsed, context)
+            if claim_errors:
+                raise RuntimeError("validated summary has invalid claim evidence")
+            evidence_sources = evidence_catalog(context)
+
     generation_ms = max(0, round((perf_counter() - started) * 1000))
     validation = {"passed": result.passed, "errors": result.errors}
     async with pool.acquire() as conn:
@@ -856,6 +905,8 @@ async def generate_summary(
                 if isinstance(context.get("_structured_summary"), dict)
                 else None
             ),
+            claims=claims,
+            evidence_sources=evidence_sources,
         )
     return {
         "validation": validation,
