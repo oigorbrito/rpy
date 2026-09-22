@@ -256,6 +256,7 @@ async def _job_payload(
             or claim_evidence_is_complete(structured_output, claim_evidence)
         )
     )
+    public_claim_evidence = claim_evidence if publishable else []
     payload = {
         "job_id": str(row["id"]),
         "poll_url": f"/v1/resumos/{row['id']}",
@@ -266,7 +267,7 @@ async def _job_payload(
         "usage": _summary_usage(row),
         "flags": flags,
         "validation": validation,
-        "claim_evidence": claim_evidence,
+        "claim_evidence": public_claim_evidence,
         "format": str(row["response_format"]),
         "iaSummary": (
             _summary_representation(
@@ -504,10 +505,11 @@ async def get_summary_sources(code: str, request: Request):
         if process is None:
             raise HTTPException(status_code=404, detail="process not found")
         summary_id = None
+        summary_structured_output = None
         if process["current_version_id"] is not None:
-            summary_id = await conn.fetchval(
+            summary_row = await conn.fetchrow(
                 """
-                SELECT id
+                SELECT id, structured_output
                 FROM process_summaries
                 WHERE process_id = $1
                   AND version_id = $2
@@ -516,6 +518,13 @@ async def get_summary_sources(code: str, request: Request):
                 process["id"],
                 process["current_version_id"],
             )
+            if summary_row is not None:
+                summary_id = summary_row["id"]
+                summary_structured_output = (
+                    _json_object(summary_row["structured_output"])
+                    if summary_row["structured_output"] is not None
+                    else None
+                )
         sources = await _load_sources(
             conn,
             process_id=process["id"],
@@ -537,6 +546,13 @@ async def get_summary_sources(code: str, request: Request):
             if summary_id is not None
             else []
         )
+        if (
+            int(process["secrecy_level"] or 0) <= 0
+            and not claim_evidence_is_complete(
+                summary_structured_output, claim_evidence
+            )
+        ):
+            claim_evidence = []
         flags = {"secrecy": int(process["secrecy_level"] or 0) > 0}
         flags.update(
             await _load_attachment_flags(
