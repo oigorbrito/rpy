@@ -104,6 +104,35 @@ pytest -q tests/integration
 
 Antes de abrir PR, leia `CONTRIBUTING.md`. Mudanças arquiteturais, de migration, fila, retrieval, provider, sigilo ou deployment também devem respeitar `AGENTS.md`.
 
+## Demo local sem custo
+
+Para testar o frontend e o fluxo principal sem Judit, Anthropic, OpenAI ou Cohere,
+use o seed sintético local. Ele grava somente dados fictícios, usa o tenant do
+`dev-local-token` e persiste um resumo já validado com custo registrado como zero.
+
+Com a stack local já migrada:
+
+```powershell
+docker compose --profile demo run --rm demo-seed
+```
+
+Saída esperada:
+
+```text
+RPY LOCAL DEMO: READY
+process=0000000-00.2026.8.21.0001
+token=dev-local-token
+providers=0
+```
+
+Depois abra `http://localhost:8000/`, informe `dev-local-token` e consulte
+`0000000-00.2026.8.21.0001`.
+
+O serviço `demo-seed` força as credenciais de providers externos para vazio e
+falha se o script for executado com credenciais externas habilitadas. Ele pertence
+somente ao Compose de desenvolvimento; `compose.production.yaml` não contém esse
+serviço.
+
 ## Modo com providers reais — opcional
 
 Use apenas ambiente controlado, credenciais rotacionáveis e orçamento explícito. Nunca use chaves reais no CI ou em exemplos commitados.
