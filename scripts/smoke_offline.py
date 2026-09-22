@@ -6,6 +6,8 @@ from uuid import uuid4
 import httpx
 import app.rag as rag
 import app.process_requests as process_requests
+from app.claim_evidence import build_material_claims
+from app.summary_output import structured_summary_document
 from app.api import app
 from app.db import create_pool
 from app.migrations import migrate
@@ -28,6 +30,24 @@ async def main() -> None:
         def forbidden(*_args, **_kwargs): raise AssertionError("offline smoke invoked a paid provider")
         async def fake_generate(_client, _context, validation_errors=None):
             assert validation_errors is None
+            payload = {
+                "synthesis": f"Processo {code}. Situação processual registrada.",
+                "timeline": [],
+                "current_status": "Situação processual registrada.",
+                "attention": ["Nenhuma divergência objetiva identificada."],
+                "decisions": [],
+                "deadlines": [],
+                "related_processes": [],
+                "attachments": [],
+            }
+            payload["claims"] = build_material_claims(
+                payload,
+                evidence_refs=[str(_context["_process_evidence_ref"])],
+            )
+            _context["_parsed_summary"] = payload
+            _context["_structured_summary"] = structured_summary_document(
+                payload, _context
+            )
             return f"# Resumo do processo\n\nProcesso {code}. Situação processual registrada.\n\n## Pontos de atenção\nNenhuma divergência objetiva identificada."
         rag.anthropic_client = lambda *_args, **_kwargs: object()
         rag._generate = fake_generate
