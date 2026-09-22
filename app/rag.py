@@ -679,6 +679,10 @@ async def _persist_summary(
                           created_at = NOW()
             WHERE COALESCE((process_summaries.validation->>'passed')::boolean, false) = false
                OR (
+                    process_summaries.structured_output IS NULL
+                    AND EXCLUDED.structured_output IS NOT NULL
+               )
+               OR (
                     COALESCE((EXCLUDED.validation->>'passed')::boolean, false) = true
                     AND (
                         process_summaries.prompt_version IS DISTINCT FROM EXCLUDED.prompt_version
