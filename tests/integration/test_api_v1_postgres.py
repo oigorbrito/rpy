@@ -245,7 +245,7 @@ async def test_v1_idempotency_states_authorization_and_sanitized_sources(monkeyp
                 version_id,
                 json.dumps(
                     {
-                        "schema_version": 1,
+                        "schema_version": 2,
                         "process": {
                             "cnj": other_code,
                             "class_name": "Procedimento Comum",
@@ -262,10 +262,55 @@ async def test_v1_idempotency_states_authorization_and_sanitized_sources(monkeyp
                             "deadlines": [],
                             "related_processes": [],
                             "attachments": [],
+                            "claims": [
+                                {
+                                    "claim_id": "synthesis",
+                                    "text": "Resumo válido",
+                                    "evidence_refs": [f"p-{version_id.hex}"],
+                                },
+                                {
+                                    "claim_id": "current_status",
+                                    "text": "Situação registrada.",
+                                    "evidence_refs": [f"p-{version_id.hex}"],
+                                },
+                            ],
                         },
                     }
                 ),
             )
+            for claim_id, claim_class, claim_text in (
+                ("synthesis", "synthesis", "Resumo válido"),
+                ("current_status", "current_status", "Situação registrada."),
+            ):
+                claim_row_id = await conn.fetchval(
+                    """
+                    INSERT INTO process_summary_claims (
+                        summary_id, process_id, version_id,
+                        claim_id, claim_class, claim_text
+                    ) VALUES ($1,$2,$3,$4,$5,$6)
+                    RETURNING id
+                    """,
+                    summary_id,
+                    process_id,
+                    version_id,
+                    claim_id,
+                    claim_class,
+                    claim_text,
+                )
+                await conn.execute(
+                    """
+                    INSERT INTO process_summary_claim_sources (
+                        claim_row_id, summary_id, process_id, version_id,
+                        evidence_ref, source_kind, source_order
+                    ) VALUES ($1,$2,$3,$4,$5,'process',0)
+                    """,
+                    claim_row_id,
+                    summary_id,
+                    process_id,
+                    version_id,
+                    f"p-{version_id.hex}",
+                )
+
             completed_request, _ = await create_or_get_summary_request(
                 conn,
                 tenant_id=tenant_a,
@@ -388,7 +433,7 @@ async def test_v1_idempotency_states_authorization_and_sanitized_sources(monkeyp
             )
             assert json_job.status_code == 200
             assert json_job.json()["format"] == "json"
-            assert json_job.json()["iaSummary"]["schema_version"] == 1
+            assert json_job.json()["iaSummary"]["schema_version"] == 2
             assert json_job.json()["iaSummary"]["process"]["cnj"] == other_code
             assert json_job.json()["iaSummary"]["summary"]["synthesis"] == "Resumo válido"
 
