@@ -35,7 +35,7 @@ from app.provenance import (
 )
 from app.reranker_provider import configured_reranker_scorer
 from app.reranking import RERANK_CANDIDATE_LIMIT, select_context_steps
-from app.retrieval import lexical_search, load_steps, vector_search
+from app.retrieval import load_steps, vector_search
 from app.summary_output import (
     SUMMARY_OUTPUT_SCHEMA,
     parse_structured_summary,
@@ -298,17 +298,8 @@ async def _load_context(
     reranker_scorer = configured_reranker_scorer() if len(steps) > 40 else None
     retrieval_limit = RERANK_CANDIDATE_LIMIT if reranker_scorer is not None else 40
 
-    lexical_scores: dict[UUID, float] | None = None
     vector_scores: dict[UUID, float] | None = None
     if len(steps) > 40:
-        async with pool.acquire() as conn:
-            lexical_scores = await lexical_search(
-                conn,
-                version_id=version_id,
-                query=RETRIEVAL_QUERY,
-                limit=retrieval_limit,
-            )
-
         if vector_retrieval_configured():
             await ensure_step_embeddings(pool, version_id=version_id)
             query_vector = await embed_query(RETRIEVAL_QUERY)
@@ -323,7 +314,6 @@ async def _load_context(
     ranked = await select_context_steps(
         query=RETRIEVAL_QUERY,
         steps=steps,
-        lexical_scores=lexical_scores,
         vector_scores=vector_scores,
         scorer=reranker_scorer,
     )
