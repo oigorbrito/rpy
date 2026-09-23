@@ -539,19 +539,91 @@ async def test_v1_idempotency_states_authorization_and_sanitized_sources(monkeyp
             assert incomplete_job.status_code == 200
             assert incomplete_job.json()["iaSummary"] is None
             assert incomplete_job.json()["claim_evidence"] == []
-            assert all("used_for_summary" not in item for item in incomplete_job.json()["sources"])
+            assert all(
+                "used_for_summary" not in item
+                for item in incomplete_job.json()["sources"]
+            )
 
             incomplete_sources = await client.get(
                 f"/v1/processos/{other_code}/fontes", headers=auth_a
             )
             assert incomplete_sources.status_code == 200
             assert incomplete_sources.json()["claim_evidence"] == []
-            assert all("used_for_summary" not in item for item in incomplete_sources.json()["sources"])
+            assert all(
+                "used_for_summary" not in item
+                for item in incomplete_sources.json()["sources"]
+            )
 
             incomplete_latest = await client.get(
                 f"/v1/processos/{other_code}/resumo", headers=auth_a
             )
             assert incomplete_latest.status_code == 404
+
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE processes SET secrecy_level=1 WHERE id=$1",
+                    process_id,
+                )
+                await conn.execute(
+                    """
+                    UPDATE process_summaries
+                    SET markdown=$2, model=$3, prompt_version=$4
+                    WHERE id=$1
+                    """,
+                    summary_id,
+                    "# Resumo sigiloso local",
+                    RESTRICTED_MODEL,
+                    RESTRICTED_PROMPT_VERSION,
+                )
+                await conn.execute(
+                    "DELETE FROM process_summary_claims WHERE summary_id=$1",
+                    summary_id,
+                )
+
+            restricted_job = await client.get(
+                f"/v1/resumos/{completed_request.id}", headers=auth_a
+            )
+            assert restricted_job.status_code == 200
+            assert restricted_job.json()["iaSummary"] == "# Resumo sigiloso local"
+            assert restricted_job.json()["claim_evidence"] == []
+
+            restricted_latest = await client.get(
+                f"/v1/processos/{other_code}/resumo", headers=auth_a
+            )
+            assert restricted_latest.status_code == 200
+            assert restricted_latest.json()["iaSummary"] == "# Resumo sigiloso local"
+
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE processes SET secrecy_level=0 WHERE id=$1",
+                    process_id,
+                )
+
+            public_after_restricted = await client.get(
+                f"/v1/resumos/{completed_request.id}", headers=auth_a
+            )
+            assert public_after_restricted.status_code == 200
+            assert public_after_restricted.json()["iaSummary"] is None
+            assert public_after_restricted.json()["claim_evidence"] == []
+            assert all(
+                "used_for_summary" not in item
+                for item in public_after_restricted.json()["sources"]
+            )
+
+            public_after_restricted_sources = await client.get(
+                f"/v1/processos/{other_code}/fontes", headers=auth_a
+            )
+            assert public_after_restricted_sources.status_code == 200
+            assert public_after_restricted_sources.json()["claim_evidence"] == []
+            assert all(
+                "used_for_summary" not in item
+                for item in public_after_restricted_sources.json()["sources"]
+            )
+
+            public_after_restricted_latest = await client.get(
+                f"/v1/processos/{other_code}/resumo", headers=auth_a
+            )
+            assert public_after_restricted_latest.status_code == 404
 
             healthz = await client.get("/healthz")
             readyz = await client.get("/readyz")
