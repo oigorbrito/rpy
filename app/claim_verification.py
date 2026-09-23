@@ -326,7 +326,7 @@ def verify_material_claims(
 
     for claim in claims:
         relations: list[ClaimRelationVerification] = []
-        total_fact_count = 0
+        cited_evidence: list[VerificationEvidence] = []
         for ref in claim.evidence_refs:
             evidence = catalog.get(ref)
             if evidence is None:
@@ -340,12 +340,12 @@ def verify_material_claims(
                     )
                 )
                 continue
-            status, reason, fact_count = _relation_status(
+            cited_evidence.append(evidence)
+            status, reason, _ = _relation_status(
                 claim_text=claim.text,
                 evidence=evidence,
                 known_parties=known_parties,
             )
-            total_fact_count = max(total_fact_count, fact_count)
             excerpt, excerpt_sha256 = _excerpt(evidence.text)
             relations.append(
                 ClaimRelationVerification(
@@ -361,25 +361,84 @@ def verify_material_claims(
                 )
             )
 
-        statuses = {relation.status for relation in relations}
-        if "contradicted" in statuses:
-            status = "contradicted"
-            reason = "at_least_one_cited_source_contradicts_deterministic_fact"
-        elif "supported" in statuses:
+        claim_cnjs = _cnjs(claim.text)
+        claim_dates = _dates(claim.text)
+        claim_amounts = _amounts(claim.text)
+        claim_parties = _party_names_in_text(claim.text, known_parties)
+        fact_count = (
+            len(claim_cnjs)
+            + len(claim_dates)
+            + len(claim_amounts)
+            + len(claim_parties)
+        )
+
+        normalized_claim = _normalized_text(claim.text)
+        exact_support = any(
+            normalized_claim
+            and normalized_claim in _normalized_text(evidence.text)
+            for evidence in cited_evidence
+        )
+
+        combined_cnjs = frozenset(
+            value for evidence in cited_evidence for value in evidence.cnjs
+        )
+        combined_dates = frozenset(
+            value for evidence in cited_evidence for value in evidence.dates
+        )
+        combined_amounts = frozenset(
+            value for evidence in cited_evidence for value in evidence.amounts
+        )
+        combined_parties = frozenset(
+            value for evidence in cited_evidence for value in evidence.party_names
+        )
+
+        process_evidence = [
+            evidence for evidence in cited_evidence if evidence.kind == "process"
+        ]
+        process_cnjs = frozenset(
+            value for evidence in process_evidence for value in evidence.cnjs
+        )
+        process_amounts = frozenset(
+            value for evidence in process_evidence for value in evidence.amounts
+        )
+
+        if exact_support:
             status = "supported"
-            reason = "at_least_one_cited_source_supports_deterministic_fact"
-        elif "insufficient" in statuses:
-            status = "insufficient"
-            reason = "cited_sources_do_not_support_deterministic_fact"
-        else:
+            reason = "exact_text_present_in_cited_source"
+        elif fact_count == 0:
             status = "not_evaluated"
             reason = "no_deterministic_fact_anchor"
+        elif (
+            claim_cnjs
+            and not claim_cnjs.issubset(combined_cnjs)
+            and process_cnjs
+        ):
+            status = "contradicted"
+            reason = "process_cnj_mismatch"
+        elif (
+            claim_amounts
+            and not claim_amounts.issubset(combined_amounts)
+            and process_amounts
+        ):
+            status = "contradicted"
+            reason = "process_amount_mismatch"
+        elif (
+            claim_cnjs.issubset(combined_cnjs)
+            and claim_dates.issubset(combined_dates)
+            and claim_amounts.issubset(combined_amounts)
+            and claim_parties.issubset(combined_parties)
+        ):
+            status = "supported"
+            reason = "deterministic_facts_present_across_cited_sources"
+        else:
+            status = "insufficient"
+            reason = "cited_sources_do_not_support_all_deterministic_facts"
 
         results[claim.claim_id] = ClaimVerification(
             claim_id=claim.claim_id,
             status=status,
             reason=reason,
-            deterministic_fact_count=total_fact_count,
+            deterministic_fact_count=fact_count,
             relations=tuple(relations),
         )
     return results
