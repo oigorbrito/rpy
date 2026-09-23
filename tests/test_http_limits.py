@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+import os
+
 import pytest
+from hypothesis import given, settings, strategies as st
 
 from app.http_limits import (
     DEFAULT_JUDIT_WEBHOOK_MAX_BODY_BYTES,
@@ -120,3 +124,55 @@ async def test_body_at_limit_reaches_app(monkeypatch) -> None:
     )
 
     assert sent[0]["status"] == 204
+
+
+@settings(max_examples=96, deadline=None)
+@given(
+    chunks=st.lists(st.binary(min_size=0, max_size=16), min_size=1, max_size=8),
+    limit=st.integers(min_value=1, max_value=64),
+    include_underdeclared_length=st.booleans(),
+)
+def test_streamed_webhook_limit_is_invariant_to_chunk_boundaries(
+    chunks: list[bytes],
+    limit: int,
+    include_underdeclared_length: bool,
+) -> None:
+    total = sum(len(chunk) for chunk in chunks)
+    previous = os.environ.get("JUDIT_WEBHOOK_MAX_BODY_BYTES")
+    os.environ["JUDIT_WEBHOOK_MAX_BODY_BYTES"] = str(limit)
+
+    async def app(scope, receive, send):
+        while True:
+            message = await receive()
+            if message["type"] != "http.request" or not message.get("more_body", False):
+                break
+        await send({"type": "http.response.start", "status": 204, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    try:
+        declared_length = min(total, limit) if include_underdeclared_length else None
+        middleware = JuditWebhookBodyLimitMiddleware(app)
+        messages = [
+            {
+                "type": "http.request",
+                "body": chunk,
+                "more_body": index < len(chunks) - 1,
+            }
+            for index, chunk in enumerate(chunks)
+        ]
+        sent = asyncio.run(
+            _run(
+                middleware,
+                _scope(content_length=declared_length),
+                messages,
+            )
+        )
+    finally:
+        if previous is None:
+            os.environ.pop("JUDIT_WEBHOOK_MAX_BODY_BYTES", None)
+        else:
+            os.environ["JUDIT_WEBHOOK_MAX_BODY_BYTES"] = previous
+
+    starts = [message for message in sent if message["type"] == "http.response.start"]
+    assert len(starts) == 1  # nosec B101
+    assert starts[0]["status"] == (413 if total > limit else 204)  # nosec B101
