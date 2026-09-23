@@ -43,6 +43,9 @@ _MAX_EXCERPT_CHARS = 4000
 VERIFICATION_STATUSES = frozenset(
     {"supported", "contradicted", "insufficient", "not_evaluated"}
 )
+_INTRINSICALLY_MATERIAL_CLAIM_CLASSES = frozenset(
+    {"procedural_event", "decision", "deadline", "related_process", "attachment"}
+)
 
 
 class ClaimLike(Protocol):
@@ -592,6 +595,9 @@ def verification_errors(
             errors.append(f"claim contradicted by cited evidence: {claim_id}")
         elif result.status == "insufficient" and result.deterministic_fact_count > 0:
             errors.append(f"claim has insufficient cited evidence: {claim_id}")
-        elif result.status == "not_evaluated" and result.claim_class != "attention":
+        elif (
+            result.status == "not_evaluated"
+            and result.claim_class in _INTRINSICALLY_MATERIAL_CLAIM_CLASSES
+        ):
             errors.append(f"material claim was not evaluated: {claim_id}")
     return errors
