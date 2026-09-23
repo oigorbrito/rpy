@@ -6,8 +6,8 @@ CREATE TABLE IF NOT EXISTS process_summary_claims (
     claim_id TEXT NOT NULL CHECK (length(trim(claim_id)) > 0),
     claim_class TEXT NOT NULL CHECK (
         claim_class IN (
-            'synthesis', 'current_status', 'procedural_event', 'decision',
-            'deadline', 'related_process', 'attachment'
+            'synthesis', 'current_status', 'procedural_event', 'attention',
+            'decision', 'deadline', 'related_process', 'attachment'
         )
     ),
     claim_text TEXT NOT NULL CHECK (length(trim(claim_text)) > 0),
