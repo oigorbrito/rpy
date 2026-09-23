@@ -155,6 +155,19 @@ class _FakeMessages:
             payload,
             evidence_refs=[str(process["evidence_ref"])],
         )
+        if milestone:
+            movement_ref = next(
+                (
+                    str(step.get("evidence_ref") or "")
+                    for step in steps
+                    if milestone in str(step.get("text") or "")
+                ),
+                "",
+            )
+            if movement_ref:
+                for claim in payload["claims"]:
+                    if claim["claim_id"] == "timeline:0":
+                        claim["evidence_refs"] = [movement_ref]
         text = json.dumps(payload, ensure_ascii=False)
         return SimpleNamespace(content=[SimpleNamespace(type="text", text=text)])
 
