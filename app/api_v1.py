@@ -423,6 +423,7 @@ async def _latest_summary_payload(
             structured_output=summary["structured_output"],
             response_format=response_format,
             hide_claim_evidence=is_secret,
+            claim_evidence=claim_evidence,
         ),
     }
 
