@@ -16,6 +16,7 @@ from app.claim_evidence import (
     process_evidence_ref,
     validate_claim_evidence,
 )
+from app.claim_verification import verify_material_claims
 from app.rag import (
     EMPTY_STEPS_WARNING,
     _generate,
@@ -178,6 +179,12 @@ async def evaluate_generation(cases: list[dict[str, Any]]) -> dict[str, Any]:
     secret_provider_calls = 0
     material_claims = 0
     structurally_unsupported_claims = 0
+    verification_counts = {
+        "supported": 0,
+        "contradicted": 0,
+        "insufficient": 0,
+        "not_evaluated": 0,
+    }
     per_case: dict[str, dict[str, Any]] = {}
 
     for case in cases:
@@ -212,6 +219,12 @@ async def evaluate_generation(cases: list[dict[str, Any]]) -> dict[str, Any]:
 
         claim_total = 0
         claim_unsupported = 0
+        case_verification_counts = {
+            "supported": 0,
+            "contradicted": 0,
+            "insufficient": 0,
+            "not_evaluated": 0,
+        }
         parsed = context.get("_parsed_summary")
         if isinstance(parsed, dict):
             expected_claims = expected_material_claims(parsed)
@@ -228,6 +241,12 @@ async def evaluate_generation(cases: list[dict[str, Any]]) -> dict[str, Any]:
             if claim_errors and claim_unsupported == 0:
                 claim_unsupported = claim_total
             structurally_unsupported_claims += claim_unsupported
+
+            if not claim_errors:
+                verification = verify_material_claims(validated_claims, context)
+                for result in verification.values():
+                    verification_counts[result.status] += 1
+                    case_verification_counts[result.status] += 1
 
         if validation.passed:
             final_valid += 1
@@ -247,6 +266,7 @@ async def evaluate_generation(cases: list[dict[str, Any]]) -> dict[str, Any]:
             ),
             "material_claims": claim_total,
             "structurally_unsupported_claims": claim_unsupported,
+            "claim_verification_counts": case_verification_counts,
         }
 
     return {
@@ -267,6 +287,21 @@ async def evaluate_generation(cases: list[dict[str, Any]]) -> dict[str, Any]:
                 if material_claims
                 else 0.0
             ),
+            "deterministic_supported_claim_rate": (
+                verification_counts["supported"] / material_claims
+                if material_claims
+                else 0.0
+            ),
+            "semantic_unverified_claim_rate": (
+                (
+                    verification_counts["contradicted"]
+                    + verification_counts["insufficient"]
+                    + verification_counts["not_evaluated"]
+                )
+                / material_claims
+                if material_claims
+                else 0.0
+            ),
         },
         "counts": {
             "public_cases": public_cases,
@@ -279,6 +314,7 @@ async def evaluate_generation(cases: list[dict[str, Any]]) -> dict[str, Any]:
             "secret_provider_calls": secret_provider_calls,
             "material_claims": material_claims,
             "structurally_unsupported_claims": structurally_unsupported_claims,
+            "claim_verification": verification_counts,
         },
         "case_metrics": per_case,
     }
