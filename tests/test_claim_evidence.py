@@ -82,6 +82,11 @@ def test_valid_claims_cover_process_movement_and_attachment_refs() -> None:
             "evidence_refs": [movement_evidence_ref(STEP_ID)],
         },
         {
+            "claim_id": "attention:0",
+            "text": payload["attention"][0],
+            "evidence_refs": [process_evidence_ref(VERSION_ID)],
+        },
+        {
             "claim_id": "decisions:0",
             "text": payload["decisions"][0],
             "evidence_refs": [movement_evidence_ref(STEP_ID)],
@@ -100,6 +105,7 @@ def test_valid_claims_cover_process_movement_and_attachment_refs() -> None:
         "synthesis",
         "current_status",
         "timeline:0",
+        "attention:0",
         "decisions:0",
         "attachments:0",
     ]
@@ -164,6 +170,22 @@ def test_deterministic_builder_covers_every_material_field() -> None:
         "attachments:0",
     ]
     assert all(item["evidence_refs"] == refs for item in built)
+
+
+def test_attention_items_require_claim_provenance() -> None:
+    payload = _payload()
+    complete = build_material_claims(
+        payload,
+        evidence_refs=[movement_evidence_ref(STEP_ID)],
+    )
+    assert any(item["claim_id"] == "attention:0" for item in complete)
+
+    without_attention = [
+        item for item in complete if item["claim_id"] != "attention:0"
+    ]
+    structured = _structured_output(payload, complete)
+
+    assert claim_evidence_is_complete(structured, without_attention) is False
 
 
 def _structured_output(
