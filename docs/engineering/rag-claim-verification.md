@@ -52,8 +52,9 @@ For every cited claim/evidence relation the application records one of:
 - `supported`: exact normalized claim text is present in the cited provider-visible
   source, or all deterministic fact anchors checked for the claim are present across
   its cited sources;
-- `contradicted`: a cited canonical process source contains a conflicting deterministic
-  CNJ or amount. Any cited contradiction makes the aggregate claim contradicted;
+- `contradicted`: a cited canonical process source conflicts with an unambiguous
+  deterministic field such as labeled process amount or total movement count. Any cited
+  contradiction makes the aggregate claim contradicted;
 - `insufficient`: the claim contains a deterministic CNJ, date, amount, known party, or
   movement-count anchor that is not present in the cited evidence set;
 - `not_evaluated`: no deterministic fact anchor is available, so the application does
