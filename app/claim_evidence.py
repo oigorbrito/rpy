@@ -16,10 +16,11 @@ from app.summary_output import (
 _EVIDENCE_REF_RE = re.compile(r"^[pma]-[0-9a-f]{32}$")
 _CLAIM_ID_RE = re.compile(
     r"^(?:synthesis|current_status|"
-    r"(?:timeline|decisions|deadlines|related_processes|attachments):[0-9]+)$"
+    r"(?:timeline|attention|decisions|deadlines|related_processes|attachments):[0-9]+)$"
 )
 _MATERIAL_LIST_FIELDS = (
     "timeline",
+    "attention",
     "decisions",
     "deadlines",
     "related_processes",
@@ -61,6 +62,7 @@ def _claim_class(claim_id: str) -> str:
         "synthesis": "synthesis",
         "current_status": "current_status",
         "timeline": "procedural_event",
+        "attention": "attention",
         "decisions": "decision",
         "deadlines": "deadline",
         "related_processes": "related_process",
