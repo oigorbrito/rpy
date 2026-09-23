@@ -247,6 +247,8 @@ _RUNTIME_LIMITS = {
 
 
 def _finite_positive_float(value: Any, *, label: str) -> float:
+    if isinstance(value, bool):
+        _fail(f"{label} must be numeric")
     try:
         rendered = float(value)
     except (TypeError, ValueError):
