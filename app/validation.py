@@ -9,6 +9,8 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from app.summary_contract import CONDITIONAL_SECTION_ORDER, CORE_SECTION_ORDER
+
 _CPF_CNPJ_RE = re.compile(
     r"(?<!\d)(?:\d{3}\.?\d{3}\.?\d{3}-?\d{2}|\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2})(?!\d)"
 )
@@ -80,20 +82,6 @@ _META_OUTPUT_MARKERS = (
     "ignore as instrucoes anteriores",
     "as a language model",
     "como modelo de linguagem",
-)
-
-_CORE_SECTION_ORDER = (
-    "Partes",
-    "Classe",
-    "Assuntos",
-    "Movimentações",
-    "Pontos de atenção",
-)
-_CONDITIONAL_SECTION_ORDER = (
-    "Decisões",
-    "Prazos em curso",
-    "Processos relacionados",
-    "Anexos",
 )
 
 
@@ -228,7 +216,7 @@ def _document_title_errors(text: str) -> list[str]:
 def _core_section_order_errors(text: str) -> list[str]:
     canonical = {
         _normalize_party_name(title): (index, title)
-        for index, title in enumerate(_CORE_SECTION_ORDER)
+        for index, title in enumerate(CORE_SECTION_ORDER)
     }
     observed: list[tuple[int, int, str]] = []
     seen: set[str] = set()
@@ -253,7 +241,7 @@ def _core_section_order_errors(text: str) -> list[str]:
         if order < previous_order:
             return [
                 "core sections must follow order: "
-                + " → ".join(_CORE_SECTION_ORDER)
+                + " → ".join(CORE_SECTION_ORDER)
                 + f"; out-of-order section: {title}"
             ]
         previous_order = order
@@ -263,7 +251,7 @@ def _core_section_order_errors(text: str) -> list[str]:
 def _conditional_section_order_errors(text: str) -> list[str]:
     expected = {
         _normalize_party_name(title): index
-        for index, title in enumerate(_CONDITIONAL_SECTION_ORDER)
+        for index, title in enumerate(CONDITIONAL_SECTION_ORDER)
     }
     observed: list[tuple[int, int, str]] = []
     for match in _HEADING_RE.finditer(text):
@@ -277,7 +265,7 @@ def _conditional_section_order_errors(text: str) -> list[str]:
         if order < previous_order:
             return [
                 "conditional sections must follow order: "
-                + " → ".join(_CONDITIONAL_SECTION_ORDER)
+                + " → ".join(CONDITIONAL_SECTION_ORDER)
                 + f"; out-of-order section: {title}"
             ]
         previous_order = order
