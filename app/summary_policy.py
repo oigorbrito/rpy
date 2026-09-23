@@ -18,6 +18,23 @@ RESTRICTED_HEADER_FIELDS = (
 )
 
 
+def restricted_summary_payload() -> dict[str, Any]:
+    return {
+        "synthesis": "Os detalhes processuais foram restringidos por sigilo.",
+        "timeline": [],
+        "current_status": (
+            "O contexto público disponível está limitado pelos dados permitidos "
+            "para processo sigiloso."
+        ),
+        "attention": ["Processo com detalhes restringidos por sigilo."],
+        "decisions": [],
+        "deadlines": [],
+        "related_processes": [],
+        "attachments": [],
+        "claims": [],
+    }
+
+
 def is_restricted_local_summary(
     row: Mapping[str, Any],
     *,
@@ -46,9 +63,12 @@ def is_restricted_local_summary(
         }
     except (KeyError, TypeError, ValueError):
         return False
-    return structured_summary_document_matches_process(
-        structured_output,
-        restricted_context,
+    return (
+        structured_summary_document_matches_process(
+            structured_output,
+            restricted_context,
+        )
+        and structured_output["summary"] == restricted_summary_payload()
     )
 
 
