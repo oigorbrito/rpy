@@ -18,6 +18,7 @@ def _context() -> dict:
         "class_name": "Procedimento Comum",
         "header": {"amount": "1000.00"},
         "parties": [{"name": "Maria da Silva", "side": "active"}],
+        "step_count": 1,
         "_process_evidence_ref": process_evidence_ref(VERSION_ID),
         "_selected_sources": [
             {
