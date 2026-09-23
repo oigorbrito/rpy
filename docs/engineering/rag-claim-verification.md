@@ -69,10 +69,11 @@ claims participate in the existing single correction attempt; a second failure r
 persisted in the normal validation result. `not_evaluated` remains publishable in this
 baseline and is explicitly measurable rather than silently promoted to `supported`.
 
-When available, the durable audit relation stores a bounded literal evidence excerpt,
-its SHA-256, and attachment page/character ranges. Literal excerpts remain internal:
-the public v1 JSON representation exposes verification status/reason, refs, hashes and
-positions but strips the excerpt itself.
+When available, the durable audit layer stores a bounded literal evidence excerpt in a
+worker/backup-only table. The API-readable claim relation stores its SHA-256 and available
+attachment page/character ranges. Literal excerpts remain internal: the public v1 JSON
+representation exposes verification status/reason, refs, hashes and positions but never
+the excerpt itself.
 
 ## Remaining semantic boundary
 
