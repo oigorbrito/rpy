@@ -95,6 +95,27 @@ class ClaimVerification:
     relations: tuple[ClaimRelationVerification, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class _ClaimFacts:
+    normalized_text: str
+    cnjs: frozenset[str]
+    dates: frozenset[str]
+    amounts: frozenset[Decimal]
+    labeled_process_amounts: frozenset[Decimal]
+    parties: frozenset[str]
+    step_counts: frozenset[int]
+
+    @property
+    def count(self) -> int:
+        return (
+            len(self.cnjs)
+            + len(self.dates)
+            + len(self.amounts)
+            + len(self.parties)
+            + len(self.step_counts)
+        )
+
+
 def _normalized_text(value: Any) -> str:
     rendered = unicodedata.normalize("NFKC", str(value or "")).casefold()
     return _SPACE_RE.sub(" ", rendered).strip()
@@ -387,52 +408,50 @@ def _optional_int(value: Any) -> int | None:
         return None
 
 
+def _claim_facts(text: str, known_parties: frozenset[str]) -> _ClaimFacts:
+    return _ClaimFacts(
+        normalized_text=_normalized_exact_text(text),
+        cnjs=_cnjs(text),
+        dates=_dates(text),
+        amounts=_amounts(text),
+        labeled_process_amounts=_labeled_process_amounts(text),
+        parties=_party_names_in_text(text, known_parties),
+        step_counts=_step_counts(text),
+    )
+
+
 def _relation_status(
     *,
-    claim_text: str,
+    facts: _ClaimFacts,
     evidence: VerificationEvidence,
-    known_parties: frozenset[str],
 ) -> tuple[str, str, int]:
-    normalized_claim = _normalized_exact_text(claim_text)
-    if normalized_claim and normalized_claim in evidence.exact_texts:
+    if facts.normalized_text and facts.normalized_text in evidence.exact_texts:
         return "supported", "exact_text_present", 1
 
-    claim_cnjs = _cnjs(claim_text)
-    claim_dates = _dates(claim_text)
-    claim_amounts = _amounts(claim_text)
-    canonical_process_amounts = _labeled_process_amounts(claim_text)
-    claim_parties = _party_names_in_text(claim_text, known_parties)
-    claim_step_counts = _step_counts(claim_text)
-    fact_count = (
-        len(claim_cnjs)
-        + len(claim_dates)
-        + len(claim_amounts)
-        + len(claim_parties)
-        + len(claim_step_counts)
-    )
+    fact_count = facts.count
     if fact_count == 0:
         return "not_evaluated", "no_deterministic_fact_anchor", 0
 
-    if claim_cnjs and not claim_cnjs.issubset(evidence.cnjs):
+    if facts.cnjs and not facts.cnjs.issubset(evidence.cnjs):
         return "insufficient", "cited_source_missing_cnj", fact_count
 
-    if claim_amounts and not claim_amounts.issubset(evidence.amounts):
+    if facts.amounts and not facts.amounts.issubset(evidence.amounts):
         if (
             evidence.kind == "process"
             and evidence.amounts
-            and canonical_process_amounts
-            and not canonical_process_amounts.issubset(evidence.amounts)
+            and facts.labeled_process_amounts
+            and not facts.labeled_process_amounts.issubset(evidence.amounts)
         ):
             return "contradicted", "process_amount_mismatch", fact_count
         return "insufficient", "cited_source_missing_amount", fact_count
 
-    if claim_dates and not claim_dates.issubset(evidence.dates):
+    if facts.dates and not facts.dates.issubset(evidence.dates):
         return "insufficient", "cited_source_missing_date", fact_count
 
-    if claim_parties and not claim_parties.issubset(evidence.party_names):
+    if facts.parties and not facts.parties.issubset(evidence.party_names):
         return "insufficient", "cited_source_missing_party", fact_count
 
-    if claim_step_counts and not claim_step_counts.issubset(evidence.step_counts):
+    if facts.step_counts and not facts.step_counts.issubset(evidence.step_counts):
         if evidence.kind == "process" and evidence.step_counts:
             return "contradicted", "process_step_count_mismatch", fact_count
         return "insufficient", "cited_source_missing_step_count", fact_count
@@ -456,6 +475,7 @@ def verify_material_claims(
     results: dict[str, ClaimVerification] = {}
 
     for claim in claims:
+        facts = _claim_facts(claim.text, known_parties)
         relations: list[ClaimRelationVerification] = []
         cited_evidence: list[VerificationEvidence] = []
         for ref in claim.evidence_refs:
@@ -473,9 +493,8 @@ def verify_material_claims(
                 continue
             cited_evidence.append(evidence)
             status, reason, _ = _relation_status(
-                claim_text=claim.text,
+                facts=facts,
                 evidence=evidence,
-                known_parties=known_parties,
             )
             excerpt, excerpt_sha256 = _excerpt(evidence.text)
             relations.append(
@@ -492,23 +511,9 @@ def verify_material_claims(
                 )
             )
 
-        claim_cnjs = _cnjs(claim.text)
-        claim_dates = _dates(claim.text)
-        claim_amounts = _amounts(claim.text)
-        canonical_process_amounts = _labeled_process_amounts(claim.text)
-        claim_parties = _party_names_in_text(claim.text, known_parties)
-        claim_step_counts = _step_counts(claim.text)
-        fact_count = (
-            len(claim_cnjs)
-            + len(claim_dates)
-            + len(claim_amounts)
-            + len(claim_parties)
-            + len(claim_step_counts)
-        )
-
-        normalized_claim = _normalized_exact_text(claim.text)
+        fact_count = facts.count
         exact_support = any(
-            normalized_claim and normalized_claim in evidence.exact_texts
+            facts.normalized_text and facts.normalized_text in evidence.exact_texts
             for evidence in cited_evidence
         )
 
@@ -549,25 +554,25 @@ def verify_material_claims(
             status = "not_evaluated"
             reason = "no_deterministic_fact_anchor"
         elif (
-            canonical_process_amounts
-            and not canonical_process_amounts.issubset(combined_amounts)
+            facts.labeled_process_amounts
+            and not facts.labeled_process_amounts.issubset(combined_amounts)
             and process_amounts
         ):
             status = "contradicted"
             reason = "process_amount_mismatch"
         elif (
-            claim_step_counts
-            and not claim_step_counts.issubset(combined_step_counts)
+            facts.step_counts
+            and not facts.step_counts.issubset(combined_step_counts)
             and process_step_counts
         ):
             status = "contradicted"
             reason = "process_step_count_mismatch"
         elif (
-            claim_cnjs.issubset(combined_cnjs)
-            and claim_dates.issubset(combined_dates)
-            and claim_amounts.issubset(combined_amounts)
-            and claim_parties.issubset(combined_parties)
-            and claim_step_counts.issubset(combined_step_counts)
+            facts.cnjs.issubset(combined_cnjs)
+            and facts.dates.issubset(combined_dates)
+            and facts.amounts.issubset(combined_amounts)
+            and facts.parties.issubset(combined_parties)
+            and facts.step_counts.issubset(combined_step_counts)
         ):
             status = "supported"
             reason = "deterministic_facts_present_across_cited_sources"
