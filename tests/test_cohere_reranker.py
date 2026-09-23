@@ -17,8 +17,8 @@ class _Response:
     def __exit__(self, exc_type, exc, tb):
         return False
 
-    def read(self) -> bytes:
-        return self._payload
+    def read(self, amount: int = -1) -> bytes:
+        return self._payload if amount < 0 else self._payload[:amount]
 
 
 @pytest.mark.asyncio
@@ -90,4 +90,28 @@ def test_cohere_reranker_rejects_missing_or_duplicate_results() -> None:
                 ]
             },
             steps=steps,
+        )
+
+
+def test_cohere_reranker_rejects_oversized_response(monkeypatch) -> None:
+    class OversizedResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self, amount: int = -1) -> bytes:
+            if amount != cohere.COHERE_RERANK_MAX_RESPONSE_BYTES + 1:
+                raise AssertionError(f"unexpected read bound: {amount}")
+            return b"x" * amount
+
+    monkeypatch.setattr(cohere, "urlopen", lambda request, timeout: OversizedResponse())
+    with pytest.raises(cohere.CohereRerankerError, match="exceeded safe size"):
+        cohere._post_rerank_sync(
+            api_key="synthetic-key",
+            model="rerank-v4.0-pro",
+            query="consulta",
+            documents=["a", "b"],
+            timeout_seconds=1,
         )
