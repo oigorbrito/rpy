@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import ipaddress
 import json
+import math
 import os
 import re
 from pathlib import Path
@@ -168,6 +169,42 @@ def _bool_value(values: dict[str, str], key: str, default: bool = False) -> bool
         return False
     raise ValueError(f"{key} must be a boolean")
 
+
+
+def _validate_attachment_ocr(values: dict[str, str], errors: list[str]) -> None:
+    try:
+        _bool_value(values, "ATTACHMENT_OCR_ENABLED", False)
+    except ValueError as exc:
+        errors.append(str(exc))
+
+    raw_timeout = str(values.get("ATTACHMENT_OCR_TIMEOUT_SECONDS") or "30").strip()
+    try:
+        timeout = int(raw_timeout)
+    except ValueError:
+        errors.append("ATTACHMENT_OCR_TIMEOUT_SECONDS must be an integer")
+    else:
+        if timeout <= 0:
+            errors.append("ATTACHMENT_OCR_TIMEOUT_SECONDS must be greater than zero")
+
+    raw_scale = str(values.get("ATTACHMENT_PDF_OCR_SCALE") or "2.0").strip()
+    try:
+        scale = float(raw_scale)
+    except ValueError:
+        errors.append("ATTACHMENT_PDF_OCR_SCALE must be numeric")
+    else:
+        if not math.isfinite(scale) or scale <= 0:
+            errors.append(
+                "ATTACHMENT_PDF_OCR_SCALE must be a finite number greater than zero"
+            )
+
+    raw_max_pages = str(values.get("ATTACHMENT_PDF_OCR_MAX_PAGES") or "100").strip()
+    try:
+        max_pages = int(raw_max_pages)
+    except ValueError:
+        errors.append("ATTACHMENT_PDF_OCR_MAX_PAGES must be an integer")
+    else:
+        if max_pages <= 0:
+            errors.append("ATTACHMENT_PDF_OCR_MAX_PAGES must be greater than zero")
 
 def _validate_embedding_runtime(values: dict[str, str], errors: list[str]) -> None:
     try:
@@ -347,6 +384,7 @@ def validate(values: dict[str, str]) -> list[str]:
         if any(marker in value.lower() for marker in PLACEHOLDER_MARKERS):
             errors.append(f"{key} still contains a placeholder value")
 
+    _validate_attachment_ocr(values, errors)
     _validate_embedding_runtime(values, errors)
     _validate_reranker(values, errors)
     _validate_datajud(values, errors)
