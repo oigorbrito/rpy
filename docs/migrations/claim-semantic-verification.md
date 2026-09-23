@@ -39,8 +39,8 @@ boundary:
 - bounded movement text/metadata for movement refs;
 - bounded attachment chunks for attachment refs.
 
-The verifier currently checks exact normalized text and deterministic CNJ, date, amount,
-and known-party anchors. It does not infer general legal entailment.
+The verifier currently checks sentence-level exact text and deterministic CNJ, date,
+amount, known-party, and movement-count anchors. It does not infer general legal entailment.
 
 ## Public API
 
