@@ -146,6 +146,7 @@ def test_missing_unknown_duplicate_and_cross_scope_refs_fail_closed() -> None:
     assert any(error.startswith("unknown evidence ref for current_status:") for error in errors)
     assert any(error.startswith("duplicate evidence ref for timeline:0:") for error in errors)
     assert "claim text does not match structured field: decisions:0" in errors
+    assert "missing material claim provenance: attention:0" in errors
     assert "missing material claim provenance: attachments:0" in errors
 
 
@@ -166,6 +167,7 @@ def test_deterministic_builder_covers_every_material_field() -> None:
         "synthesis",
         "current_status",
         "timeline:0",
+        "attention:0",
         "decisions:0",
         "attachments:0",
     ]
