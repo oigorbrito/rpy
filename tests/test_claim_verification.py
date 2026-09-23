@@ -72,6 +72,43 @@ def test_process_amount_mismatch_is_contradicted() -> None:
     ]
 
 
+def test_process_step_count_is_supported_and_mismatch_is_contradicted() -> None:
+    supported = MaterialClaim(
+        claim_id="synthesis",
+        claim_class="synthesis",
+        text="O processo possui 1 movimentos.",
+        evidence_refs=(process_evidence_ref(VERSION_ID),),
+    )
+    contradicted = MaterialClaim(
+        claim_id="synthesis",
+        claim_class="synthesis",
+        text="O processo possui 2 movimentos.",
+        evidence_refs=(process_evidence_ref(VERSION_ID),),
+    )
+
+    assert verify_material_claims([supported], _context())["synthesis"].status == "supported"
+    assert (
+        verify_material_claims([contradicted], _context())["synthesis"].status
+        == "contradicted"
+    )
+
+
+def test_terminal_punctuation_does_not_block_exact_movement_support() -> None:
+    context = _context()
+    context["steps"][0]["text"] = "SENTENÇA proferida"
+    claim = MaterialClaim(
+        claim_id="timeline:0",
+        claim_class="procedural_event",
+        text="SENTENÇA proferida.",
+        evidence_refs=(f"m-{STEP_ID.hex}",),
+    )
+
+    result = verify_material_claims([claim], context)["timeline:0"]
+
+    assert result.status == "supported"
+    assert result.reason == "exact_text_present_in_cited_source"
+
+
 def test_labeled_amount_without_currency_prefix_is_verified() -> None:
     claim = MaterialClaim(
         claim_id="synthesis",
