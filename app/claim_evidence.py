@@ -300,10 +300,79 @@ async def load_summary_claim_evidence(
                            'source_order', s.source_order
                        )
                        ORDER BY s.source_order
-                   ) FILTER (WHERE s.evidence_ref IS NOT NULL),
+                   ) FILTER (
+                       WHERE s.evidence_ref IS NOT NULL
+                         AND s.summary_id = c.summary_id
+                         AND s.process_id = c.process_id
+                         AND s.version_id = c.version_id
+                         AND (
+                             (
+                                 s.source_kind = 'process'
+                                 AND s.step_id IS NULL
+                                 AND s.attachment_chunk_id IS NULL
+                                 AND s.evidence_ref =
+                                     'p-' || replace(s.version_id::text, '-', '')
+                             )
+                             OR (
+                                 s.source_kind = 'movement'
+                                 AND s.step_id IS NOT NULL
+                                 AND s.attachment_chunk_id IS NULL
+                                 AND s.evidence_ref =
+                                     'm-' || replace(s.step_id::text, '-', '')
+                                 AND EXISTS (
+                                     SELECT 1
+                                     FROM process_summary_sources used
+                                     JOIN process_steps step
+                                       ON step.id = used.step_id
+                                      AND step.process_id = used.process_id
+                                      AND step.version_id = used.version_id
+                                     WHERE used.summary_id = s.summary_id
+                                       AND used.process_id = s.process_id
+                                       AND used.version_id = s.version_id
+                                       AND used.step_id = s.step_id
+                                 )
+                             )
+                             OR (
+                                 s.source_kind = 'attachment'
+                                 AND s.step_id IS NULL
+                                 AND s.attachment_chunk_id IS NOT NULL
+                                 AND s.evidence_ref =
+                                     'a-' || replace(
+                                         s.attachment_chunk_id::text, '-', ''
+                                     )
+                                 AND EXISTS (
+                                     SELECT 1
+                                     FROM process_summary_attachment_sources used
+                                     JOIN attachment_chunks chunk
+                                       ON chunk.id = used.attachment_chunk_id
+                                      AND chunk.process_id = used.process_id
+                                      AND chunk.version_id = used.version_id
+                                      AND chunk.attachment_id = used.attachment_id
+                                     JOIN process_attachments attachment
+                                       ON attachment.id = used.attachment_id
+                                      AND attachment.process_id = used.process_id
+                                      AND attachment.version_id = used.version_id
+                                      AND attachment.source_attachment_id =
+                                          used.source_attachment_id
+                                     WHERE used.summary_id = s.summary_id
+                                       AND used.process_id = s.process_id
+                                       AND used.version_id = s.version_id
+                                       AND used.attachment_chunk_id =
+                                           s.attachment_chunk_id
+                                 )
+                             )
+                         )
+                   ),
                    '[]'::jsonb
                ) AS sources
         FROM process_summary_claims c
+        JOIN process_summaries summary
+          ON summary.id = c.summary_id
+         AND summary.process_id = c.process_id
+         AND summary.version_id = c.version_id
+        JOIN process_versions version
+          ON version.id = c.version_id
+         AND version.process_id = c.process_id
         LEFT JOIN process_summary_claim_sources s ON s.claim_row_id = c.id
         WHERE c.summary_id = $1
         GROUP BY c.id, c.claim_id, c.claim_class, c.claim_text
