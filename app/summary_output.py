@@ -260,34 +260,51 @@ def _append_list(lines: list[str], title: str, items: list[str]) -> None:
     lines.extend(["", f"## {title}", *(f"- {item}" for item in items)])
 
 
+def structured_summary_process(context: dict[str, Any]) -> dict[str, Any]:
+    header = context.get("header") if isinstance(context.get("header"), dict) else {}
+    parties = context.get("parties")
+    normalized_parties = (
+        [
+            {
+                key: item.get(key)
+                for key in ("name", "side", "person_type", "masked_person_id")
+                if item.get(key) is not None
+            }
+            for item in parties
+            if isinstance(item, dict)
+        ]
+        if isinstance(parties, list)
+        else []
+    )
+    return {
+        "cnj": _inline(context.get("code")),
+        "class_name": _inline(context.get("class_name")) or None,
+        "court": _inline(context.get("court")) or None,
+        "header": {
+            key: header.get(key)
+            for key, _ in _HEADER_FIELDS
+            if header.get(key) is not None
+        },
+        "parties": normalized_parties,
+    }
+
+
+def structured_summary_document_matches_process(
+    value: Any,
+    context: dict[str, Any],
+) -> bool:
+    return (
+        structured_summary_document_is_canonical(value)
+        and value["process"] == structured_summary_process(context)
+    )
+
+
 def structured_summary_document(
     payload: dict[str, Any], context: dict[str, Any]
 ) -> dict[str, Any]:
-    header = context.get("header") if isinstance(context.get("header"), dict) else {}
-    parties = context.get("parties")
-    normalized_parties = [
-        {
-            key: item.get(key)
-            for key in ("name", "side", "person_type", "masked_person_id")
-            if item.get(key) is not None
-        }
-        for item in parties
-        if isinstance(item, dict)
-    ] if isinstance(parties, list) else []
-
     return {
         "schema_version": 2,
-        "process": {
-            "cnj": _inline(context.get("code")),
-            "class_name": _inline(context.get("class_name")) or None,
-            "court": _inline(context.get("court")) or None,
-            "header": {
-                key: header.get(key)
-                for key, _ in _HEADER_FIELDS
-                if header.get(key) is not None
-            },
-            "parties": normalized_parties,
-        },
+        "process": structured_summary_process(context),
         "summary": {
             "synthesis": payload["synthesis"],
             "timeline": list(payload["timeline"]),
