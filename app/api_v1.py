@@ -221,7 +221,10 @@ async def _job_payload(
                ps.cache_hit,
                ps.cost_usd,
                ps.structured_output,
-               p.secrecy_level AS process_secrecy_level
+               p.secrecy_level AS process_secrecy_level,
+               p.code AS summary_process_code,
+               p.class_name AS summary_process_class_name,
+               p.header AS summary_process_header
         FROM public_summary_requests psr
         LEFT JOIN process_summaries ps ON ps.id = psr.summary_id
         LEFT JOIN processes p ON p.id = psr.process_id
@@ -260,7 +263,17 @@ async def _job_payload(
         validation
         and validation.get("passed") is True
         and (
-            (is_secret and is_restricted_local_summary(row))
+            (
+                is_secret
+                and is_restricted_local_summary(
+                    row,
+                    process={
+                        "code": row["summary_process_code"],
+                        "class_name": row["summary_process_class_name"],
+                        "header": row["summary_process_header"],
+                    },
+                )
+            )
             or (
                 not is_secret
                 and claim_evidence_is_complete(structured_output, claim_evidence)
@@ -336,7 +349,7 @@ async def _latest_summary_payload(
     )
     is_secret = int(process["secrecy_level"] or 0) > 0
     if is_secret:
-        if not is_restricted_local_summary(summary):
+        if not is_restricted_local_summary(summary, process=process):
             return None
     elif not claim_evidence_is_complete(structured_output, claim_evidence):
         return None
@@ -542,7 +555,9 @@ async def get_summary_sources(code: str, request: Request):
             )
             if summary_row is not None:
                 is_secret = int(process["secrecy_level"] or 0) > 0
-                if not is_secret or is_restricted_local_summary(summary_row):
+                if not is_secret or is_restricted_local_summary(
+                    summary_row, process=process
+                ):
                     summary_id = summary_row["id"]
                     summary_structured_output = (
                         _json_object(summary_row["structured_output"])
