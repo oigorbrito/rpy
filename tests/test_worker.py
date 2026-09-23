@@ -149,3 +149,135 @@ async def test_worker_redacts_secret_from_error_log_and_runtime_log(
     assert "db-password" not in rendered_logs
     assert "[REDACTED]" in rendered_logs
     assert all(record.exc_info is None for record in caplog.records)
+
+
+class _Trace:
+    def __init__(self) -> None:
+        self.finished: list[dict] = []
+
+    def finish(self, **kwargs) -> None:
+        self.finished.append(kwargs)
+
+
+@pytest.mark.asyncio
+async def test_summary_worker_lost_ownership_before_start_has_no_lifecycle_side_effect(
+    monkeypatch,
+) -> None:
+    called: list[str] = []
+
+    async def handler(payload):
+        called.append("handler")
+        return {"validation": {"passed": True}}
+
+    async def not_owner(conn, job_id, worker_id):
+        return False
+
+    async def mark_started(conn, *, task_name, payload):
+        called.append("mark_started")
+
+    monkeypatch.setattr(worker_module, "resolve_task", lambda name: handler)
+    monkeypatch.setattr(worker_module, "heartbeat", not_owner)
+    monkeypatch.setattr(worker_module, "mark_job_started", mark_started)
+
+    worker = Worker(_Pool(), _settings(), worker_id=uuid4())
+    row = {
+        "id": uuid4(),
+        "task_name": "generate_process_summary",
+        "payload": {"process_id": str(uuid4()), "version_id": str(uuid4())},
+        "attempts": 1,
+    }
+
+    await worker._run_job(row)
+
+    assert called == []
+
+
+@pytest.mark.asyncio
+async def test_summary_worker_lost_ownership_before_completion_skips_reconcile(
+    monkeypatch,
+) -> None:
+    called: list[str] = []
+    trace = _Trace()
+
+    async def handler(payload):
+        called.append("handler")
+        return {"validation": {"passed": True}}
+
+    async def owns_job(conn, job_id, worker_id):
+        return True
+
+    async def mark_started(conn, *, task_name, payload):
+        called.append("mark_started")
+
+    async def lost_complete(conn, job_id, worker_id, result):
+        called.append("complete")
+        return False
+
+    async def reconcile(conn, *, payload, result):
+        called.append("reconcile")
+
+    monkeypatch.setattr(worker_module, "resolve_task", lambda name: handler)
+    monkeypatch.setattr(worker_module, "heartbeat", owns_job)
+    monkeypatch.setattr(worker_module, "mark_job_started", mark_started)
+    monkeypatch.setattr(worker_module, "complete", lost_complete)
+    monkeypatch.setattr(worker_module, "reconcile_generation_result", reconcile)
+    monkeypatch.setattr(worker_module, "start_summary_trace", lambda **kwargs: trace)
+
+    worker = Worker(_Pool(), _settings(), worker_id=uuid4())
+    row = {
+        "id": uuid4(),
+        "task_name": "generate_process_summary",
+        "payload": {"process_id": str(uuid4()), "version_id": str(uuid4())},
+        "attempts": 1,
+    }
+
+    await worker._run_job(row)
+
+    assert called == ["mark_started", "handler", "complete"]
+    assert trace.finished == [{"error_type": "LostJobOwnership"}]
+
+
+@pytest.mark.asyncio
+async def test_summary_worker_completes_fence_before_reconcile(monkeypatch) -> None:
+    called: list[str] = []
+    trace = _Trace()
+
+    async def handler(payload):
+        return {"validation": {"passed": True}}
+
+    async def owns_job(conn, job_id, worker_id):
+        return True
+
+    async def mark_started(conn, *, task_name, payload):
+        called.append("mark_started")
+
+    async def complete_owned(conn, job_id, worker_id, result):
+        called.append("complete")
+        return True
+
+    async def reconcile(conn, *, payload, result):
+        called.append("reconcile")
+
+    async def trace_details(conn, payload):
+        return None, []
+
+    monkeypatch.setattr(worker_module, "resolve_task", lambda name: handler)
+    monkeypatch.setattr(worker_module, "heartbeat", owns_job)
+    monkeypatch.setattr(worker_module, "mark_job_started", mark_started)
+    monkeypatch.setattr(worker_module, "complete", complete_owned)
+    monkeypatch.setattr(worker_module, "reconcile_generation_result", reconcile)
+    monkeypatch.setattr(worker_module, "_summary_trace_details", trace_details)
+    monkeypatch.setattr(worker_module, "start_summary_trace", lambda **kwargs: trace)
+
+    worker = Worker(_Pool(), _settings(), worker_id=uuid4())
+    row = {
+        "id": uuid4(),
+        "task_name": "generate_process_summary",
+        "payload": {"process_id": str(uuid4()), "version_id": str(uuid4())},
+        "attempts": 1,
+    }
+
+    await worker._run_job(row)
+
+    assert called == ["mark_started", "complete", "reconcile"]
+    assert trace.finished and trace.finished[0].get("error_type") is None
