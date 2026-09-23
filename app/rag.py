@@ -705,8 +705,30 @@ async def _persist_summary(
             process_id,
             version_id,
         )
+        incoming_passed = validation.get("passed") is True
+        incoming_publishable = False
+        if existing is not None and incoming_passed:
+            if int(existing["secrecy_level"] or 0) > 0:
+                incoming_publishable = (
+                    model == RESTRICTED_MODEL
+                    and prompt_version == RESTRICTED_PROMPT_VERSION
+                )
+            else:
+                incoming_claim_evidence = [
+                    {
+                        "claim_id": claim.claim_id,
+                        "text": claim.text,
+                        "evidence_refs": list(claim.evidence_refs),
+                    }
+                    for claim in (claims or [])
+                ]
+                incoming_publishable = claim_evidence_is_complete(
+                    structured_output,
+                    incoming_claim_evidence,
+                )
         replace_unpublishable = bool(
             existing is not None
+            and incoming_publishable
             and not await _summary_row_is_publishable(conn, existing)
         )
 
