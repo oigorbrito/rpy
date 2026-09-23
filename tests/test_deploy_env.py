@@ -384,6 +384,16 @@ def test_langfuse_environment_must_match_sdk_contract() -> None:
 
 
 
+def test_deploy_preflight_rejects_non_finite_egress_timeout() -> None:
+    for value in ("nan", "inf", "-inf"):
+        values = _valid_values()
+        values["EGRESS_PROXY_CONNECT_TIMEOUT_SECONDS"] = value
+        _require_error(
+            values,
+            "EGRESS_PROXY_CONNECT_TIMEOUT_SECONDS must be a finite number greater than zero",
+        )
+
+
 def test_egress_allowlist_requires_core_provider_hosts() -> None:
     values = _valid_values()
     values["EGRESS_PROXY_ALLOWED_HOSTS"] = "api.anthropic.com"
