@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import os
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -24,18 +25,27 @@ class ProviderSettings:
     retry_backoff_seconds: float = DEFAULT_PROVIDER_RETRY_BACKOFF_SECONDS
 
     def validate(self) -> "ProviderSettings":
-        if self.timeout_seconds <= 0:
-            raise ValueError("provider timeout_seconds must be greater than zero")
+        if not math.isfinite(self.timeout_seconds) or self.timeout_seconds <= 0:
+            raise ValueError("provider timeout_seconds must be finite and greater than zero")
         if not 1 <= self.max_attempts <= 3:
             raise ValueError("provider max_attempts must be between 1 and 3")
-        if self.retry_backoff_seconds < 0:
-            raise ValueError("provider retry_backoff_seconds cannot be negative")
+        if (
+            not math.isfinite(self.retry_backoff_seconds)
+            or self.retry_backoff_seconds < 0
+        ):
+            raise ValueError("provider retry_backoff_seconds must be finite and non-negative")
 
         worker_timeout = os.getenv("WORKER_TASK_TIMEOUT_SECONDS")
-        if worker_timeout is not None and self.timeout_seconds >= float(worker_timeout):
-            raise ValueError(
-                "provider timeout must be lower than WORKER_TASK_TIMEOUT_SECONDS"
-            )
+        if worker_timeout is not None:
+            parsed_worker_timeout = float(worker_timeout)
+            if not math.isfinite(parsed_worker_timeout) or parsed_worker_timeout <= 0:
+                raise ValueError(
+                    "WORKER_TASK_TIMEOUT_SECONDS must be finite and greater than zero"
+                )
+            if self.timeout_seconds >= parsed_worker_timeout:
+                raise ValueError(
+                    "provider timeout must be lower than WORKER_TASK_TIMEOUT_SECONDS"
+                )
         return self
 
     @classmethod
