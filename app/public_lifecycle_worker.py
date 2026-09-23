@@ -5,7 +5,7 @@ from uuid import UUID
 
 import asyncpg
 
-from app.claim_evidence import claim_evidence_is_complete, load_summary_claim_evidence
+from app.claim_evidence import claim_evidence_is_publishable, load_summary_claim_evidence
 from app.json_utils import decode_json_object
 from app.public_lifecycle import (
     transition_job_public_requests,
@@ -60,7 +60,9 @@ async def reconcile_generation_result(
                p.secrecy_level,
                p.code,
                p.class_name,
+               p.court,
                p.header,
+               p.parties,
                p.updated_at AS source_updated_at
         FROM process_summaries ps
         JOIN processes p
@@ -91,7 +93,11 @@ async def reconcile_generation_result(
                 if row["structured_output"] is not None
                 else None
             )
-            passed = claim_evidence_is_complete(structured_output, claim_evidence)
+            passed = claim_evidence_is_publishable(
+                structured_output,
+                claim_evidence,
+                process=row,
+            )
 
     status = "completed" if passed else "validation_failed"
     error_code = None if passed else "validation_failed"
