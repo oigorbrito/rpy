@@ -36,6 +36,7 @@ _STEP_COUNT_RE = re.compile(
     re.IGNORECASE,
 )
 _SPACE_RE = re.compile(r"\s+")
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?;])\s+|\n+")
 _SAO_PAULO = ZoneInfo("America/Sao_Paulo")
 _MAX_EXCERPT_CHARS = 4000
 VERIFICATION_STATUSES = frozenset(
@@ -60,6 +61,7 @@ class VerificationEvidence:
     amounts: frozenset[Decimal]
     party_names: frozenset[str]
     step_counts: frozenset[int]
+    exact_texts: frozenset[str]
     page_start: int | None = None
     page_end: int | None = None
     char_start: int | None = None
@@ -95,6 +97,35 @@ def _normalized_text(value: Any) -> str:
 
 def _normalized_exact_text(value: Any) -> str:
     return _normalized_text(value).rstrip(" .;:!?")
+
+
+def _exact_text_segments(value: Any) -> frozenset[str]:
+    rendered = str(value or "").strip()
+    if not rendered:
+        return frozenset()
+    return frozenset(
+        normalized
+        for part in _SENTENCE_SPLIT_RE.split(rendered)
+        if (normalized := _normalized_exact_text(part))
+    )
+
+
+def _scalar_text_values(value: Any) -> list[str]:
+    if isinstance(value, dict):
+        return [
+            item
+            for child in value.values()
+            for item in _scalar_text_values(child)
+        ]
+    if isinstance(value, list):
+        return [
+            item
+            for child in value
+            for item in _scalar_text_values(child)
+        ]
+    if value is None or isinstance(value, bool):
+        return []
+    return [str(value)]
 
 
 def _canonical_cnj(value: str) -> str:
@@ -202,6 +233,7 @@ def _verification_evidence(
     known_parties: frozenset[str],
     amounts: frozenset[Decimal] | None = None,
     step_counts: frozenset[int] | None = None,
+    exact_values: Sequence[Any] | None = None,
     page_start: int | None = None,
     page_end: int | None = None,
     char_start: int | None = None,
@@ -217,6 +249,11 @@ def _verification_evidence(
         party_names=_party_names_in_text(text, known_parties),
         step_counts=frozenset(
             step_counts if step_counts is not None else _step_counts(text)
+        ),
+        exact_texts=frozenset(
+            segment
+            for value in (exact_values if exact_values is not None else [text])
+            for segment in _exact_text_segments(value)
         ),
         page_start=page_start,
         page_end=page_end,
@@ -284,6 +321,7 @@ def verification_evidence_catalog(
                 and int(context["step_count"]) >= 0
                 else frozenset()
             ),
+            exact_values=_scalar_text_values(process_payload),
         )
 
     for step in context.get("steps", []):
@@ -303,6 +341,7 @@ def verification_evidence_catalog(
             kind="movement",
             text=_canonical_json(payload),
             known_parties=known_parties,
+            exact_values=[payload["title"], payload["text"]],
         )
 
     for attachment in context.get("attachments", []):
@@ -316,6 +355,7 @@ def verification_evidence_catalog(
             kind="attachment",
             text=str(attachment.get("text") or ""),
             known_parties=known_parties,
+            exact_values=[attachment.get("text")],
             page_start=_optional_int(attachment.get("page_start")),
             page_end=_optional_int(attachment.get("page_end")),
             char_start=_optional_int(attachment.get("char_start")),
@@ -340,8 +380,7 @@ def _relation_status(
     known_parties: frozenset[str],
 ) -> tuple[str, str, int]:
     normalized_claim = _normalized_exact_text(claim_text)
-    normalized_evidence = _normalized_text(evidence.text)
-    if normalized_claim and normalized_claim in normalized_evidence:
+    if normalized_claim and normalized_claim in evidence.exact_texts:
         return "supported", "exact_text_present", 1
 
     claim_cnjs = _cnjs(claim_text)
@@ -450,8 +489,7 @@ def verify_material_claims(
 
         normalized_claim = _normalized_exact_text(claim.text)
         exact_support = any(
-            normalized_claim
-            and normalized_claim in _normalized_text(evidence.text)
+            normalized_claim and normalized_claim in evidence.exact_texts
             for evidence in cited_evidence
         )
 
