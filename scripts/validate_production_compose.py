@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import sys
 from pathlib import Path
@@ -245,14 +246,20 @@ _RUNTIME_LIMITS = {
 }
 
 
-def _numeric(value: Any, *, field: str, service_name: str) -> float:
+def _finite_positive_float(value: Any, *, label: str) -> float:
     try:
         rendered = float(value)
     except (TypeError, ValueError):
-        _fail(f"{service_name} {field} must be numeric")
+        _fail(f"{label} must be numeric")
+    if not math.isfinite(rendered):
+        _fail(f"{label} must be finite")
     if rendered <= 0:
-        _fail(f"{service_name} {field} must be positive")
+        _fail(f"{label} must be positive")
     return rendered
+
+
+def _numeric(value: Any, *, field: str, service_name: str) -> float:
+    return _finite_positive_float(value, label=f"{service_name} {field}")
 
 
 def _memory_bytes(value: Any, *, service_name: str) -> int:
@@ -357,6 +364,12 @@ def _validate_egress_topology(services: dict[str, Any], networks: dict[str, Any]
         _fail("egress-proxy bind host must remain 0.0.0.0 inside the container network")
     if not str(proxy_env.get("EGRESS_PROXY_ALLOWED_HOSTS") or "").strip():
         _fail("egress-proxy allowlist must not be empty")
+    proxy_timeout = _finite_positive_float(
+        proxy_env.get("EGRESS_PROXY_CONNECT_TIMEOUT_SECONDS"),
+        label="egress-proxy EGRESS_PROXY_CONNECT_TIMEOUT_SECONDS",
+    )
+    if proxy_timeout > 60:
+        _fail("egress-proxy EGRESS_PROXY_CONNECT_TIMEOUT_SECONDS must not exceed 60")
 
     for service_name in ("worker-1", "worker-2"):
         env = _environment(services, service_name)
@@ -398,14 +411,10 @@ def _validate_attachment_parser_contract(
         _fail("attachment-parser socket path must remain fixed inside the sandbox")
     if parser_env.get("ATTACHMENT_OCR_BINARY") != "tesseract":
         _fail("attachment-parser OCR binary must remain the packaged tesseract binary")
-    try:
-        parser_request_timeout = float(
-            parser_env.get("ATTACHMENT_PARSER_REQUEST_TIMEOUT_SECONDS")
-        )
-    except (TypeError, ValueError):
-        _fail("attachment-parser request timeout must be numeric")
-    if parser_request_timeout <= 0:
-        _fail("attachment-parser request timeout must be positive")
+    _finite_positive_float(
+        parser_env.get("ATTACHMENT_PARSER_REQUEST_TIMEOUT_SECONDS"),
+        label="attachment-parser request timeout",
+    )
     _forbid_env(
         services,
         "attachment-parser",
@@ -431,12 +440,10 @@ def _validate_attachment_parser_contract(
         env = _environment(services, service_name)
         if env.get("ATTACHMENT_PARSER_SOCKET") != "/run/rpy-parser/parser.sock":
             _fail(f"{service_name} must use the private parser Unix socket")
-        try:
-            parser_timeout = float(env.get("ATTACHMENT_PARSER_TIMEOUT_SECONDS"))
-        except (TypeError, ValueError):
-            _fail(f"{service_name} ATTACHMENT_PARSER_TIMEOUT_SECONDS must be numeric")
-        if parser_timeout <= 0:
-            _fail(f"{service_name} ATTACHMENT_PARSER_TIMEOUT_SECONDS must be positive")
+        _finite_positive_float(
+            env.get("ATTACHMENT_PARSER_TIMEOUT_SECONDS"),
+            label=f"{service_name} ATTACHMENT_PARSER_TIMEOUT_SECONDS",
+        )
         if not _volume_mount(worker, source="parser_socket", target="/run/rpy-parser"):
             _fail(f"{service_name} must mount the private parser_socket volume")
         dependency = (worker.get("depends_on") or {}).get("attachment-parser") or {}
@@ -446,10 +453,7 @@ def _validate_attachment_parser_contract(
 
 def _duration_seconds(value: Any) -> float:
     if isinstance(value, (int, float)) and not isinstance(value, bool):
-        seconds = float(value)
-        if seconds <= 0:
-            _fail("duration must be greater than zero")
-        return seconds
+        return _finite_positive_float(value, label="duration")
 
     rendered = str(value or "").strip()
     match = DURATION_RE.fullmatch(rendered)
@@ -468,12 +472,12 @@ def _validate_worker_shutdown(services: dict[str, Any]) -> None:
     rendered_pairs: list[tuple[float, float]] = []
     for service_name in ("worker-1", "worker-2"):
         environment = _environment(services, service_name)
-        try:
-            app_grace = float(environment["WORKER_SHUTDOWN_GRACE_SECONDS"])
-        except (KeyError, TypeError, ValueError):
+        if "WORKER_SHUTDOWN_GRACE_SECONDS" not in environment:
             _fail(f"{service_name} WORKER_SHUTDOWN_GRACE_SECONDS must be numeric")
-        if app_grace <= 0:
-            _fail(f"{service_name} WORKER_SHUTDOWN_GRACE_SECONDS must be positive")
+        app_grace = _finite_positive_float(
+            environment["WORKER_SHUTDOWN_GRACE_SECONDS"],
+            label=f"{service_name} WORKER_SHUTDOWN_GRACE_SECONDS",
+        )
         container_grace = _duration_seconds(
             services[service_name].get("stop_grace_period")
         )
