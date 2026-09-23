@@ -12,6 +12,7 @@ from app.api import app
 from app.api_key_auth import api_key_hash_and_fingerprint
 from app.db import create_pool
 from app.migrations import migrate
+from app.summary_policy import RESTRICTED_MODEL, RESTRICTED_PROMPT_VERSION
 from app.public_lifecycle import (
     create_or_get_summary_request,
     request_fingerprint,
