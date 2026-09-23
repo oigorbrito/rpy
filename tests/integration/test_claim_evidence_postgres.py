@@ -202,6 +202,27 @@ async def test_partial_used_source_loss_breaks_declared_claim_completeness() -> 
         assert claim_evidence_is_complete(structured_output, loaded) is True
 
         await conn.execute(
+            """
+            UPDATE process_summary_claims
+            SET claim_class='decision'
+            WHERE id=$1
+            """,
+            synthesis_claim_id,
+        )
+        wrong_class = await load_summary_claim_evidence(
+            conn, summary_id=summary_id
+        )
+        assert claim_evidence_is_complete(structured_output, wrong_class) is False
+        await conn.execute(
+            """
+            UPDATE process_summary_claims
+            SET claim_class='synthesis'
+            WHERE id=$1
+            """,
+            synthesis_claim_id,
+        )
+
+        await conn.execute(
             "DELETE FROM process_summary_sources WHERE summary_id=$1 AND step_id=$2",
             summary_id,
             step_id,
