@@ -189,7 +189,7 @@ async def test_summary_worker_lost_ownership_before_start_has_no_lifecycle_side_
 
     await worker._run_job(row)
 
-    assert called == []
+    assert called == []  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -233,8 +233,8 @@ async def test_summary_worker_lost_ownership_before_completion_skips_reconcile(
 
     await worker._run_job(row)
 
-    assert called == ["mark_started", "handler", "complete"]
-    assert trace.finished == [{"error_type": "LostJobOwnership"}]
+    assert called == ["mark_started", "handler", "complete"]  # nosec B101
+    assert trace.finished == [{"error_type": "LostJobOwnership"}]  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -279,5 +279,5 @@ async def test_summary_worker_completes_fence_before_reconcile(monkeypatch) -> N
 
     await worker._run_job(row)
 
-    assert called == ["mark_started", "complete", "reconcile"]
-    assert trace.finished and trace.finished[0].get("error_type") is None
+    assert called == ["mark_started", "complete", "reconcile"]  # nosec B101
+    assert trace.finished and trace.finished[0].get("error_type") is None  # nosec B101
