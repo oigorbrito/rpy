@@ -85,6 +85,7 @@ class ClaimRelationVerification:
 @dataclass(frozen=True, slots=True)
 class ClaimVerification:
     claim_id: str
+    claim_class: str
     status: str
     reason: str
     deterministic_fact_count: int
@@ -573,6 +574,7 @@ def verify_material_claims(
 
         results[claim.claim_id] = ClaimVerification(
             claim_id=claim.claim_id,
+            claim_class=claim.claim_class,
             status=status,
             reason=reason,
             deterministic_fact_count=fact_count,
@@ -590,4 +592,6 @@ def verification_errors(
             errors.append(f"claim contradicted by cited evidence: {claim_id}")
         elif result.status == "insufficient" and result.deterministic_fact_count > 0:
             errors.append(f"claim has insufficient cited evidence: {claim_id}")
+        elif result.status == "not_evaluated" and result.claim_class != "attention":
+            errors.append(f"material claim was not evaluated: {claim_id}")
     return errors
