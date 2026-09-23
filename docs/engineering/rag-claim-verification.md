@@ -66,9 +66,12 @@ attachment checks use the bounded chunk representation. Process-level checks use
 normalized process projection represented by the process evidence ref.
 
 A `contradicted` claim fails closed before publication. Deterministic `insufficient`
-claims participate in the existing single correction attempt; a second failure remains
-persisted in the normal validation result. `not_evaluated` remains publishable in this
-baseline and is explicitly measurable rather than silently promoted to `supported`.
+claims and factual material claims that remain `not_evaluated` participate in the
+existing single correction attempt; a second failure remains persisted in the normal
+validation result. Generic `attention` prose remains measurable as `not_evaluated`
+without forcing a retry because it may be a provider-authored meta assessment rather
+than an atomic factual claim. Attention items that contain deterministic facts are still
+subject to the normal supported/insufficient/contradicted checks.
 
 When available, the durable audit layer stores a bounded literal evidence excerpt in a
 worker/backup-only table. The API-readable claim relation stores its SHA-256 and available
