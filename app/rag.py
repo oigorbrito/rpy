@@ -66,8 +66,8 @@ SHORT_SUMMARY_STEP_MAX = 15
 MEDIUM_SUMMARY_STEP_MAX = 60
 MAX_TOKENS = 4000
 PROMPT_VERSION = "process-summary-v5"
-SECRET_MODEL = "local-deterministic"
-SECRET_PROMPT_VERSION = "secret-summary-v1"
+RESTRICTED_MODEL = "local-deterministic"
+RESTRICTED_PROMPT_VERSION = "secret-summary-v1"
 REQUESTED_TEMPERATURE = 0.2
 # Anthropic deprecates custom sampling parameters for current Claude models.
 # Keep the product's requested value documented but omit it from API payloads.
@@ -780,8 +780,8 @@ async def _load_publishable_summary(
             return None
         if int(row["secrecy_level"] or 0) > 0:
             if (
-                row["model"] != SECRET_MODEL
-                or row["prompt_version"] != SECRET_PROMPT_VERSION
+                row["model"] != RESTRICTED_MODEL
+                or row["prompt_version"] != RESTRICTED_PROMPT_VERSION
             ):
                 return None
         else:
@@ -854,8 +854,8 @@ async def generate_summary(
             forbid_party_names=True,
             require_document_title=True,
         )
-        model = SECRET_MODEL
-        prompt_version = SECRET_PROMPT_VERSION
+        model = RESTRICTED_MODEL
+        prompt_version = RESTRICTED_PROMPT_VERSION
     else:
         api_key = os.environ.get("ANTHROPIC_API_KEY")
         if not api_key:
