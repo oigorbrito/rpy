@@ -6,7 +6,7 @@ from uuid import UUID, uuid4
 import asyncpg
 import pytest
 
-from app.claim_evidence import load_summary_claim_evidence
+from app.claim_evidence import claim_evidence_is_complete, load_summary_claim_evidence
 from app.migrations import migrate
 
 
@@ -59,6 +59,168 @@ async def _process_version(conn: asyncpg.Connection, *, code: str):
         version_id,
     )
     return process_id, version_id
+
+
+@pytest.mark.asyncio
+async def test_partial_used_source_loss_breaks_declared_claim_completeness() -> None:
+    assert TEST_DATABASE_URL is not None
+    await migrate(TEST_DATABASE_URL)
+    conn = await asyncpg.connect(TEST_DATABASE_URL)
+    try:
+        await _reset(conn)
+        process_id, version_id = await _process_version(
+            conn, code="0000000-00.2026.8.21.2500"
+        )
+        step_id = uuid4()
+        await conn.execute(
+            """
+            INSERT INTO process_steps (
+                id, version_id, process_id, step_number, title, text
+            ) VALUES ($1, $2, $3, 1, 'Movimento', 'Movimento relevante.')
+            """,
+            step_id,
+            version_id,
+            process_id,
+        )
+        summary_id = await conn.fetchval(
+            """
+            INSERT INTO process_summaries (
+                process_id, version_id, markdown, validation, model, prompt_version
+            ) VALUES ($1, $2, '# resumo', '{"passed":true}'::jsonb, 'fake', 'test-v1')
+            RETURNING id
+            """,
+            process_id,
+            version_id,
+        )
+        await conn.execute(
+            """
+            INSERT INTO process_summary_sources (
+                summary_id, process_id, version_id, chunk_type,
+                step_id, step_number, source_order
+            ) VALUES ($1, $2, $3, 'movement', $4, 1, 0)
+            """,
+            summary_id,
+            process_id,
+            version_id,
+            step_id,
+        )
+
+        synthesis_claim_id = await conn.fetchval(
+            """
+            INSERT INTO process_summary_claims (
+                summary_id, process_id, version_id,
+                claim_id, claim_class, claim_text
+            ) VALUES ($1, $2, $3, 'synthesis', 'synthesis', 'Síntese.')
+            RETURNING id
+            """,
+            summary_id,
+            process_id,
+            version_id,
+        )
+        status_claim_id = await conn.fetchval(
+            """
+            INSERT INTO process_summary_claims (
+                summary_id, process_id, version_id,
+                claim_id, claim_class, claim_text
+            ) VALUES ($1, $2, $3, 'current_status', 'current_status', 'Situação.')
+            RETURNING id
+            """,
+            summary_id,
+            process_id,
+            version_id,
+        )
+        process_ref = _ref("p", version_id)
+        movement_ref = _ref("m", step_id)
+        await conn.executemany(
+            """
+            INSERT INTO process_summary_claim_sources (
+                claim_row_id, summary_id, process_id, version_id,
+                evidence_ref, source_kind, step_id, source_order
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            """,
+            [
+                (
+                    synthesis_claim_id,
+                    summary_id,
+                    process_id,
+                    version_id,
+                    process_ref,
+                    "process",
+                    None,
+                    0,
+                ),
+                (
+                    synthesis_claim_id,
+                    summary_id,
+                    process_id,
+                    version_id,
+                    movement_ref,
+                    "movement",
+                    step_id,
+                    1,
+                ),
+                (
+                    status_claim_id,
+                    summary_id,
+                    process_id,
+                    version_id,
+                    process_ref,
+                    "process",
+                    None,
+                    0,
+                ),
+            ],
+        )
+        structured_output = {
+            "schema_version": 2,
+            "process": {},
+            "summary": {
+                "synthesis": "Síntese.",
+                "timeline": [],
+                "current_status": "Situação.",
+                "attention": [],
+                "decisions": [],
+                "deadlines": [],
+                "related_processes": [],
+                "attachments": [],
+                "claims": [
+                    {
+                        "claim_id": "synthesis",
+                        "text": "Síntese.",
+                        "evidence_refs": [process_ref, movement_ref],
+                    },
+                    {
+                        "claim_id": "current_status",
+                        "text": "Situação.",
+                        "evidence_refs": [process_ref],
+                    },
+                ],
+            },
+        }
+
+        loaded = await load_summary_claim_evidence(conn, summary_id=summary_id)
+        assert claim_evidence_is_complete(structured_output, loaded) is True
+
+        await conn.execute(
+            "DELETE FROM process_summary_sources WHERE summary_id=$1 AND step_id=$2",
+            summary_id,
+            step_id,
+        )
+        partially_tampered = await load_summary_claim_evidence(
+            conn, summary_id=summary_id
+        )
+        synthesis = next(
+            item
+            for item in partially_tampered
+            if item["claim_id"] == "synthesis"
+        )
+        assert synthesis["evidence_refs"] == [process_ref]
+        assert claim_evidence_is_complete(
+            structured_output,
+            partially_tampered,
+        ) is False
+    finally:
+        await conn.close()
 
 
 @pytest.mark.asyncio
