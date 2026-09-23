@@ -483,7 +483,7 @@ async def test_v1_idempotency_states_authorization_and_sanitized_sources(monkeyp
 
             async with pool.acquire() as conn:
                 original_structured_output = await conn.fetchval(
-                    "SELECT structured_output FROM process_summaries WHERE id=$1",
+                    "SELECT structured_output::text FROM process_summaries WHERE id=$1",
                     summary_id,
                 )
                 await conn.execute(
@@ -530,7 +530,7 @@ async def test_v1_idempotency_states_authorization_and_sanitized_sources(monkeyp
                 await conn.execute(
                     "UPDATE process_summaries SET structured_output=$2::jsonb WHERE id=$1",
                     summary_id,
-                    json.dumps(original_structured_output),
+                    original_structured_output,
                 )
                 await conn.execute(
                     "UPDATE processes SET secrecy_level=1 WHERE id=$1",
