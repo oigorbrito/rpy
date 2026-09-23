@@ -232,12 +232,6 @@ async def _job_payload(
     )
     if row is None:
         return None
-    sources = await _load_sources(
-        conn,
-        process_id=row["process_id"],
-        version_id=row["version_id"],
-        summary_id=row["summary_id"],
-    )
     claim_evidence = (
         await load_summary_claim_evidence(conn, summary_id=row["summary_id"])
         if row["summary_id"] is not None
@@ -272,6 +266,12 @@ async def _job_payload(
                 and claim_evidence_is_complete(structured_output, claim_evidence)
             )
         )
+    )
+    sources = await _load_sources(
+        conn,
+        process_id=row["process_id"],
+        version_id=row["version_id"],
+        summary_id=row["summary_id"] if publishable else None,
     )
     public_claim_evidence = claim_evidence if publishable and not is_secret else []
     payload = {
@@ -549,12 +549,6 @@ async def get_summary_sources(code: str, request: Request):
                         if summary_row["structured_output"] is not None
                         else None
                     )
-        sources = await _load_sources(
-            conn,
-            process_id=process["id"],
-            version_id=process["current_version_id"],
-            summary_id=summary_id,
-        )
         state = getattr(request, "state", None)
         principal = getattr(state, "principal", None)
         if not isinstance(principal, RequestPrincipal):
@@ -575,7 +569,14 @@ async def get_summary_sources(code: str, request: Request):
         elif not claim_evidence_is_complete(
             summary_structured_output, claim_evidence
         ):
+            summary_id = None
             claim_evidence = []
+        sources = await _load_sources(
+            conn,
+            process_id=process["id"],
+            version_id=process["current_version_id"],
+            summary_id=summary_id,
+        )
         flags = {"secrecy": int(process["secrecy_level"] or 0) > 0}
         flags.update(
             await _load_attachment_flags(
