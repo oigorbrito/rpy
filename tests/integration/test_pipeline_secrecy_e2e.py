@@ -244,6 +244,18 @@ async def test_secret_process_completes_locally_without_any_ai_provider(
                 "parties": [],
             }
 
+            leaked_summary_text = {
+                **structured_output,
+                "summary": {
+                    **structured_output["summary"],
+                    "synthesis": secret_party,
+                },
+            }
+            assert rag.is_restricted_local_summary(
+                {**dict(summary), "structured_output": leaked_summary_text},
+                process=process,
+            ) is False
+
             leaked_parties = {
                 **structured_output,
                 "process": {
