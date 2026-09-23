@@ -237,7 +237,7 @@ def test_missing_deterministic_date_is_insufficient_and_retryable() -> None:
     ]
 
 
-def test_unanchored_semantic_claim_remains_explicitly_not_evaluated() -> None:
+def test_unanchored_material_claim_is_not_evaluated_and_retryable() -> None:
     claim = MaterialClaim(
         claim_id="current_status",
         claim_class="current_status",
@@ -248,7 +248,25 @@ def test_unanchored_semantic_claim_remains_explicitly_not_evaluated() -> None:
     verification = verify_material_claims([claim], _context())
 
     assert verification["current_status"].status == "not_evaluated"
+    assert verification["current_status"].claim_class == "current_status"
     assert verification["current_status"].deterministic_fact_count == 0
+    assert verification_errors(verification) == [
+        "material claim was not evaluated: current_status"
+    ]
+
+
+def test_generic_attention_can_remain_measured_not_evaluated_without_retry() -> None:
+    claim = MaterialClaim(
+        claim_id="attention:0",
+        claim_class="attention",
+        text="Nenhuma divergência objetiva identificada.",
+        evidence_refs=(f"m-{STEP_ID.hex}",),
+    )
+
+    verification = verify_material_claims([claim], _context())
+
+    assert verification["attention:0"].status == "not_evaluated"
+    assert verification["attention:0"].claim_class == "attention"
     assert verification_errors(verification) == []
 
 
