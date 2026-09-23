@@ -28,6 +28,9 @@ async def _complete_from_current_summary(
         """
         SELECT p.current_version_id AS version_id,
                p.secrecy_level,
+               p.code,
+               p.class_name,
+               p.header,
                ps.id AS summary_id,
                ps.structured_output,
                ps.model,
@@ -46,7 +49,7 @@ async def _complete_from_current_summary(
         return False
 
     if int(current["secrecy_level"] or 0) > 0:
-        if not is_restricted_local_summary(current):
+        if not is_restricted_local_summary(current, process=current):
             return False
     else:
         claim_evidence = await load_summary_claim_evidence(
