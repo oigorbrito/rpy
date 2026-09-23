@@ -169,13 +169,28 @@ async def test_semantically_equal_response_reuses_current_version_and_summary(
     assert first_result["summary_enqueued"] is True
 
     async with pool.acquire() as conn:
-        process_id = await conn.fetchval("SELECT id FROM processes WHERE code = $1", code)
+        process = await conn.fetchrow(
+            """
+            SELECT id, code, class_name, court, header, parties
+            FROM processes
+            WHERE code = $1
+            """,
+            code,
+        )
+        assert process is not None
+        process_id = process["id"]
+        header = process["header"]
+        parties = process["parties"]
+        if isinstance(header, str):
+            header = json.loads(header)
+        if isinstance(parties, str):
+            parties = json.loads(parties)
         claim_context = {
-            "code": code,
-            "class_name": "Procedimento Comum",
-            "court": "TJRS",
-            "header": {},
-            "parties": [],
+            "code": process["code"],
+            "class_name": process["class_name"],
+            "court": process["court"],
+            "header": header,
+            "parties": parties,
             "_process_evidence_ref": process_evidence_ref(first_version),
             "_selected_sources": [],
             "_attachment_sources": [],
@@ -184,7 +199,7 @@ async def test_semantically_equal_response_reuses_current_version_and_summary(
             "synthesis": "Resumo sintético",
             "timeline": [],
             "current_status": "Situação atual registrada.",
-            "attention": [],
+            "attention": ["Nenhum ponto adicional de atenção."],
             "decisions": [],
             "deadlines": [],
             "related_processes": [],
