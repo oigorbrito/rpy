@@ -30,6 +30,11 @@ _LABELED_AMOUNT_RE = re.compile(
     r"(?P<amount>-?\d{1,3}(?:\.\d{3})*(?:,\d+)?|-?\d+(?:[.,]\d+)?)",
     re.IGNORECASE,
 )
+_STEP_COUNT_RE = re.compile(
+    r"\b(?:o\s+processo\s+possui|há|total(?:iza)?)\s+"
+    r"(?P<count>\d+)\s+movimentos\b",
+    re.IGNORECASE,
+)
 _SPACE_RE = re.compile(r"\s+")
 _SAO_PAULO = ZoneInfo("America/Sao_Paulo")
 _MAX_EXCERPT_CHARS = 4000
@@ -54,6 +59,7 @@ class VerificationEvidence:
     dates: frozenset[str]
     amounts: frozenset[Decimal]
     party_names: frozenset[str]
+    step_counts: frozenset[int]
     page_start: int | None = None
     page_end: int | None = None
     char_start: int | None = None
@@ -85,6 +91,10 @@ class ClaimVerification:
 def _normalized_text(value: Any) -> str:
     rendered = unicodedata.normalize("NFKC", str(value or "")).casefold()
     return _SPACE_RE.sub(" ", rendered).strip()
+
+
+def _normalized_exact_text(value: Any) -> str:
+    return _normalized_text(value).rstrip(" .;:!?")
 
 
 def _canonical_cnj(value: str) -> str:
@@ -153,6 +163,13 @@ def _amounts(text: str) -> frozenset[Decimal]:
     return frozenset(values)
 
 
+def _step_counts(text: str) -> frozenset[int]:
+    return frozenset(
+        int(match.group("count"))
+        for match in _STEP_COUNT_RE.finditer(text)
+    )
+
+
 def _known_party_names(context: dict[str, Any]) -> frozenset[str]:
     values: set[str] = set()
     for party in context.get("parties", []):
@@ -184,6 +201,7 @@ def _verification_evidence(
     text: str,
     known_parties: frozenset[str],
     amounts: frozenset[Decimal] | None = None,
+    step_counts: frozenset[int] | None = None,
     page_start: int | None = None,
     page_end: int | None = None,
     char_start: int | None = None,
@@ -197,6 +215,9 @@ def _verification_evidence(
         dates=_dates(text),
         amounts=frozenset(amounts if amounts is not None else _amounts(text)),
         party_names=_party_names_in_text(text, known_parties),
+        step_counts=frozenset(
+            step_counts if step_counts is not None else _step_counts(text)
+        ),
         page_start=page_start,
         page_end=page_end,
         char_start=char_start,
@@ -216,8 +237,33 @@ def verification_evidence_catalog(
             "code": context.get("code"),
             "court": context.get("court"),
             "class_name": context.get("class_name"),
-            "header": context.get("header") if isinstance(context.get("header"), dict) else {},
-            "parties": context.get("parties") if isinstance(context.get("parties"), list) else [],
+            "subjects": (
+                context.get("subjects")
+                if isinstance(context.get("subjects"), list)
+                else []
+            ),
+            "parties": (
+                context.get("parties")
+                if isinstance(context.get("parties"), list)
+                else []
+            ),
+            "representatives": (
+                context.get("representatives")
+                if isinstance(context.get("representatives"), list)
+                else []
+            ),
+            "secrecy_level": context.get("secrecy_level"),
+            "header": (
+                context.get("header")
+                if isinstance(context.get("header"), dict)
+                else {}
+            ),
+            "step_count": context.get("step_count"),
+            "source_warnings": (
+                context.get("source_warnings")
+                if isinstance(context.get("source_warnings"), list)
+                else []
+            ),
         }
         process_amounts: set[Decimal] = set()
         header = process_payload["header"]
@@ -231,6 +277,13 @@ def verification_evidence_catalog(
             text=_canonical_json(process_payload),
             known_parties=known_parties,
             amounts=frozenset(process_amounts),
+            step_counts=(
+                frozenset({int(context["step_count"])})
+                if isinstance(context.get("step_count"), int)
+                and not isinstance(context.get("step_count"), bool)
+                and int(context["step_count"]) >= 0
+                else frozenset()
+            ),
         )
 
     for step in context.get("steps", []):
@@ -286,7 +339,7 @@ def _relation_status(
     evidence: VerificationEvidence,
     known_parties: frozenset[str],
 ) -> tuple[str, str, int]:
-    normalized_claim = _normalized_text(claim_text)
+    normalized_claim = _normalized_exact_text(claim_text)
     normalized_evidence = _normalized_text(evidence.text)
     if normalized_claim and normalized_claim in normalized_evidence:
         return "supported", "exact_text_present", 1
@@ -295,11 +348,13 @@ def _relation_status(
     claim_dates = _dates(claim_text)
     claim_amounts = _amounts(claim_text)
     claim_parties = _party_names_in_text(claim_text, known_parties)
+    claim_step_counts = _step_counts(claim_text)
     fact_count = (
         len(claim_cnjs)
         + len(claim_dates)
         + len(claim_amounts)
         + len(claim_parties)
+        + len(claim_step_counts)
     )
     if fact_count == 0:
         return "not_evaluated", "no_deterministic_fact_anchor", 0
@@ -319,6 +374,11 @@ def _relation_status(
 
     if claim_parties and not claim_parties.issubset(evidence.party_names):
         return "insufficient", "cited_source_missing_party", fact_count
+
+    if claim_step_counts and not claim_step_counts.issubset(evidence.step_counts):
+        if evidence.kind == "process" and evidence.step_counts:
+            return "contradicted", "process_step_count_mismatch", fact_count
+        return "insufficient", "cited_source_missing_step_count", fact_count
 
     return "supported", "deterministic_facts_present", fact_count
 
@@ -379,14 +439,16 @@ def verify_material_claims(
         claim_dates = _dates(claim.text)
         claim_amounts = _amounts(claim.text)
         claim_parties = _party_names_in_text(claim.text, known_parties)
+        claim_step_counts = _step_counts(claim.text)
         fact_count = (
             len(claim_cnjs)
             + len(claim_dates)
             + len(claim_amounts)
             + len(claim_parties)
+            + len(claim_step_counts)
         )
 
-        normalized_claim = _normalized_text(claim.text)
+        normalized_claim = _normalized_exact_text(claim.text)
         exact_support = any(
             normalized_claim
             and normalized_claim in _normalized_text(evidence.text)
@@ -405,6 +467,9 @@ def verify_material_claims(
         combined_parties = frozenset(
             value for evidence in cited_evidence for value in evidence.party_names
         )
+        combined_step_counts = frozenset(
+            value for evidence in cited_evidence for value in evidence.step_counts
+        )
 
         process_evidence = [
             evidence for evidence in cited_evidence if evidence.kind == "process"
@@ -414,6 +479,9 @@ def verify_material_claims(
         )
         process_amounts = frozenset(
             value for evidence in process_evidence for value in evidence.amounts
+        )
+        process_step_counts = frozenset(
+            value for evidence in process_evidence for value in evidence.step_counts
         )
 
         relation_statuses = {relation.status for relation in relations}
@@ -441,10 +509,18 @@ def verify_material_claims(
             status = "contradicted"
             reason = "process_amount_mismatch"
         elif (
+            claim_step_counts
+            and not claim_step_counts.issubset(combined_step_counts)
+            and process_step_counts
+        ):
+            status = "contradicted"
+            reason = "process_step_count_mismatch"
+        elif (
             claim_cnjs.issubset(combined_cnjs)
             and claim_dates.issubset(combined_dates)
             and claim_amounts.issubset(combined_amounts)
             and claim_parties.issubset(combined_parties)
+            and claim_step_counts.issubset(combined_step_counts)
         ):
             status = "supported"
             reason = "deterministic_facts_present_across_cited_sources"
