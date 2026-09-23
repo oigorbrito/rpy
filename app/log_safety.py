@@ -41,6 +41,20 @@ _QUERY_SECRET_RE = re.compile(
 _API_KEY_TOKEN_RE = re.compile(r"\b(?:sk_(?:live|test)|sk-ant-api)[a-zA-Z0-9_-]+\b")
 
 
+def _configured_bearer_token_keys(value: str) -> list[str]:
+    try:
+        parsed = json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        return []
+    if not isinstance(parsed, dict):
+        return []
+    return [
+        token
+        for token in parsed
+        if isinstance(token, str) and len(token) >= 4
+    ]
+
+
 def _configured_secret_values() -> list[str]:
     values: list[str] = []
     for name in _SECRET_ENV_NAMES:
@@ -49,16 +63,7 @@ def _configured_secret_values() -> list[str]:
             continue
         values.append(value)
         if name == "RPY_BEARER_TOKENS":
-            try:
-                parsed = json.loads(value)
-            except (json.JSONDecodeError, TypeError):
-                continue
-            if isinstance(parsed, dict):
-                values.extend(
-                    token
-                    for token in parsed
-                    if isinstance(token, str) and len(token) >= 4
-                )
+            values.extend(_configured_bearer_token_keys(value))
     return sorted(set(values), key=len, reverse=True)
 
 
