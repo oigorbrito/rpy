@@ -7,6 +7,7 @@ import math
 import os
 import re
 from pathlib import Path
+from typing import Callable
 from urllib.parse import urlsplit
 from uuid import UUID
 
@@ -171,40 +172,66 @@ def _bool_value(values: dict[str, str], key: str, default: bool = False) -> bool
 
 
 
+def _validate_positive_numeric(
+    values: dict[str, str],
+    errors: list[str],
+    *,
+    key: str,
+    default: str,
+    convert: Callable[[str], int | float],
+    invalid_message: str,
+    non_positive_message: str,
+    require_finite: bool = False,
+) -> None:
+    raw = str(values.get(key) or default).strip()
+    try:
+        value = convert(raw)
+    except ValueError:
+        errors.append(invalid_message)
+        return
+    if require_finite and isinstance(value, float) and not math.isfinite(value):
+        errors.append(non_positive_message)
+        return
+    if value <= 0:
+        errors.append(non_positive_message)
+
+
 def _validate_attachment_ocr(values: dict[str, str], errors: list[str]) -> None:
     try:
         _bool_value(values, "ATTACHMENT_OCR_ENABLED", False)
     except ValueError as exc:
         errors.append(str(exc))
 
-    raw_timeout = str(values.get("ATTACHMENT_OCR_TIMEOUT_SECONDS") or "30").strip()
-    try:
-        timeout = int(raw_timeout)
-    except ValueError:
-        errors.append("ATTACHMENT_OCR_TIMEOUT_SECONDS must be an integer")
-    else:
-        if timeout <= 0:
-            errors.append("ATTACHMENT_OCR_TIMEOUT_SECONDS must be greater than zero")
-
-    raw_scale = str(values.get("ATTACHMENT_PDF_OCR_SCALE") or "2.0").strip()
-    try:
-        scale = float(raw_scale)
-    except ValueError:
-        errors.append("ATTACHMENT_PDF_OCR_SCALE must be numeric")
-    else:
-        if not math.isfinite(scale) or scale <= 0:
-            errors.append(
-                "ATTACHMENT_PDF_OCR_SCALE must be a finite number greater than zero"
-            )
-
-    raw_max_pages = str(values.get("ATTACHMENT_PDF_OCR_MAX_PAGES") or "100").strip()
-    try:
-        max_pages = int(raw_max_pages)
-    except ValueError:
-        errors.append("ATTACHMENT_PDF_OCR_MAX_PAGES must be an integer")
-    else:
-        if max_pages <= 0:
-            errors.append("ATTACHMENT_PDF_OCR_MAX_PAGES must be greater than zero")
+    _validate_positive_numeric(
+        values,
+        errors,
+        key="ATTACHMENT_OCR_TIMEOUT_SECONDS",
+        default="30",
+        convert=int,
+        invalid_message="ATTACHMENT_OCR_TIMEOUT_SECONDS must be an integer",
+        non_positive_message="ATTACHMENT_OCR_TIMEOUT_SECONDS must be greater than zero",
+    )
+    _validate_positive_numeric(
+        values,
+        errors,
+        key="ATTACHMENT_PDF_OCR_SCALE",
+        default="2.0",
+        convert=float,
+        invalid_message="ATTACHMENT_PDF_OCR_SCALE must be numeric",
+        non_positive_message=(
+            "ATTACHMENT_PDF_OCR_SCALE must be a finite number greater than zero"
+        ),
+        require_finite=True,
+    )
+    _validate_positive_numeric(
+        values,
+        errors,
+        key="ATTACHMENT_PDF_OCR_MAX_PAGES",
+        default="100",
+        convert=int,
+        invalid_message="ATTACHMENT_PDF_OCR_MAX_PAGES must be an integer",
+        non_positive_message="ATTACHMENT_PDF_OCR_MAX_PAGES must be greater than zero",
+    )
 
 def _validate_embedding_runtime(values: dict[str, str], errors: list[str]) -> None:
     try:
