@@ -39,6 +39,14 @@ def test_offline_generation_matches_versioned_baseline() -> None:
         + report["metrics"]["semantic_unverified_claim_rate"]
         == pytest.approx(1.0)
     )
+    verification_by_class = report["counts"]["claim_verification_by_class"]
+    assert verification_by_class
+    assert sum(
+        sum(class_counts.values())
+        for class_counts in verification_by_class.values()
+    ) == report["counts"]["material_claims"]
+    assert verification_by_class["current_status"]["not_evaluated"] > 0
+    assert verification_by_class["attention"]["not_evaluated"] > 0
 
 
 def test_generation_regression_is_reported() -> None:
