@@ -389,6 +389,7 @@ async def replace_summary_claim_evidence(
             else {}
         )
         records: list[tuple[Any, ...]] = []
+        excerpt_records: list[tuple[Any, ...]] = []
         for source_order, ref in enumerate(claim.evidence_refs):
             source = catalog.get(ref)
             if source is None:
@@ -411,7 +412,6 @@ async def replace_summary_claim_evidence(
                         if relation is not None
                         else "semantic_verifier_not_run"
                     ),
-                    relation.evidence_excerpt if relation is not None else None,
                     (
                         relation.evidence_excerpt_sha256
                         if relation is not None
@@ -423,21 +423,34 @@ async def replace_summary_claim_evidence(
                     relation.char_end if relation is not None else None,
                 )
             )
+            if relation is not None and relation.evidence_excerpt:
+                excerpt_records.append(
+                    (claim_row_id, ref, relation.evidence_excerpt)
+                )
         await conn.executemany(
             """
             INSERT INTO process_summary_claim_sources (
                 claim_row_id, summary_id, process_id, version_id,
                 evidence_ref, source_kind, step_id, attachment_chunk_id, source_order,
                 verification_status, verification_reason,
-                evidence_excerpt, evidence_excerpt_sha256,
+                evidence_excerpt_sha256,
                 page_start, page_end, char_start, char_end
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9,
-                $10, $11, $12, $13, $14, $15, $16, $17
+                $10, $11, $12, $13, $14, $15, $16
             )
             """,
             records,
         )
+        if excerpt_records:
+            await conn.executemany(
+                """
+                INSERT INTO process_summary_claim_evidence_excerpts (
+                    claim_row_id, evidence_ref, evidence_excerpt
+                ) VALUES ($1, $2, $3)
+                """,
+                excerpt_records,
+            )
 
 
 async def load_summary_claim_evidence(
@@ -457,7 +470,6 @@ async def load_summary_claim_evidence(
                            'source_order', s.source_order,
                            'verification_status', s.verification_status,
                            'verification_reason', s.verification_reason,
-                           'evidence_excerpt', s.evidence_excerpt,
                            'evidence_excerpt_sha256', s.evidence_excerpt_sha256,
                            'page_start', s.page_start,
                            'page_end', s.page_end,
@@ -547,11 +559,6 @@ async def load_summary_claim_evidence(
                 "verification_reason": (
                     str(item["verification_reason"])
                     if item.get("verification_reason") is not None
-                    else None
-                ),
-                "evidence_excerpt": (
-                    str(item["evidence_excerpt"])
-                    if item.get("evidence_excerpt") is not None
                     else None
                 ),
                 "evidence_excerpt_sha256": (
