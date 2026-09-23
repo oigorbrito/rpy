@@ -28,6 +28,7 @@ from app.process_requests import grant_request_tenants, request_process
 from app.processes import get_authorized_process, log_access, stage_version
 from app.queue import enqueue
 from app.security_headers import SecurityResponseHeadersMiddleware
+from app.summary_policy import is_restricted_local_summary, restricted_public_header
 from app.tenancy import configured_webhook_tenant, validate_carteira_seed
 from app.webhook_security import (
     JuditWebhookSecretRedactionMiddleware,
@@ -188,6 +189,7 @@ async def get_process_summary(code: str, request: Request) -> dict:
             process_code=canonical_code,
             action="read_process_summary",
         )
+        is_restricted = int(process["secrecy_level"] or 0) > 0
         summary = await conn.fetchrow(
             """
             SELECT markdown, validation, model, prompt_version, generation_ms, created_at
@@ -199,21 +201,28 @@ async def get_process_summary(code: str, request: Request) -> dict:
             process["id"],
             process["current_version_id"],
         )
+        if (
+            is_restricted
+            and summary is not None
+            and not is_restricted_local_summary(summary)
+        ):
+            summary = None
         steps = []
         summary_job_status = None
         cached_response = False
         if process["current_version_id"] is not None:
-            steps = await conn.fetch(
-                """
-                SELECT step_number, occurred_at, title, text
-                FROM process_steps
-                WHERE process_id = $1 AND version_id = $2
-                ORDER BY occurred_at DESC NULLS LAST, step_number DESC
-                LIMIT 20
-                """,
-                process["id"],
-                process["current_version_id"],
-            )
+            if not is_restricted:
+                steps = await conn.fetch(
+                    """
+                    SELECT step_number, occurred_at, title, text
+                    FROM process_steps
+                    WHERE process_id = $1 AND version_id = $2
+                    ORDER BY occurred_at DESC NULLS LAST, step_number DESC
+                    LIMIT 20
+                    """,
+                    process["id"],
+                    process["current_version_id"],
+                )
             cached_response = bool(
                 await conn.fetchval(
                     "SELECT source_cached_response FROM process_versions WHERE id = $1 AND process_id = $2",
@@ -237,9 +246,16 @@ async def get_process_summary(code: str, request: Request) -> dict:
         )
 
     ia_summary = summary_data["markdown"] if summary_data else None
-    parties = _json_value(process["parties"], fallback=[])
-    subjects = _json_value(process["subjects"], fallback=[])
-    header = _json_value(process["header"], fallback={})
+    if is_restricted:
+        parties = []
+        subjects = []
+        header = restricted_public_header(
+            _json_value(process["header"], fallback={})
+        )
+    else:
+        parties = _json_value(process["parties"], fallback=[])
+        subjects = _json_value(process["subjects"], fallback=[])
+        header = _json_value(process["header"], fallback={})
 
     return {
         "code": process["code"],
