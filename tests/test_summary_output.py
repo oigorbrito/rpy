@@ -38,6 +38,11 @@ def _payload() -> dict:
                 "text": "Movimento relevante registrado.",
                 "evidence_refs": ["m-00000000000000000000000000000002"],
             },
+            {
+                "claim_id": "attention:0",
+                "text": "Nenhuma divergência objetiva identificada.",
+                "evidence_refs": ["p-00000000000000000000000000000001"],
+            },
         ],
     }
 
@@ -55,6 +60,11 @@ def _context() -> dict:
 def test_schema_is_closed_and_requires_all_contract_fields() -> None:
     assert SUMMARY_OUTPUT_SCHEMA["additionalProperties"] is False
     assert set(SUMMARY_OUTPUT_SCHEMA["required"]) == set(SUMMARY_OUTPUT_SCHEMA["properties"])
+
+
+def test_claim_schema_capacity_covers_all_bounded_material_items() -> None:
+    material_capacity = 2 + 24 + 12 + 16 + 12 + 12 + 12
+    assert SUMMARY_OUTPUT_SCHEMA["properties"]["claims"]["maxItems"] >= material_capacity
 
 
 def test_parser_rejects_extra_fields_and_wrong_types() -> None:
