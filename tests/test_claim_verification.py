@@ -73,6 +73,20 @@ def test_process_amount_mismatch_is_contradicted() -> None:
     ]
 
 
+def test_different_cnj_on_process_ref_is_insufficient_not_contradicted() -> None:
+    claim = MaterialClaim(
+        claim_id="related_processes:0",
+        claim_class="related_process",
+        text="Processo relacionado 9999999-99.2026.8.21.9999.",
+        evidence_refs=(process_evidence_ref(VERSION_ID),),
+    )
+
+    result = verify_material_claims([claim], _context())["related_processes:0"]
+
+    assert result.status == "insufficient"
+    assert result.reason == "cited_sources_do_not_support_all_deterministic_facts"
+
+
 def test_process_step_count_is_supported_and_mismatch_is_contradicted() -> None:
     supported = MaterialClaim(
         claim_id="synthesis",
