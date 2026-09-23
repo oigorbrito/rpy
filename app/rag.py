@@ -53,6 +53,12 @@ from app.summary_output import (
     render_structured_summary,
     structured_summary_document,
 )
+from app.summary_policy import (
+    RESTRICTED_HEADER_FIELDS,
+    RESTRICTED_MODEL,
+    RESTRICTED_PROMPT_VERSION,
+    is_restricted_local_summary,
+)
 from app.tasks import PermanentTaskError, task
 from app.tpu_glossary import resolve_process_tpu_definitions
 from app.unicode_security import model_view_text, model_view_value
@@ -66,8 +72,6 @@ SHORT_SUMMARY_STEP_MAX = 15
 MEDIUM_SUMMARY_STEP_MAX = 60
 MAX_TOKENS = 4000
 PROMPT_VERSION = "process-summary-v5"
-RESTRICTED_MODEL = "local-deterministic"
-RESTRICTED_PROMPT_VERSION = "secret-summary-v1"
 REQUESTED_TEMPERATURE = 0.2
 # Anthropic deprecates custom sampling parameters for current Claude models.
 # Keep the product's requested value documented but omit it from API payloads.
@@ -82,14 +86,6 @@ DEFAULT_PROVIDER_STEP_TEXT_MAX_CHARS = 12_000
 DEFAULT_PROVIDER_STEPS_TEXT_MAX_CHARS = 80_000
 TRUNCATION_MARKER = "… [truncated]"
 _SAO_PAULO = ZoneInfo("America/Sao_Paulo")
-_SECRET_HEADER_FIELDS = (
-    ("instance", "Instância"),
-    ("area", "Área"),
-    ("justice_description", "Justiça"),
-    ("county", "Comarca"),
-    ("state", "Estado"),
-    ("city", "Cidade"),
-)
 _USAGE_FIELDS = (
     "input_tokens",
     "output_tokens",
@@ -381,7 +377,7 @@ def _secret_summary(context: dict[str, Any]) -> str:
         allowed_lines.append(f"- Classe: {class_name}")
 
     header = context.get("header") if isinstance(context.get("header"), dict) else {}
-    for key, label in _SECRET_HEADER_FIELDS:
+    for key, label in RESTRICTED_HEADER_FIELDS:
         value = header.get(key)
         if value is None:
             continue
@@ -779,10 +775,7 @@ async def _load_publishable_summary(
         if row is None:
             return None
         if int(row["secrecy_level"] or 0) > 0:
-            if (
-                row["model"] != RESTRICTED_MODEL
-                or row["prompt_version"] != RESTRICTED_PROMPT_VERSION
-            ):
+            if not is_restricted_local_summary(row):
                 return None
         else:
             claim_evidence = await load_summary_claim_evidence(
