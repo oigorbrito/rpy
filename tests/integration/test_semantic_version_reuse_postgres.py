@@ -27,6 +27,31 @@ from app.summary_output import structured_summary_document
 from app.summary_policy import RESTRICTED_MODEL, RESTRICTED_PROMPT_VERSION
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
+def _restricted_structured_output(code: str) -> dict:
+    return structured_summary_document(
+        {
+            "synthesis": "Os detalhes processuais foram restringidos por sigilo.",
+            "timeline": [],
+            "current_status": (
+                "O contexto público disponível está limitado pelos dados permitidos "
+                "para processo sigiloso."
+            ),
+            "attention": ["Processo com detalhes restringidos por sigilo."],
+            "decisions": [],
+            "deadlines": [],
+            "related_processes": [],
+            "attachments": [],
+        },
+        {
+            "code": code,
+            "class_name": None,
+            "court": None,
+            "header": {},
+            "parties": [],
+        },
+    )
+
+
 pytestmark = pytest.mark.skipif(
     not TEST_DATABASE_URL,
     reason="TEST_DATABASE_URL is required for PostgreSQL integration tests",
@@ -285,14 +310,16 @@ async def test_restricted_summary_reuse_fails_after_process_becomes_public() -> 
                 """
                 INSERT INTO process_summaries (
                     process_id, version_id, markdown, validation, model,
-                    prompt_version, generation_ms
+                    prompt_version, generation_ms, structured_output
                 ) VALUES ($1, $2, '# resumo restrito',
-                          '{"passed": true, "errors": []}'::jsonb, $3, $4, 1)
+                          '{"passed": true, "errors": []}'::jsonb, $3, $4, 1,
+                          $5::jsonb)
                 """,
                 process_id,
                 version_id,
                 RESTRICTED_MODEL,
                 RESTRICTED_PROMPT_VERSION,
+                json.dumps(_restricted_structured_output(code)),
             )
 
             assert await _complete_from_current_summary(
@@ -422,12 +449,13 @@ async def test_public_lifecycle_completion_uses_publication_gate() -> None:
             await conn.execute(
                 """
                 UPDATE process_summaries
-                SET model=$2, prompt_version=$3
+                SET model=$2, prompt_version=$3, structured_output=$4::jsonb
                 WHERE id=$1
                 """,
                 summary_id,
                 RESTRICTED_MODEL,
                 RESTRICTED_PROMPT_VERSION,
+                json.dumps(_restricted_structured_output(code)),
             )
             restricted_request = await new_request("restricted-valid")
             await reconcile_generation_result(
