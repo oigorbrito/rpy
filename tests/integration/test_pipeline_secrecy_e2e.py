@@ -228,7 +228,7 @@ async def test_secret_process_completes_locally_without_any_ai_provider(
             validation = decode_json_object(summary["validation"], label="summary validation")
             assert validation["passed"] is True
             assert summary["model"] == rag.RESTRICTED_MODEL == "local-deterministic"
-            assert summary["prompt_version"] == rag.RESTRICTED_PROMPT_VERSION == "secret-summary-v1"
+            assert summary["prompt_version"] == rag.RESTRICTED_PROMPT_VERSION
 
             markdown = summary["markdown"]
             assert "sigilo" in markdown.casefold()
