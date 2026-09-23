@@ -156,9 +156,21 @@ class Worker:
         summary_trace = SummaryTrace()
         try:
             handler, payload = _resolve_job_contract(row)
-            async with self.pool.acquire() as conn:
-                await mark_job_started(conn, task_name=task_name, payload=payload)
             if task_name == "generate_process_summary":
+                async with self.pool.acquire() as conn:
+                    async with _transaction(conn):
+                        owns_job = await heartbeat(conn, job_id, self.worker_id)
+                        if not owns_job:
+                            logger.warning(
+                                "job %s lost ownership before lifecycle start",
+                                job_id,
+                            )
+                            return
+                        await mark_job_started(
+                            conn,
+                            task_name=task_name,
+                            payload=payload,
+                        )
                 summary_trace = start_summary_trace(
                     job_id=job_id,
                     process_id=payload.get("process_id"),
@@ -173,6 +185,20 @@ class Worker:
             trace_source_ids: list[str] = []
             async with self.pool.acquire() as conn:
                 async with _transaction(conn):
+                    completed = await complete(
+                        conn,
+                        job_id,
+                        self.worker_id,
+                        result or {},
+                    )
+                    if not completed:
+                        logger.warning(
+                            "job %s lost ownership before completion",
+                            job_id,
+                        )
+                        if task_name == "generate_process_summary":
+                            summary_trace.finish(error_type="LostJobOwnership")
+                        return
                     if task_name == "generate_process_summary":
                         await reconcile_generation_result(
                             conn,
@@ -182,7 +208,6 @@ class Worker:
                         summary_id, trace_source_ids = await _summary_trace_details(conn, payload)
                         if summary_id is not None:
                             trace_result["summary_id"] = summary_id
-                    await complete(conn, job_id, self.worker_id, result or {})
             if task_name == "generate_process_summary":
                 validation = trace_result.get("validation")
                 validation_errors = (
