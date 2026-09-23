@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from hypothesis import given, settings, strategies as st
 
 from app import egress_proxy
 
@@ -19,6 +20,30 @@ def test_allowlist_requires_dns_names(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("EGRESS_PROXY_ALLOWED_HOSTS", "127.0.0.1")
     with pytest.raises(RuntimeError, match="DNS hostnames"):
         egress_proxy._allowed_hosts()
+
+
+def test_programmatic_allowlist_uses_same_validation_as_environment() -> None:
+    assert egress_proxy._normalize_allowed_hosts(
+        ["API.ANTHROPIC.COM.", "requests.production.judit.io"]
+    ) == frozenset({"api.anthropic.com", "requests.production.judit.io"})  # nosec B101
+
+    with pytest.raises(RuntimeError, match="DNS hostnames"):
+        egress_proxy._normalize_allowed_hosts(["127.0.0.1"])
+
+
+@settings(max_examples=96, deadline=None)
+@given(address=st.ip_addresses())
+def test_programmatic_allowlist_property_rejects_ip_literals(address) -> None:
+    with pytest.raises(RuntimeError, match="DNS hostnames"):
+        egress_proxy._normalize_allowed_hosts([str(address)])
+
+
+@settings(max_examples=96, deadline=None)
+@given(address=st.ip_addresses())
+def test_connect_target_property_rejects_ip_literal_destinations(address) -> None:
+    target = f"{address}:443" if address.version == 4 else f"[{address}]:443"
+    with pytest.raises(ValueError):
+        egress_proxy._parse_connect_target(target)
 
 
 @pytest.mark.parametrize(
