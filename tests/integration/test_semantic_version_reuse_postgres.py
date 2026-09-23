@@ -13,11 +13,12 @@ from app.claim_evidence import (
     validate_claim_evidence,
 )
 from app.db import create_pool
-from app.judit_tasks import finalize_judit_request_task
+from app.judit_tasks import _complete_from_current_summary, finalize_judit_request_task
 from app.migrations import migrate
 from app.processes import stage_version
 from app.rag import _persist_summary
 from app.summary_output import structured_summary_document
+from app.summary_policy import RESTRICTED_MODEL, RESTRICTED_PROMPT_VERSION
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(
@@ -231,6 +232,81 @@ async def test_semantically_equal_response_reuses_current_version_and_summary(
     assert summaries == 1
 
     await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_restricted_summary_reuse_fails_after_process_becomes_public() -> None:
+    assert TEST_DATABASE_URL is not None
+    await migrate(TEST_DATABASE_URL)
+    pool = await create_pool(TEST_DATABASE_URL, min_size=1, max_size=2)
+    try:
+        process_id = uuid4()
+        version_id = uuid4()
+        code = "0000000-00.2026.8.21.0199"
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                TRUNCATE jobs, process_summaries, process_steps, tenant_processes,
+                         access_log, process_versions, processes, tenants
+                RESTART IDENTITY CASCADE
+                """
+            )
+            await conn.execute(
+                """
+                INSERT INTO processes (
+                    id, code, secrecy_level, current_version_id
+                ) VALUES ($1, $2, 1, NULL)
+                """,
+                process_id,
+                code,
+            )
+            await conn.execute(
+                """
+                INSERT INTO process_versions (
+                    id, process_id, source_request_id, finalized
+                ) VALUES ($1, $2, $3, TRUE)
+                """,
+                version_id,
+                process_id,
+                f"restricted-{version_id}",
+            )
+            await conn.execute(
+                "UPDATE processes SET current_version_id=$2 WHERE id=$1",
+                process_id,
+                version_id,
+            )
+            await conn.execute(
+                """
+                INSERT INTO process_summaries (
+                    process_id, version_id, markdown, validation, model,
+                    prompt_version, generation_ms
+                ) VALUES ($1, $2, '# resumo restrito',
+                          '{"passed": true, "errors": []}'::jsonb, $3, $4, 1)
+                """,
+                process_id,
+                version_id,
+                RESTRICTED_MODEL,
+                RESTRICTED_PROMPT_VERSION,
+            )
+
+            assert await _complete_from_current_summary(
+                conn,
+                request_id=f"secret-{uuid4()}",
+                process_id=process_id,
+            ) is True
+
+            await conn.execute(
+                "UPDATE processes SET secrecy_level=0 WHERE id=$1",
+                process_id,
+            )
+
+            assert await _complete_from_current_summary(
+                conn,
+                request_id=f"public-{uuid4()}",
+                process_id=process_id,
+            ) is False
+    finally:
+        await pool.close()
 
 
 @pytest.mark.asyncio
