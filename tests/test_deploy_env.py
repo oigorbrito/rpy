@@ -54,6 +54,12 @@ def _enable_cohere(values: dict[str, str]) -> None:
     values["COHERE_API_KEY"] = "cohere-key"
 
 
+def _require_error(values: dict[str, str], expected: str) -> None:
+    errors = preflight.validate(values)
+    if expected not in errors:
+        raise AssertionError(f"expected deploy preflight error {expected!r}, got {errors!r}")
+
+
 def test_valid_deploy_environment_passes() -> None:
     assert preflight.validate(_valid_values()) == []
 
@@ -62,9 +68,9 @@ def test_deploy_preflight_rejects_non_finite_attachment_pdf_ocr_scale() -> None:
     for value in ("nan", "inf", "-inf"):
         values = _valid_values()
         values["ATTACHMENT_PDF_OCR_SCALE"] = value
-        assert (
-            "ATTACHMENT_PDF_OCR_SCALE must be a finite number greater than zero"
-            in preflight.validate(values)
+        _require_error(
+            values,
+            "ATTACHMENT_PDF_OCR_SCALE must be a finite number greater than zero",
         )
 
 
@@ -74,8 +80,10 @@ def test_deploy_preflight_validates_attachment_ocr_integer_controls() -> None:
     values["ATTACHMENT_PDF_OCR_MAX_PAGES"] = "many"
     errors = preflight.validate(values)
 
-    assert "ATTACHMENT_OCR_TIMEOUT_SECONDS must be greater than zero" in errors
-    assert "ATTACHMENT_PDF_OCR_MAX_PAGES must be an integer" in errors
+    if "ATTACHMENT_OCR_TIMEOUT_SECONDS must be greater than zero" not in errors:
+        raise AssertionError(f"missing timeout validation error: {errors!r}")
+    if "ATTACHMENT_PDF_OCR_MAX_PAGES must be an integer" not in errors:
+        raise AssertionError(f"missing max-pages validation error: {errors!r}")
 
 
 def test_bge_runtime_does_not_require_openai_key() -> None:
