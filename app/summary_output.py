@@ -381,11 +381,11 @@ def render_structured_summary(payload: dict[str, Any], context: dict[str, Any]) 
         lines.append("Nenhuma movimentação relevante selecionada.")
     lines.extend(["", f"Estado atual: {payload['current_status']}"])
 
-    for key, title in _LIST_FIELDS[1:]:
-        _append_list(lines, title, payload[key])
-
     lines.extend(
         ["", "## Pontos de atenção", *(f"- {item}" for item in payload["attention"])]
     )
+
+    for key, title in _LIST_FIELDS[1:]:
+        _append_list(lines, title, payload[key])
 
     return "\n".join(lines).strip()
