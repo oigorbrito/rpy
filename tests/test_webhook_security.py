@@ -102,9 +102,7 @@ _TOKEN_ALPHABET = st.characters(
     blacklist_characters="/\\x00\\r\\n",
     blacklist_categories=("Cs",),
 )
-_TOKEN_STRATEGY = st.text(_TOKEN_ALPHABET, min_size=1, max_size=128).filter(
-    lambda value: value != REDACTED_WEBHOOK_TOKEN
-)
+_TOKEN_STRATEGY = st.text(_TOKEN_ALPHABET, min_size=1, max_size=128)
 
 
 @settings(max_examples=128, deadline=None)
@@ -130,9 +128,9 @@ async def test_webhook_redaction_property_never_exposes_valid_route_token(token:
 
     await middleware(scope, None, None)
 
-    assert seen["path"] == f"/webhooks/judit/{REDACTED_WEBHOOK_TOKEN}"  # nosec B101
-    assert token not in seen["path"]  # nosec B101
-    assert token.encode("utf-8") not in seen["raw_path"]  # nosec B101
+    redacted_path = f"/webhooks/judit/{REDACTED_WEBHOOK_TOKEN}"
+    assert seen["path"] == redacted_path  # nosec B101
+    assert seen["raw_path"] == redacted_path.encode("utf-8")  # nosec B101
     assert seen["state"][JUDIT_WEBHOOK_TOKEN_STATE_KEY] == token  # nosec B101
     assert webhook_token_from_scope(scope, REDACTED_WEBHOOK_TOKEN) == token  # nosec B101
 
@@ -163,7 +161,8 @@ async def test_webhook_redaction_property_malformed_paths_never_gain_auth_state(
 
     await middleware(scope, None, None)
 
-    assert seen["path"].startswith(f"/webhooks/judit/{REDACTED_WEBHOOK_TOKEN}/")  # nosec B101
-    assert token.encode("utf-8") not in seen["raw_path"]  # nosec B101
+    expected_path = f"/webhooks/judit/{REDACTED_WEBHOOK_TOKEN}{tail}"
+    assert seen["path"] == expected_path  # nosec B101
+    assert seen["raw_path"] == expected_path.encode("utf-8")  # nosec B101
     assert JUDIT_WEBHOOK_TOKEN_STATE_KEY not in seen["state"]  # nosec B101
     assert webhook_token_from_scope(scope, REDACTED_WEBHOOK_TOKEN) == REDACTED_WEBHOOK_TOKEN  # nosec B101
