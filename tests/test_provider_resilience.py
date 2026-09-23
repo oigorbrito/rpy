@@ -158,3 +158,37 @@ def test_provider_timeout_must_fit_inside_worker_timeout(monkeypatch) -> None:
 
     with pytest.raises(ValueError, match="lower than WORKER_TASK_TIMEOUT_SECONDS"):
         providers.anthropic_settings()
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("timeout_seconds", float("nan"), "finite number greater than zero"),
+        ("timeout_seconds", float("inf"), "finite number greater than zero"),
+        ("retry_backoff_seconds", float("nan"), "must be finite"),
+        ("retry_backoff_seconds", float("inf"), "must be finite"),
+    ],
+)
+def test_provider_settings_reject_non_finite_timing_controls(
+    field: str,
+    value: float,
+    message: str,
+) -> None:
+    kwargs = {
+        "timeout_seconds": 1.0,
+        "max_attempts": 2,
+        "retry_backoff_seconds": 0.1,
+    }
+    kwargs[field] = value
+    with pytest.raises(ValueError, match=message):
+        providers.ProviderSettings(**kwargs).validate()
+
+
+@pytest.mark.parametrize("value", ["nan", "inf", "-inf"])
+def test_provider_settings_reject_non_finite_worker_timeout_env(
+    monkeypatch: pytest.MonkeyPatch,
+    value: str,
+) -> None:
+    monkeypatch.setenv("WORKER_TASK_TIMEOUT_SECONDS", value)
+    with pytest.raises(ValueError, match="WORKER_TASK_TIMEOUT_SECONDS must be a finite"):
+        providers.ProviderSettings(timeout_seconds=1).validate()

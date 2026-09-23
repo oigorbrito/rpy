@@ -260,7 +260,17 @@ def test_tracking_recurrence_must_be_positive() -> None:
 
 def test_timeout_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("JUDIT_TIMEOUT_SECONDS", "61")
-    with pytest.raises(RuntimeError, match="between 0 and 60"):
+    with pytest.raises(RuntimeError, match="finite number between 0 and 60"):
+        judit_client._timeout_seconds()
+
+
+@pytest.mark.parametrize("value", ["nan", "NaN", "inf", "+inf", "-inf"])
+def test_timeout_rejects_non_finite_values(
+    monkeypatch: pytest.MonkeyPatch,
+    value: str,
+) -> None:
+    monkeypatch.setenv("JUDIT_TIMEOUT_SECONDS", value)
+    with pytest.raises(RuntimeError, match="finite number between 0 and 60"):
         judit_client._timeout_seconds()
 
 

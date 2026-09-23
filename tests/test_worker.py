@@ -17,6 +17,31 @@ def test_worker_settings_defaults(monkeypatch) -> None:
     assert settings.task_timeout_seconds > 0
 
 
+@pytest.mark.parametrize(
+    "field",
+    [
+        "poll_interval_seconds",
+        "heartbeat_interval_seconds",
+        "task_timeout_seconds",
+        "reclaim_interval_seconds",
+        "shutdown_grace_seconds",
+    ],
+)
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_worker_settings_reject_non_finite_timing_controls(
+    field: str,
+    value: float,
+) -> None:
+    settings = WorkerSettings(
+        database_url="postgresql://localhost/rpy",
+        heartbeat_interval_seconds=1.0,
+        stale_after_seconds=2,
+    )
+    setattr(settings, field, value)
+    with pytest.raises(ValueError, match="must be finite"):
+        settings.validate()
+
+
 def test_decode_payload_accepts_mapping_and_json_string() -> None:
     assert _decode_payload({"request_id": "req-1"}) == {"request_id": "req-1"}
     assert _decode_payload('{"request_id":"req-2"}') == {"request_id": "req-2"}
