@@ -26,12 +26,13 @@ Required provenance currently covers:
 - `synthesis`;
 - `current_status`;
 - every item in `timeline`;
+- every item in `attention`;
 - every item in `decisions`;
 - every item in `deadlines`;
 - every item in `related_processes`;
 - every item in `attachments`.
 
-`attention` is intentionally outside this material-claim contract for now. It can contain deterministic application warnings, such as source gaps or attachment-processing status, that are not provider claims tied to one evidentiary source. If warning provenance is later required, it should be modeled as a distinct provenance class rather than pretending the warning came from provider evidence.
+`attention` is covered because it is part of the provider-authored structured output and may contain factual conflicts or objective warnings. Some attention text is constrained by deterministic application warnings, such as source gaps or attachment-processing status, but the published sentence still crosses the provider boundary and therefore carries a claim identity and authorized evidence refs like the other structured fields. This remains structural provenance only; it does not assert semantic entailment of the warning from a particular ref.
 
 ## Process-level refs
 
