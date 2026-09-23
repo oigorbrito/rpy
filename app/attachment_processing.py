@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import io
+import math
 import os
 import subprocess
 import tempfile
@@ -73,8 +74,8 @@ def _positive_env_float(name: str, default: float) -> float:
         value = float(raw)
     except ValueError as exc:
         raise RuntimeError(f"{name} must be numeric") from exc
-    if value <= 0:
-        raise RuntimeError(f"{name} must be greater than zero")
+    if not math.isfinite(value) or value <= 0:
+        raise RuntimeError(f"{name} must be a finite number greater than zero")
     return value
 
 

@@ -3,9 +3,11 @@ from __future__ import annotations
 import argparse
 import ipaddress
 import json
+import math
 import os
 import re
 from pathlib import Path
+from typing import Callable
 from urllib.parse import urlsplit
 from uuid import UUID
 
@@ -168,6 +170,68 @@ def _bool_value(values: dict[str, str], key: str, default: bool = False) -> bool
         return False
     raise ValueError(f"{key} must be a boolean")
 
+
+
+def _validate_positive_numeric(
+    values: dict[str, str],
+    errors: list[str],
+    *,
+    key: str,
+    default: str,
+    convert: Callable[[str], int | float],
+    invalid_message: str,
+    non_positive_message: str,
+    require_finite: bool = False,
+) -> None:
+    raw = str(values.get(key) or default).strip()
+    try:
+        value = convert(raw)
+    except ValueError:
+        errors.append(invalid_message)
+        return
+    if require_finite and isinstance(value, float) and not math.isfinite(value):
+        errors.append(non_positive_message)
+        return
+    if value <= 0:
+        errors.append(non_positive_message)
+
+
+def _validate_attachment_ocr(values: dict[str, str], errors: list[str]) -> None:
+    try:
+        _bool_value(values, "ATTACHMENT_OCR_ENABLED", False)
+    except ValueError as exc:
+        errors.append(str(exc))
+
+    _validate_positive_numeric(
+        values,
+        errors,
+        key="ATTACHMENT_OCR_TIMEOUT_SECONDS",
+        default="30",
+        convert=int,
+        invalid_message="ATTACHMENT_OCR_TIMEOUT_SECONDS must be an integer",
+        non_positive_message="ATTACHMENT_OCR_TIMEOUT_SECONDS must be greater than zero",
+    )
+    _validate_positive_numeric(
+        values,
+        errors,
+        key="ATTACHMENT_PDF_OCR_SCALE",
+        default="2.0",
+        convert=float,
+        invalid_message="ATTACHMENT_PDF_OCR_SCALE must be numeric",
+        non_positive_message=(
+            "ATTACHMENT_PDF_OCR_SCALE must be a finite number greater than zero"
+        ),
+        require_finite=True,
+    )
+    _validate_positive_numeric(
+        values,
+        errors,
+        key="ATTACHMENT_PDF_OCR_MAX_PAGES",
+        default="100",
+        convert=int,
+        invalid_message="ATTACHMENT_PDF_OCR_MAX_PAGES must be an integer",
+        non_positive_message="ATTACHMENT_PDF_OCR_MAX_PAGES must be greater than zero",
+    )
 
 def _validate_embedding_runtime(values: dict[str, str], errors: list[str]) -> None:
     try:
@@ -347,6 +411,7 @@ def validate(values: dict[str, str]) -> list[str]:
         if any(marker in value.lower() for marker in PLACEHOLDER_MARKERS):
             errors.append(f"{key} still contains a placeholder value")
 
+    _validate_attachment_ocr(values, errors)
     _validate_embedding_runtime(values, errors)
     _validate_reranker(values, errors)
     _validate_datajud(values, errors)
