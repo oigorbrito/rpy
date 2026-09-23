@@ -148,7 +148,7 @@ class _FakeMessages:
             "current_status": (
                 "Recomendo que a parte tome providências."
                 if force_first_failure
-                else "Situação atual registrada nos autos."
+                else str((steps[-1] if steps else {}).get("text") or "Sem movimentação processual.")
             ),
             "attention": (
                 [str(warning) for warning in warnings]
@@ -164,6 +164,13 @@ class _FakeMessages:
             payload,
             evidence_refs=[str(process["evidence_ref"])],
         )
+        if steps:
+            current_status_ref = str(steps[-1].get("evidence_ref") or "")
+            if current_status_ref:
+                for claim in payload["claims"]:
+                    if claim["claim_id"] == "current_status":
+                        claim["evidence_refs"] = [current_status_ref]
+
         if milestone:
             movement_ref = next(
                 (
