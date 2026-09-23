@@ -156,7 +156,4 @@ def test_multiple_cited_sources_can_support_different_deterministic_facts() -> N
     # Each source alone is incomplete for the full sentence. The first deterministic
     # baseline therefore does not overclaim semantic entailment across sources.
     assert result.status == "supported"
-    assert {relation.status for relation in result.relations} == {
-        "supported",
-        "insufficient",
-    }
+    assert {relation.status for relation in result.relations} == {"insufficient"}
