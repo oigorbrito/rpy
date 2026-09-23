@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from uuid import uuid4
 
 from hypothesis import given, settings, strategies as st
 
@@ -88,6 +89,7 @@ def test_adversarial_input_mutations_cannot_break_prompt_envelope(base: str, pla
 def test_adversarial_attachment_mutations_remain_data(base: str, plan: MutationPlan) -> None:
     attack = mutate_attack(base, plan)
     chunks = [{
+        "chunk_id": uuid4(),
         "source_attachment_id": "synthetic-attachment",
         "page_start": 1, "page_end": 1, "char_start": 0, "char_end": len(attack), "text": attack,
     }]
@@ -160,6 +162,7 @@ def test_mutations_span_multiple_movements_and_attachments(
 
     chunks = [
         {
+            "chunk_id": uuid4(),
             "source_attachment_id": f"synthetic-{index}",
             "page_start": index,
             "page_end": index,

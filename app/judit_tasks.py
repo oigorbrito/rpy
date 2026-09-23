@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from app.claim_evidence import claim_evidence_is_publishable, load_summary_claim_evidence
 from app.datajud_client import lookup_datajud_metadata
 from app.datajud_enrichment import merge_datajud_metadata
 from app.datajud_provenance import replace_datajud_field_provenance
@@ -13,6 +14,7 @@ from app.judit_client import judit_attachments_enabled
 from app.processes import finalize_version, preferred_judit_version
 from app.public_lifecycle import transition_requests_for_judit_request
 from app.queue import enqueue
+from app.summary_policy import is_restricted_local_summary
 from app.tasks import task
 
 
@@ -25,7 +27,16 @@ async def _complete_from_current_summary(
     current = await conn.fetchrow(
         """
         SELECT p.current_version_id AS version_id,
+               p.secrecy_level,
+               p.code,
+               p.class_name,
+               p.court,
+               p.header,
+               p.parties,
                ps.id AS summary_id,
+               ps.structured_output,
+               ps.model,
+               ps.prompt_version,
                p.updated_at AS source_updated_at
         FROM processes p
         LEFT JOIN process_summaries ps
@@ -38,6 +49,29 @@ async def _complete_from_current_summary(
     )
     if current is None or current["version_id"] is None or current["summary_id"] is None:
         return False
+
+    if int(current["secrecy_level"] or 0) > 0:
+        if not is_restricted_local_summary(current, process=current):
+            return False
+    else:
+        claim_evidence = await load_summary_claim_evidence(
+            conn, summary_id=current["summary_id"]
+        )
+        structured_output = (
+            decode_json_object(
+                current["structured_output"],
+                label="current summary structured output",
+            )
+            if current["structured_output"] is not None
+            else None
+        )
+        if not claim_evidence_is_publishable(
+            structured_output,
+            claim_evidence,
+            process=current,
+        ):
+            return False
+
     await transition_requests_for_judit_request(
         conn,
         judit_request_id=request_id,
@@ -222,6 +256,28 @@ async def finalize_judit_request_task(payload: dict[str, Any]) -> dict[str, Any]
                     process_id=staged["process_id"],
                 ):
                     pass
+                elif not promoted and equivalent_to_version_id is not None:
+                    await transition_requests_for_judit_request(
+                        conn,
+                        judit_request_id=request_id,
+                        status="indexing",
+                        process_id=staged["process_id"],
+                        version_id=equivalent_to_version_id,
+                    )
+                    job = await enqueue(
+                        conn,
+                        task_name="generate_process_summary",
+                        payload={
+                            "process_id": str(staged["process_id"]),
+                            "version_id": str(equivalent_to_version_id),
+                            "code": staged["code"],
+                            "judit_request_id": request_id,
+                        },
+                        idempotency_key=(
+                            f"summary-repair:{equivalent_to_version_id}:{request_id}"
+                        ),
+                    )
+                    summary_enqueued = job is not None
                 else:
                     error_code = (
                         "cached_response_not_generated"

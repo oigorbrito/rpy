@@ -8,11 +8,32 @@ import httpx
 import pytest
 
 import app.rag as rag
+from app.claim_evidence import build_material_claims
+from app.summary_output import structured_summary_document
 from app.api import app
 from app.db import create_pool
 from app.json_utils import decode_json_object
 from app.migrations import migrate
 from app.worker import Worker, WorkerSettings
+
+
+def _prime_fake_structured_summary(context: dict) -> None:
+    payload = {
+        "synthesis": "Síntese factual de teste.",
+        "timeline": [],
+        "current_status": "Situação atual registrada nos autos.",
+        "attention": ["Nenhuma divergência objetiva identificada."],
+        "decisions": [],
+        "deadlines": [],
+        "related_processes": [],
+        "attachments": [],
+    }
+    payload["claims"] = build_material_claims(
+        payload,
+        evidence_refs=[str(context["_process_evidence_ref"])],
+    )
+    context["_parsed_summary"] = payload
+    context["_structured_summary"] = structured_summary_document(payload, context)
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(
@@ -50,6 +71,7 @@ async def test_judit_to_summary_end_to_end(monkeypatch: pytest.MonkeyPatch) -> N
     generation_attempts: list[list[str] | None] = []
 
     async def fake_generate(client, context, validation_errors=None):
+        _prime_fake_structured_summary(context)
         assert context["code"] == code
         assert len(context["steps"]) == 3
         generation_attempts.append(validation_errors)
@@ -196,7 +218,7 @@ Nenhuma divergência objetiva identificada.
             validation = decode_json_object(summary["validation"], label="summary validation")
             assert validation["passed"] is True
             assert summary["model"] == "claude-sonnet-5"
-            assert summary["prompt_version"] == "process-summary-v4"
+            assert summary["prompt_version"] == "process-summary-v5"
 
             await conn.execute(
                 "INSERT INTO tenants (id, name) VALUES ($1, 'e2e tenant')",

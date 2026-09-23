@@ -152,7 +152,8 @@ async def test_secret_process_completes_locally_without_any_ai_provider(
         async with pool.acquire() as conn:
             process = await conn.fetchrow(
                 """
-                SELECT id, current_version_id, secrecy_level, parties, subjects, header
+                SELECT id, code, class_name, current_version_id, secrecy_level,
+                       parties, subjects, header
                 FROM processes
                 WHERE code = $1
                 """,
@@ -217,7 +218,7 @@ async def test_secret_process_completes_locally_without_any_ai_provider(
 
             summary = await conn.fetchrow(
                 """
-                SELECT markdown, validation, model, prompt_version
+                SELECT markdown, structured_output, validation, model, prompt_version
                 FROM process_summaries
                 WHERE process_id = $1 AND version_id = $2
                 """,
@@ -227,8 +228,95 @@ async def test_secret_process_completes_locally_without_any_ai_provider(
             assert summary is not None
             validation = decode_json_object(summary["validation"], label="summary validation")
             assert validation["passed"] is True
-            assert summary["model"] == rag.SECRET_MODEL == "local-deterministic"
-            assert summary["prompt_version"] == rag.SECRET_PROMPT_VERSION == "secret-summary-v1"
+            assert summary["model"] == rag.RESTRICTED_MODEL == "local-deterministic"
+            assert summary["prompt_version"] == rag.RESTRICTED_PROMPT_VERSION
+            assert rag.is_restricted_local_summary(summary, process=process) is True
+
+            structured_output = decode_json_object(
+                summary["structured_output"],
+                label="restricted summary structured output",
+            )
+            assert structured_output["process"] == {
+                "cnj": code,
+                "class_name": "Procedimento sob sigilo",
+                "court": None,
+                "header": {"instance": 1, "area": "Cível", "state": "RS"},
+                "parties": [],
+            }
+
+            leaked_summary_text = {
+                **structured_output,
+                "summary": {
+                    **structured_output["summary"],
+                    "synthesis": secret_party,
+                },
+            }
+            assert rag.is_restricted_local_summary(
+                {**dict(summary), "structured_output": leaked_summary_text},
+                process=process,
+            ) is False
+
+            leaked_parties = {
+                **structured_output,
+                "process": {
+                    **structured_output["process"],
+                    "parties": [{"name": secret_party}],
+                },
+            }
+            assert rag.is_restricted_local_summary(
+                {**dict(summary), "structured_output": leaked_parties},
+                process=process,
+            ) is False
+
+            leaked_header = {
+                **structured_output,
+                "process": {
+                    **structured_output["process"],
+                    "header": {
+                        **structured_output["process"]["header"],
+                        "amount": forbidden_amount,
+                    },
+                },
+            }
+            assert rag.is_restricted_local_summary(
+                {**dict(summary), "structured_output": leaked_header},
+                process=process,
+            ) is False
+
+            wrong_court = {
+                **structured_output,
+                "process": {
+                    **structured_output["process"],
+                    "court": "TJRS",
+                },
+            }
+            assert rag.is_restricted_local_summary(
+                {**dict(summary), "structured_output": wrong_court},
+                process=process,
+            ) is False
+
+            await conn.execute(
+                """
+                UPDATE process_summaries
+                SET structured_output = structured_output || '{"debug":"must-not-publish"}'::jsonb
+                WHERE process_id = $1 AND version_id = $2
+                """,
+                process["id"],
+                process["current_version_id"],
+            )
+            tampered_summary = await conn.fetchrow(
+                """
+                SELECT structured_output, model, prompt_version
+                FROM process_summaries
+                WHERE process_id = $1 AND version_id = $2
+                """,
+                process["id"],
+                process["current_version_id"],
+            )
+            assert tampered_summary is not None
+            assert rag.is_restricted_local_summary(
+                tampered_summary, process=process
+            ) is False
 
             markdown = summary["markdown"]
             assert "sigilo" in markdown.casefold()

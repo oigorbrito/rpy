@@ -12,6 +12,7 @@ from fastapi import FastAPI, HTTPException, Request
 from app.api_key_middleware import ApiKeySecurityMiddleware
 from app.api_v1 import router as api_v1_router
 from app.auth import configured_bearer_tokens, tenant_from_request
+from app.claim_evidence import claim_evidence_is_publishable, load_summary_claim_evidence
 from app.db import create_pool
 from app.frontend import router as frontend_router
 from app.http_auth_config import validate_http_auth_config
@@ -28,6 +29,7 @@ from app.process_requests import grant_request_tenants, request_process
 from app.processes import get_authorized_process, log_access, stage_version
 from app.queue import enqueue
 from app.security_headers import SecurityResponseHeadersMiddleware
+from app.summary_policy import is_restricted_local_summary, restricted_public_header
 from app.tenancy import configured_webhook_tenant, validate_carteira_seed
 from app.webhook_security import (
     JuditWebhookSecretRedactionMiddleware,
@@ -188,9 +190,11 @@ async def get_process_summary(code: str, request: Request) -> dict:
             process_code=canonical_code,
             action="read_process_summary",
         )
+        is_restricted = int(process["secrecy_level"] or 0) > 0
         summary = await conn.fetchrow(
             """
-            SELECT markdown, validation, model, prompt_version, generation_ms, created_at
+            SELECT id, markdown, structured_output, validation, model, prompt_version,
+                   generation_ms, created_at
             FROM process_summaries
             WHERE process_id = $1
               AND version_id = $2
@@ -199,21 +203,44 @@ async def get_process_summary(code: str, request: Request) -> dict:
             process["id"],
             process["current_version_id"],
         )
+        if summary is not None:
+            if is_restricted:
+                if not is_restricted_local_summary(summary, process=process):
+                    summary = None
+            else:
+                claim_evidence = await load_summary_claim_evidence(
+                    conn, summary_id=summary["id"]
+                )
+                structured_output = (
+                    decode_json_object(
+                        summary["structured_output"],
+                        label="summary structured output",
+                    )
+                    if summary["structured_output"] is not None
+                    else None
+                )
+                if not claim_evidence_is_publishable(
+                    structured_output,
+                    claim_evidence,
+                    process=process,
+                ):
+                    summary = None
         steps = []
         summary_job_status = None
         cached_response = False
         if process["current_version_id"] is not None:
-            steps = await conn.fetch(
-                """
-                SELECT step_number, occurred_at, title, text
-                FROM process_steps
-                WHERE process_id = $1 AND version_id = $2
-                ORDER BY occurred_at DESC NULLS LAST, step_number DESC
-                LIMIT 20
-                """,
-                process["id"],
-                process["current_version_id"],
-            )
+            if not is_restricted:
+                steps = await conn.fetch(
+                    """
+                    SELECT step_number, occurred_at, title, text
+                    FROM process_steps
+                    WHERE process_id = $1 AND version_id = $2
+                    ORDER BY occurred_at DESC NULLS LAST, step_number DESC
+                    LIMIT 20
+                    """,
+                    process["id"],
+                    process["current_version_id"],
+                )
             cached_response = bool(
                 await conn.fetchval(
                     "SELECT source_cached_response FROM process_versions WHERE id = $1 AND process_id = $2",
@@ -232,19 +259,28 @@ async def get_process_summary(code: str, request: Request) -> dict:
 
     summary_data = dict(summary) if summary else None
     if summary_data is not None:
+        summary_data.pop("id", None)
+        summary_data.pop("structured_output", None)
         summary_data["validation"] = decode_json_object(
             summary_data.get("validation"), label="summary validation"
         )
 
     ia_summary = summary_data["markdown"] if summary_data else None
-    parties = _json_value(process["parties"], fallback=[])
-    subjects = _json_value(process["subjects"], fallback=[])
-    header = _json_value(process["header"], fallback={})
+    if is_restricted:
+        parties = []
+        subjects = []
+        header = restricted_public_header(
+            _json_value(process["header"], fallback={})
+        )
+    else:
+        parties = _json_value(process["parties"], fallback=[])
+        subjects = _json_value(process["subjects"], fallback=[])
+        header = _json_value(process["header"], fallback={})
 
     return {
         "code": process["code"],
         "class_name": process["class_name"],
-        "court": process["court"],
+        "court": None if is_restricted else process["court"],
         "parties": parties if isinstance(parties, list) else [],
         "subjects": subjects if isinstance(subjects, list) else [],
         "header": header if isinstance(header, dict) else {},

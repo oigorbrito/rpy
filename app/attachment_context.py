@@ -8,6 +8,7 @@ from uuid import UUID
 import asyncpg
 
 from app.attachments import search_authorized_attachment_chunks
+from app.claim_evidence import attachment_evidence_ref
 from app.provenance import selected_attachment_sources
 from app.unicode_security import model_view_text
 
@@ -87,6 +88,7 @@ def serialize_attachment_chunks(
         bounded = _truncate(text, allowance)
         rendered.append(
             {
+                "evidence_ref": attachment_evidence_ref(chunk["chunk_id"]),
                 "source_attachment_id": str(chunk["source_attachment_id"]),
                 "page_start": chunk.get("page_start"),
                 "page_end": chunk.get("page_end"),

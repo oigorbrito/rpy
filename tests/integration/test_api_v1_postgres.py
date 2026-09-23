@@ -12,6 +12,8 @@ from app.api import app
 from app.api_key_auth import api_key_hash_and_fingerprint
 from app.db import create_pool
 from app.migrations import migrate
+from app.summary_output import structured_summary_document
+from app.summary_policy import RESTRICTED_MODEL, RESTRICTED_PROMPT_VERSION
 from app.public_lifecycle import (
     create_or_get_summary_request,
     request_fingerprint,
@@ -245,7 +247,7 @@ async def test_v1_idempotency_states_authorization_and_sanitized_sources(monkeyp
                 version_id,
                 json.dumps(
                     {
-                        "schema_version": 1,
+                        "schema_version": 2,
                         "process": {
                             "cnj": other_code,
                             "class_name": "Procedimento Comum",
@@ -262,10 +264,65 @@ async def test_v1_idempotency_states_authorization_and_sanitized_sources(monkeyp
                             "deadlines": [],
                             "related_processes": [],
                             "attachments": [],
+                            "claims": [
+                                {
+                                    "claim_id": "synthesis",
+                                    "text": "Resumo válido",
+                                    "evidence_refs": [f"p-{version_id.hex}"],
+                                },
+                                {
+                                    "claim_id": "current_status",
+                                    "text": "Situação registrada.",
+                                    "evidence_refs": [f"p-{version_id.hex}"],
+                                },
+                                {
+                                    "claim_id": "attention:0",
+                                    "text": "Nenhuma divergência objetiva identificada.",
+                                    "evidence_refs": [f"p-{version_id.hex}"],
+                                },
+                            ],
                         },
                     }
                 ),
             )
+            for claim_id, claim_class, claim_text in (
+                ("synthesis", "synthesis", "Resumo válido"),
+                ("current_status", "current_status", "Situação registrada."),
+                (
+                    "attention:0",
+                    "attention",
+                    "Nenhuma divergência objetiva identificada.",
+                ),
+            ):
+                claim_row_id = await conn.fetchval(
+                    """
+                    INSERT INTO process_summary_claims (
+                        summary_id, process_id, version_id,
+                        claim_id, claim_class, claim_text
+                    ) VALUES ($1,$2,$3,$4,$5,$6)
+                    RETURNING id
+                    """,
+                    summary_id,
+                    process_id,
+                    version_id,
+                    claim_id,
+                    claim_class,
+                    claim_text,
+                )
+                await conn.execute(
+                    """
+                    INSERT INTO process_summary_claim_sources (
+                        claim_row_id, summary_id, process_id, version_id,
+                        evidence_ref, source_kind, source_order
+                    ) VALUES ($1,$2,$3,$4,$5,'process',0)
+                    """,
+                    claim_row_id,
+                    summary_id,
+                    process_id,
+                    version_id,
+                    f"p-{version_id.hex}",
+                )
+
             completed_request, _ = await create_or_get_summary_request(
                 conn,
                 tenant_id=tenant_a,
@@ -388,7 +445,7 @@ async def test_v1_idempotency_states_authorization_and_sanitized_sources(monkeyp
             )
             assert json_job.status_code == 200
             assert json_job.json()["format"] == "json"
-            assert json_job.json()["iaSummary"]["schema_version"] == 1
+            assert json_job.json()["iaSummary"]["schema_version"] == 2
             assert json_job.json()["iaSummary"]["process"]["cnj"] == other_code
             assert json_job.json()["iaSummary"]["summary"]["synthesis"] == "Resumo válido"
 
@@ -433,6 +490,225 @@ async def test_v1_idempotency_states_authorization_and_sanitized_sources(monkeyp
             rendered_sources = json.dumps(source_body, ensure_ascii=False)
             assert raw_sentinel not in rendered_sources
             assert "source_payload" not in rendered_sources
+
+            async with pool.acquire() as conn:
+                original_structured_output = await conn.fetchval(
+                    "SELECT structured_output::text FROM process_summaries WHERE id=$1",
+                    summary_id,
+                )
+                await conn.execute(
+                    """
+                    UPDATE process_summaries
+                    SET structured_output = jsonb_set(
+                        structured_output,
+                        '{process,parties}',
+                        '[{"name":"PARTE INJETADA"}]'::jsonb,
+                        true
+                    )
+                    WHERE id=$1
+                    """,
+                    summary_id,
+                )
+
+            tampered_job = await client.get(
+                f"/v1/resumos/{completed_request.id}", headers=auth_a
+            )
+            assert tampered_job.status_code == 200
+            assert tampered_job.json()["iaSummary"] is None
+            assert tampered_job.json()["claim_evidence"] == []
+            assert all(
+                "used_for_summary" not in item
+                for item in tampered_job.json()["sources"]
+            )
+
+            tampered_latest = await client.get(
+                f"/v1/processos/{other_code}/resumo?format=json", headers=auth_a
+            )
+            assert tampered_latest.status_code == 404
+
+            tampered_sources = await client.get(
+                f"/v1/processos/{other_code}/fontes", headers=auth_a
+            )
+            assert tampered_sources.status_code == 200
+            assert tampered_sources.json()["claim_evidence"] == []
+            assert all(
+                "used_for_summary" not in item
+                for item in tampered_sources.json()["sources"]
+            )
+
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE process_summaries SET structured_output=$2::jsonb WHERE id=$1",
+                    summary_id,
+                    original_structured_output,
+                )
+                await conn.execute(
+                    "UPDATE processes SET secrecy_level=1 WHERE id=$1",
+                    process_id,
+                )
+
+            secret_job = await client.get(
+                f"/v1/resumos/{completed_request.id}", headers=auth_a
+            )
+            assert secret_job.status_code == 200
+            assert secret_job.json()["claim_evidence"] == []
+            assert secret_job.json()["iaSummary"] is None
+
+            secret_json_job = await client.get(
+                f"/v1/resumos/{json_request.id}", headers=auth_a
+            )
+            assert secret_json_job.status_code == 200
+            assert secret_json_job.json()["claim_evidence"] == []
+            assert secret_json_job.json()["iaSummary"] is None
+
+            secret_summary = await client.get(
+                f"/v1/processos/{other_code}/resumo", headers=auth_a
+            )
+            assert secret_summary.status_code == 404
+
+            secret_json_summary = await client.get(
+                f"/v1/processos/{other_code}/resumo?format=json", headers=auth_a
+            )
+            assert secret_json_summary.status_code == 404
+
+            secret_sources = await client.get(
+                f"/v1/processos/{other_code}/fontes", headers=auth_a
+            )
+            assert secret_sources.status_code == 200
+            assert secret_sources.json()["claim_evidence"] == []
+            assert all(
+                item["kind"] != "movement"
+                for item in secret_sources.json()["sources"]
+            )
+
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE processes SET secrecy_level=0 WHERE id=$1",
+                    process_id,
+                )
+                await conn.execute(
+                    """
+                    DELETE FROM process_summary_claims
+                    WHERE summary_id=$1 AND claim_id='current_status'
+                    """,
+                    summary_id,
+                )
+
+            incomplete_job = await client.get(
+                f"/v1/resumos/{completed_request.id}", headers=auth_a
+            )
+            assert incomplete_job.status_code == 200
+            assert incomplete_job.json()["iaSummary"] is None
+            assert incomplete_job.json()["claim_evidence"] == []
+            assert all(
+                "used_for_summary" not in item
+                for item in incomplete_job.json()["sources"]
+            )
+
+            incomplete_sources = await client.get(
+                f"/v1/processos/{other_code}/fontes", headers=auth_a
+            )
+            assert incomplete_sources.status_code == 200
+            assert incomplete_sources.json()["claim_evidence"] == []
+            assert all(
+                "used_for_summary" not in item
+                for item in incomplete_sources.json()["sources"]
+            )
+
+            incomplete_latest = await client.get(
+                f"/v1/processos/{other_code}/resumo", headers=auth_a
+            )
+            assert incomplete_latest.status_code == 404
+
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE processes SET secrecy_level=1 WHERE id=$1",
+                    process_id,
+                )
+                restricted_structured_output = structured_summary_document(
+                    {
+                        "synthesis": "Os detalhes processuais foram restringidos por sigilo.",
+                        "timeline": [],
+                        "current_status": (
+                            "O contexto público disponível está limitado pelos dados "
+                            "permitidos para processo sigiloso."
+                        ),
+                        "attention": ["Processo com detalhes restringidos por sigilo."],
+                        "decisions": [],
+                        "deadlines": [],
+                        "related_processes": [],
+                        "attachments": [],
+                    },
+                    {
+                        "code": other_code,
+                        "class_name": "Procedimento Comum",
+                        "court": None,
+                        "header": {},
+                        "parties": [],
+                    },
+                )
+                await conn.execute(
+                    """
+                    UPDATE process_summaries
+                    SET markdown=$2, model=$3, prompt_version=$4,
+                        structured_output=$5::jsonb
+                    WHERE id=$1
+                    """,
+                    summary_id,
+                    "# Resumo sigiloso local",
+                    RESTRICTED_MODEL,
+                    RESTRICTED_PROMPT_VERSION,
+                    json.dumps(restricted_structured_output),
+                )
+                await conn.execute(
+                    "DELETE FROM process_summary_claims WHERE summary_id=$1",
+                    summary_id,
+                )
+
+            restricted_job = await client.get(
+                f"/v1/resumos/{completed_request.id}", headers=auth_a
+            )
+            assert restricted_job.status_code == 200
+            assert restricted_job.json()["iaSummary"] == "# Resumo sigiloso local"
+            assert restricted_job.json()["claim_evidence"] == []
+
+            restricted_latest = await client.get(
+                f"/v1/processos/{other_code}/resumo", headers=auth_a
+            )
+            assert restricted_latest.status_code == 200
+            assert restricted_latest.json()["iaSummary"] == "# Resumo sigiloso local"
+
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE processes SET secrecy_level=0 WHERE id=$1",
+                    process_id,
+                )
+
+            public_after_restricted = await client.get(
+                f"/v1/resumos/{completed_request.id}", headers=auth_a
+            )
+            assert public_after_restricted.status_code == 200
+            assert public_after_restricted.json()["iaSummary"] is None
+            assert public_after_restricted.json()["claim_evidence"] == []
+            assert all(
+                "used_for_summary" not in item
+                for item in public_after_restricted.json()["sources"]
+            )
+
+            public_after_restricted_sources = await client.get(
+                f"/v1/processos/{other_code}/fontes", headers=auth_a
+            )
+            assert public_after_restricted_sources.status_code == 200
+            assert public_after_restricted_sources.json()["claim_evidence"] == []
+            assert all(
+                "used_for_summary" not in item
+                for item in public_after_restricted_sources.json()["sources"]
+            )
+
+            public_after_restricted_latest = await client.get(
+                f"/v1/processos/{other_code}/resumo", headers=auth_a
+            )
+            assert public_after_restricted_latest.status_code == 404
 
             healthz = await client.get("/healthz")
             readyz = await client.get("/readyz")

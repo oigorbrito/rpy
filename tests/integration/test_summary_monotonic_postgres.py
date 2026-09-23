@@ -5,9 +5,16 @@ from uuid import uuid4
 
 import pytest
 
+from app.claim_evidence import (
+    build_material_claims,
+    evidence_catalog,
+    process_evidence_ref,
+    validate_claim_evidence,
+)
 from app.db import create_pool
 from app.migrations import migrate
 from app.rag import _persist_summary
+from app.summary_output import structured_summary_document
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(
@@ -169,6 +176,39 @@ async def test_new_prompt_revision_may_replace_valid_summary_only_with_valid_out
     try:
         async with pool.acquire() as conn:
             process_id, version_id = await _fixture(conn)
+            code = await conn.fetchval(
+                "SELECT code FROM processes WHERE id=$1",
+                process_id,
+            )
+            context = {
+                "code": code,
+                "class_name": None,
+                "court": None,
+                "header": {},
+                "parties": [],
+                "_process_evidence_ref": process_evidence_ref(version_id),
+                "_selected_sources": [],
+                "_attachment_sources": [],
+            }
+            payload = {
+                "synthesis": "Resumo válido.",
+                "timeline": [],
+                "current_status": "Situação atual.",
+                "attention": ["Nenhuma divergência objetiva identificada."],
+                "decisions": [],
+                "deadlines": [],
+                "related_processes": [],
+                "attachments": [],
+            }
+            payload["claims"] = build_material_claims(
+                payload,
+                evidence_refs=[context["_process_evidence_ref"]],
+            )
+            claims, errors = validate_claim_evidence(payload, context)
+            assert errors == []
+            structured_output = structured_summary_document(payload, context)
+            catalog = evidence_catalog(context)
+
             assert await _persist_summary(
                 conn,
                 process_id=process_id,
@@ -177,6 +217,9 @@ async def test_new_prompt_revision_may_replace_valid_summary_only_with_valid_out
                 validation={"passed": True, "errors": []},
                 generation_ms=700,
                 prompt_version="process-summary-v2",
+                structured_output=structured_output,
+                claims=claims,
+                evidence_sources=catalog,
             )
             rejected = await _persist_summary(
                 conn,
@@ -195,6 +238,9 @@ async def test_new_prompt_revision_may_replace_valid_summary_only_with_valid_out
                 validation={"passed": True, "errors": []},
                 generation_ms=900,
                 prompt_version="process-summary-v3",
+                structured_output=structured_output,
+                claims=claims,
+                evidence_sources=catalog,
             )
             stored = await conn.fetchrow(
                 "SELECT markdown, validation, prompt_version, generation_ms FROM process_summaries WHERE process_id = $1 AND version_id = $2",

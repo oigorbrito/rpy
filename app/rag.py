@@ -12,6 +12,17 @@ import asyncpg
 
 from app.attachment_context import load_attachment_context, resolve_generation_tenant
 from app.attachment_signals import attachment_status_warnings
+from app.claim_evidence import (
+    EvidenceSource,
+    MaterialClaim,
+    claim_evidence_is_publishable,
+    evidence_catalog,
+    movement_evidence_ref,
+    process_evidence_ref,
+    load_summary_claim_evidence,
+    replace_summary_claim_evidence,
+    validate_claim_evidence,
+)
 from app.datajud_provenance import datajud_conflict_warning
 from app.db import create_pool
 from app.embeddings import (
@@ -42,6 +53,14 @@ from app.summary_output import (
     render_structured_summary,
     structured_summary_document,
 )
+from app.summary_policy import (
+    RESTRICTED_HEADER_FIELDS,
+    RESTRICTED_MODEL,
+    RESTRICTED_PROMPT_VERSION,
+    is_restricted_local_summary,
+    restricted_public_header,
+    restricted_summary_payload,
+)
 from app.tasks import PermanentTaskError, task
 from app.tpu_glossary import resolve_process_tpu_definitions
 from app.unicode_security import model_view_text, model_view_value
@@ -54,9 +73,7 @@ OPUS_STEP_THRESHOLD = 100
 SHORT_SUMMARY_STEP_MAX = 15
 MEDIUM_SUMMARY_STEP_MAX = 60
 MAX_TOKENS = 4000
-PROMPT_VERSION = "process-summary-v4"
-SECRET_MODEL = "local-deterministic"
-SECRET_PROMPT_VERSION = "secret-summary-v1"
+PROMPT_VERSION = "process-summary-v5"
 REQUESTED_TEMPERATURE = 0.2
 # Anthropic deprecates custom sampling parameters for current Claude models.
 # Keep the product's requested value documented but omit it from API payloads.
@@ -71,14 +88,6 @@ DEFAULT_PROVIDER_STEP_TEXT_MAX_CHARS = 12_000
 DEFAULT_PROVIDER_STEPS_TEXT_MAX_CHARS = 80_000
 TRUNCATION_MARKER = "… [truncated]"
 _SAO_PAULO = ZoneInfo("America/Sao_Paulo")
-_SECRET_HEADER_FIELDS = (
-    ("instance", "Instância"),
-    ("area", "Área"),
-    ("justice_description", "Justiça"),
-    ("county", "Comarca"),
-    ("state", "Estado"),
-    ("city", "Cidade"),
-)
 _USAGE_FIELDS = (
     "input_tokens",
     "output_tokens",
@@ -166,6 +175,7 @@ def _serialize_steps(ranked: list[Any]) -> list[dict[str, Any]]:
 
     return [
         {
+            "evidence_ref": movement_evidence_ref(item.step.id),
             "step_number": item.step.step_number,
             "occurred_at": _provider_datetime(item.step.occurred_at),
             "title": (
@@ -251,18 +261,20 @@ async def _load_context(
     tenant_id: UUID | None = None,
 ) -> dict[str, Any]:
     base = await _load_process(pool, process_id, version_id)
+    base["_process_evidence_ref"] = process_evidence_ref(version_id)
 
     if base["secrecy_level"] > 0:
         return {
             "code": base["code"],
             "class_name": base["class_name"],
             "secrecy_level": base["secrecy_level"],
-            "header": base["header"],
+            "header": restricted_public_header(base["header"]),
             "validation_parties": base["parties"],
             "parties": [],
             "representatives": [],
             "subjects": [],
             "steps": [],
+            "_process_evidence_ref": base["_process_evidence_ref"],
             "_selected_sources": [],
             "_attachment_sources": [],
             "_glossary_sources": [],
@@ -367,7 +379,7 @@ def _secret_summary(context: dict[str, Any]) -> str:
         allowed_lines.append(f"- Classe: {class_name}")
 
     header = context.get("header") if isinstance(context.get("header"), dict) else {}
-    for key, label in _SECRET_HEADER_FIELDS:
+    for key, label in RESTRICTED_HEADER_FIELDS:
         value = header.get(key)
         if value is None:
             continue
@@ -408,6 +420,8 @@ def _provider_payload(context: dict[str, Any]) -> tuple[dict[str, Any], list[Any
         }
         raw_steps = list(context.get("steps", []))
 
+    if not _is_secret_context(context):
+        raw_process["evidence_ref"] = context.get("_process_evidence_ref")
     rendered, flags = model_view_value(
         {"process": raw_process, "steps": raw_steps}
     )
@@ -435,7 +449,7 @@ def _prompt_json(value: Any) -> str:
 
 
 def _validate_provider_summary(text: str, context: dict[str, Any]) -> ValidationResult:
-    return validar(
+    result = validar(
         text=text,
         code=context["code"],
         parties=context.get("parties", []),
@@ -457,6 +471,13 @@ def _validate_provider_summary(text: str, context: dict[str, Any]) -> Validation
             "Anexos",
         ),
     )
+    parsed = context.get("_parsed_summary")
+    if not isinstance(parsed, dict):
+        evidence_errors = ["structured summary claim provenance is unavailable"]
+    else:
+        _, evidence_errors = validate_claim_evidence(parsed, context)
+    errors = [*result.errors, *evidence_errors]
+    return ValidationResult(passed=not errors, errors=errors)
 
 
 def summary_volume_instruction(step_count: int) -> str:
@@ -621,8 +642,50 @@ async def _generate(
         payload = parse_structured_summary(raw)
     except ValueError as exc:
         raise PermanentTaskError("provider returned an invalid structured summary") from exc
+    context["_parsed_summary"] = payload
     context["_structured_summary"] = structured_summary_document(payload, context)
     return render_structured_summary(payload, context)
+
+
+async def _summary_row_is_publishable(
+    conn: asyncpg.Connection,
+    row: asyncpg.Record,
+) -> bool:
+    if not bool(row["passed"]):
+        return False
+    if int(row["secrecy_level"] or 0) > 0:
+        return is_restricted_local_summary(
+            row,
+            process={
+                "code": row["process_code"],
+                "class_name": row["process_class_name"],
+                "court": row["process_court"],
+                "header": row["process_header"],
+                "parties": row["process_parties"],
+            },
+        )
+
+    claim_evidence = await load_summary_claim_evidence(
+        conn, summary_id=row["id"]
+    )
+    try:
+        structured_output = decode_json_object(
+            row["structured_output"],
+            label="summary structured output",
+        )
+    except (TypeError, ValueError):
+        return False
+    return claim_evidence_is_publishable(
+        structured_output,
+        claim_evidence,
+        process={
+            "code": row["process_code"],
+            "class_name": row["process_class_name"],
+            "court": row["process_court"],
+            "header": row["process_header"],
+            "parties": row["process_parties"],
+        },
+    )
 
 
 async def _persist_summary(
@@ -643,8 +706,78 @@ async def _persist_summary(
     glossary_sources: list[dict[str, Any]] | None = None,
     unicode_security_flags: list[str] | None = None,
     structured_output: dict[str, Any] | None = None,
+    claims: list[MaterialClaim] | None = None,
+    evidence_sources: dict[str, EvidenceSource] | None = None,
 ) -> bool:
     async with conn.transaction():
+        existing = await conn.fetchrow(
+            """
+            SELECT ps.id,
+                   ps.structured_output,
+                   ps.model,
+                   ps.prompt_version,
+                   COALESCE((ps.validation->>'passed')::boolean, false) AS passed,
+                   p.secrecy_level,
+                   p.code AS process_code,
+                   p.class_name AS process_class_name,
+                   p.court AS process_court,
+                   p.header AS process_header,
+                   p.parties AS process_parties
+            FROM process_summaries ps
+            JOIN processes p ON p.id = ps.process_id
+            WHERE ps.process_id = $1 AND ps.version_id = $2
+            FOR UPDATE OF ps
+            """,
+            process_id,
+            version_id,
+        )
+        incoming_passed = validation.get("passed") is True
+        incoming_publishable = False
+        if existing is not None and incoming_passed:
+            if int(existing["secrecy_level"] or 0) > 0:
+                incoming_publishable = is_restricted_local_summary(
+                    {
+                        "model": model,
+                        "prompt_version": prompt_version,
+                        "structured_output": structured_output,
+                    },
+                    process={
+                        "code": existing["process_code"],
+                        "class_name": existing["process_class_name"],
+                        "court": existing["process_court"],
+                        "header": existing["process_header"],
+                        "parties": existing["process_parties"],
+                    },
+                )
+            else:
+                incoming_claim_evidence = [
+                    {
+                        "claim_id": claim.claim_id,
+                        "text": claim.text,
+                        "evidence_refs": list(claim.evidence_refs),
+                    }
+                    for claim in (claims or [])
+                ]
+                incoming_publishable = claim_evidence_is_publishable(
+                    structured_output,
+                    incoming_claim_evidence,
+                    process={
+                        "code": existing["process_code"],
+                        "class_name": existing["process_class_name"],
+                        "court": existing["process_court"],
+                        "header": existing["process_header"],
+                        "parties": existing["process_parties"],
+                    },
+                )
+        replace_approved = False
+        if existing is not None and bool(existing["passed"]) and incoming_publishable:
+            existing_publishable = await _summary_row_is_publishable(conn, existing)
+            replace_approved = bool(
+                not existing_publishable
+                or existing["prompt_version"] != prompt_version
+                or existing["model"] != model
+            )
+
         row = await conn.fetchrow(
             """
             INSERT INTO process_summaries (
@@ -667,18 +800,8 @@ async def _persist_summary(
                           unicode_security_flags = EXCLUDED.unicode_security_flags,
                           structured_output = EXCLUDED.structured_output,
                           created_at = NOW()
-            WHERE COALESCE((process_summaries.validation->>'passed')::boolean, false) = false
-               OR (
-                    process_summaries.structured_output IS NULL
-                    AND EXCLUDED.structured_output IS NOT NULL
-               )
-               OR (
-                    COALESCE((EXCLUDED.validation->>'passed')::boolean, false) = true
-                    AND (
-                        process_summaries.prompt_version IS DISTINCT FROM EXCLUDED.prompt_version
-                        OR process_summaries.model IS DISTINCT FROM EXCLUDED.model
-                    )
-               )
+            WHERE $13::boolean
+               OR COALESCE((process_summaries.validation->>'passed')::boolean, false) = false
             RETURNING id
             """,
             process_id,
@@ -693,6 +816,7 @@ async def _persist_summary(
             cost_usd,
             json.dumps(unicode_security_flags or []),
             json.dumps(structured_output) if structured_output is not None else None,
+            replace_approved,
         )
         if row is None:
             return False
@@ -709,6 +833,14 @@ async def _persist_summary(
             process_id=process_id,
             version_id=version_id,
             sources=attachment_sources or [],
+        )
+        await replace_summary_claim_evidence(
+            conn,
+            summary_id=row["id"],
+            process_id=process_id,
+            version_id=version_id,
+            claims=claims or [],
+            catalog=evidence_sources or {},
         )
         await replace_summary_glossary_sources(
             conn,
@@ -728,8 +860,15 @@ async def _load_publishable_summary(
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
-            SELECT ps.validation, ps.model, ps.prompt_version, ps.generation_ms,
-                   ps.usage, ps.cache_hit, ps.cost_usd
+            SELECT ps.id, ps.validation, ps.model, ps.prompt_version, ps.generation_ms,
+                   ps.usage, ps.cache_hit, ps.cost_usd, ps.structured_output,
+                   COALESCE((ps.validation->>'passed')::boolean, false) AS passed,
+                   p.secrecy_level,
+                   p.code AS process_code,
+                   p.class_name AS process_class_name,
+                   p.court AS process_court,
+                   p.header AS process_header,
+                   p.parties AS process_parties
             FROM process_summaries ps
             JOIN processes p
               ON p.id = ps.process_id
@@ -741,8 +880,10 @@ async def _load_publishable_summary(
             process_id,
             version_id,
         )
-    if row is None:
-        return None
+        if row is None:
+            return None
+        if not await _summary_row_is_publishable(conn, row):
+            return None
     return {
         "validation": decode_json_object(row["validation"], label="summary validation"),
         "model": row["model"],
@@ -784,16 +925,7 @@ async def generate_summary(
     cost_usd: float | None = None
     if _is_secret_context(context):
         text = _secret_summary(context)
-        secret_payload = {
-            "synthesis": "Os detalhes processuais foram restringidos por sigilo.",
-            "timeline": [],
-            "current_status": "O contexto público disponível está limitado pelos dados permitidos para processo sigiloso.",
-            "attention": ["Processo com detalhes restringidos por sigilo."],
-            "decisions": [],
-            "deadlines": [],
-            "related_processes": [],
-            "attachments": [],
-        }
+        secret_payload = restricted_summary_payload()
         context["_structured_summary"] = structured_summary_document(
             secret_payload, context
         )
@@ -804,8 +936,8 @@ async def generate_summary(
             forbid_party_names=True,
             require_document_title=True,
         )
-        model = SECRET_MODEL
-        prompt_version = SECRET_PROMPT_VERSION
+        model = RESTRICTED_MODEL
+        prompt_version = RESTRICTED_PROMPT_VERSION
     else:
         api_key = os.environ.get("ANTHROPIC_API_KEY")
         if not api_key:
@@ -832,6 +964,16 @@ async def generate_summary(
                 except (TypeError, ValueError):
                     cost_usd = None
 
+    claims: list[MaterialClaim] = []
+    evidence_sources: dict[str, EvidenceSource] = {}
+    if not _is_secret_context(context) and result.passed:
+        parsed = context.get("_parsed_summary")
+        if isinstance(parsed, dict):
+            claims, claim_errors = validate_claim_evidence(parsed, context)
+            if claim_errors:
+                raise RuntimeError("validated summary has invalid claim evidence")
+            evidence_sources = evidence_catalog(context)
+
     generation_ms = max(0, round((perf_counter() - started) * 1000))
     validation = {"passed": result.passed, "errors": result.errors}
     async with pool.acquire() as conn:
@@ -856,6 +998,8 @@ async def generate_summary(
                 if isinstance(context.get("_structured_summary"), dict)
                 else None
             ),
+            claims=claims,
+            evidence_sources=evidence_sources,
         )
     return {
         "validation": validation,

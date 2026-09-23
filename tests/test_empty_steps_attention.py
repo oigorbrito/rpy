@@ -62,6 +62,36 @@ def test_empty_steps_warning_must_be_inside_attention_section() -> None:
         "step_count": 0,
         "steps": [],
         "source_warnings": [rag.EMPTY_STEPS_WARNING],
+        "_process_evidence_ref": "p-00000000000000000000000000000001",
+        "_selected_sources": [],
+        "_attachment_sources": [],
+        "_parsed_summary": {
+        "synthesis": "Síntese factual.",
+        "timeline": [],
+        "current_status": "Situação atual registrada.",
+        "attention": ["Nenhuma divergência objetiva identificada."],
+        "decisions": [],
+        "deadlines": [],
+        "related_processes": [],
+        "attachments": [],
+        "claims": [
+            {
+                "claim_id": "synthesis",
+                "text": "Síntese factual.",
+                "evidence_refs": ["p-00000000000000000000000000000001"],
+            },
+            {
+                "claim_id": "current_status",
+                "text": "Situação atual registrada.",
+                "evidence_refs": ["p-00000000000000000000000000000001"],
+            },
+            {
+                "claim_id": "attention:0",
+                "text": "Nenhuma divergência objetiva identificada.",
+                "evidence_refs": ["p-00000000000000000000000000000001"],
+            },
+        ],
+    },
     }
 
     invalid = rag._validate_provider_summary(
@@ -94,6 +124,36 @@ async def test_empty_steps_warning_is_sent_to_single_correction_attempt(monkeypa
         "step_count": 0,
         "steps": [],
         "source_warnings": [rag.EMPTY_STEPS_WARNING],
+        "_process_evidence_ref": "p-00000000000000000000000000000001",
+        "_selected_sources": [],
+        "_attachment_sources": [],
+        "_parsed_summary": {
+        "synthesis": "Síntese factual.",
+        "timeline": [],
+        "current_status": "Situação atual registrada.",
+        "attention": ["Nenhuma divergência objetiva identificada."],
+        "decisions": [],
+        "deadlines": [],
+        "related_processes": [],
+        "attachments": [],
+        "claims": [
+            {
+                "claim_id": "synthesis",
+                "text": "Síntese factual.",
+                "evidence_refs": ["p-00000000000000000000000000000001"],
+            },
+            {
+                "claim_id": "current_status",
+                "text": "Situação atual registrada.",
+                "evidence_refs": ["p-00000000000000000000000000000001"],
+            },
+            {
+                "claim_id": "attention:0",
+                "text": "Nenhuma divergência objetiva identificada.",
+                "evidence_refs": ["p-00000000000000000000000000000001"],
+            },
+        ],
+    },
     }
     generation_errors: list[list[str] | None] = []
     persisted: dict = {}

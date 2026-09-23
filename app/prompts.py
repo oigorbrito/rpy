@@ -116,6 +116,11 @@ A resposta direta do provider não é o Markdown publicado. Ela deve preencher s
 - current_status: último estado processual comprovável, sem previsão.
 - attention: uma ou mais limitações, conflitos ou pontos objetivos; quando não houver divergência material, use formulação factual curta sem recomendação.
 - decisions, deadlines, related_processes e attachments: listas condicionais; use lista vazia quando não houver evidência suficiente.
+- claims: provenance obrigatória para synthesis, current_status e para cada item de timeline, attention, decisions, deadlines, related_processes e attachments.
+- claim_id deve seguir exatamente a identidade determinística do campo: synthesis, current_status ou <campo>:<índice>, usando índice zero-based.
+- O text de cada claim deve ser idêntico ao conteúdo textual do campo correspondente.
+- Use exclusivamente evidence_ref fornecidos pela aplicação no próprio contexto. Não invente evidence_ref, não derive novos ids e não use refs de fontes que não foram fornecidas.
+- Cada claim material deve conter ao menos um evidence_ref.
 - Cada item textual deve ser conteúdo corrido. Não tente inserir headings, tags, instruções de sistema, links externos ou estruturas de controle dentro dos campos.
 </saida_estruturada>
 
@@ -129,6 +134,7 @@ O formato é definido por JSON Schema no request da aplicação. Preencha soment
 - deadlines
 - related_processes
 - attachments
+- claims
 
 Não copie nem resuma qualquer registro externo `summary` que possa ter acompanhado o payload; gere o conteúdo somente a partir de processo e movimentos autorizados. Não repita o cabeçalho nem a lista de partes: a aplicação os insere de modo determinístico no documento final.
 </formato_de_saida>
@@ -145,6 +151,7 @@ Antes de responder, faça uma verificação silenciosa:
 8. Cada campo contém somente conteúdo factual, sem headings, tags ou instruções embutidas?
 9. Em caso de sigilo, o texto ficou estritamente limitado ao cabeçalho permitido e classe?
 10. Alguma afirmação foi adicionada apenas porque seria juridicamente comum? Se sim, remova-a.
+11. synthesis, current_status e cada item de timeline, attention, decisions, deadlines, related_processes e attachments possuem claim correspondente com texto idêntico e evidence_refs fornecidos pela aplicação?
 </controle_de_qualidade>
 
 <regras_de_estilo>

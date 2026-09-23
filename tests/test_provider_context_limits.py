@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 
@@ -12,6 +13,7 @@ def _ranked(texts: list[str]) -> list[SimpleNamespace]:
     return [
         SimpleNamespace(
             step=SimpleNamespace(
+                id=uuid4(),
                 step_number=index + 1,
                 occurred_at=None,
                 title=f"Movimento {index + 1}",

@@ -5,7 +5,15 @@ import os
 from datetime import datetime, timezone
 
 from app.auth import configured_bearer_tokens
+from app.claim_evidence import (
+    build_material_claims,
+    claim_evidence_is_publishable,
+    evidence_catalog,
+    load_summary_claim_evidence,
+    validate_claim_evidence,
+)
 from app.db import create_pool
+from app.json_utils import decode_json_object
 from app.processes import finalize_version, stage_version
 from app.rag import _load_context, _persist_summary, _validate_provider_summary
 from app.summary_output import structured_summary_document
@@ -37,7 +45,8 @@ async def seed_demo(database_url: str) -> None:
 
             existing = await conn.fetchrow(
                 """
-                SELECT p.id, p.current_version_id
+                SELECT p.id, p.code, p.class_name, p.court, p.header, p.parties,
+                       p.current_version_id
                 FROM processes p
                 JOIN tenant_processes tp ON tp.process_id = p.id
                 WHERE tp.tenant_id = $1 AND p.code = $2
@@ -46,20 +55,31 @@ async def seed_demo(database_url: str) -> None:
                 DEMO_CODE,
             )
             if existing is not None and existing["current_version_id"] is not None:
-                summary_ok = await conn.fetchval(
+                summary_row = await conn.fetchrow(
                     """
-                    SELECT EXISTS(
-                        SELECT 1
-                        FROM process_summaries
-                        WHERE process_id = $1
-                          AND version_id = $2
-                          AND COALESCE((validation->>'passed')::boolean, false)
-                          AND structured_output IS NOT NULL
-                    )
+                    SELECT id, structured_output
+                    FROM process_summaries
+                    WHERE process_id = $1
+                      AND version_id = $2
+                      AND COALESCE((validation->>'passed')::boolean, false)
                     """,
                     existing["id"],
                     existing["current_version_id"],
                 )
+                summary_ok = False
+                if summary_row is not None:
+                    claim_evidence = await load_summary_claim_evidence(
+                        conn, summary_id=summary_row["id"]
+                    )
+                    structured_output = decode_json_object(
+                        summary_row["structured_output"],
+                        label="demo structured summary",
+                    )
+                    summary_ok = claim_evidence_is_publishable(
+                        structured_output,
+                        claim_evidence,
+                        process=existing,
+                    )
                 if summary_ok:
                     print("RPY LOCAL DEMO: READY")
                     print(f"process={DEMO_CODE}")
@@ -142,25 +162,32 @@ async def seed_demo(database_url: str) -> None:
             "## Pontos de atenção\n"
             "Nenhuma divergência objetiva identificada."
         )
-        structured_output = structured_summary_document(
-            {
-                "synthesis": f"Processo {DEMO_CODE}. Situação processual registrada.",
-                "timeline": [],
-                "current_status": "Situação processual registrada.",
-                "attention": ["Nenhuma divergência objetiva identificada."],
-                "decisions": [],
-                "deadlines": [],
-                "related_processes": [],
-                "attachments": [],
-            },
-            context,
+        demo_payload = {
+            "synthesis": f"Processo {DEMO_CODE}. Situação processual registrada.",
+            "timeline": [],
+            "current_status": "Situação processual registrada.",
+            "attention": ["Nenhuma divergência objetiva identificada."],
+            "decisions": [],
+            "deadlines": [],
+            "related_processes": [],
+            "attachments": [],
+        }
+        demo_payload["claims"] = build_material_claims(
+            demo_payload,
+            evidence_refs=[context["_process_evidence_ref"]],
         )
+        context["_parsed_summary"] = demo_payload
+        structured_output = structured_summary_document(demo_payload, context)
         result = _validate_provider_summary(summary, context)
         if not result.passed:
             raise RuntimeError(
                 "synthetic demo summary failed validation: "
                 + "; ".join(result.errors)
             )
+
+        claims, claim_errors = validate_claim_evidence(demo_payload, context)
+        if claim_errors:
+            raise RuntimeError("synthetic demo claim evidence failed validation")
 
         async with pool.acquire() as conn:
             await _persist_summary(
@@ -182,6 +209,8 @@ async def seed_demo(database_url: str) -> None:
                     context.get("_unicode_security_flags", [])
                 ),
                 structured_output=structured_output,
+                claims=claims,
+                evidence_sources=evidence_catalog(context),
             )
 
         print("RPY LOCAL DEMO: READY")

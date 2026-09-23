@@ -17,6 +17,7 @@ from app.api_key_auth import (
 )
 from app.attachment_signals import attachment_status_flags
 from app.auth import principal_from_request, principal_from_request_unscoped, tenant_from_request
+from app.claim_evidence import claim_evidence_is_publishable, load_summary_claim_evidence
 from app.judit import normalize_cnj
 from app.json_utils import decode_json_object
 from app.process_requests import request_process
@@ -27,6 +28,7 @@ from app.public_lifecycle import (
     create_or_get_summary_request,
     request_fingerprint,
 )
+from app.summary_policy import is_restricted_local_summary
 
 router = APIRouter()
 
@@ -51,13 +53,25 @@ def _summary_format(value: Any) -> str:
 
 
 def _summary_representation(
-    *, markdown: str | None, structured_output: Any, response_format: str
+    *,
+    markdown: str | None,
+    structured_output: Any,
+    response_format: str,
+    hide_claim_evidence: bool = False,
 ) -> Any:
     if response_format == "jsx":
         return markdown
     if structured_output is None:
         return None
-    return _json_object(structured_output)
+    rendered = _json_object(structured_output)
+    if not hide_claim_evidence:
+        return rendered
+    summary = rendered.get("summary")
+    if not isinstance(summary, dict) or "claims" not in summary:
+        return rendered
+    public_summary = dict(summary)
+    public_summary.pop("claims", None)
+    return {**rendered, "summary": public_summary}
 
 
 def _summary_usage(row: asyncpg.Record) -> dict[str, Any] | None:
@@ -206,9 +220,16 @@ async def _job_payload(
                ps.usage AS provider_usage,
                ps.cache_hit,
                ps.cost_usd,
-               ps.structured_output
+               ps.structured_output,
+               p.secrecy_level AS process_secrecy_level,
+               p.code AS summary_process_code,
+               p.class_name AS summary_process_class_name,
+               p.court AS summary_process_court,
+               p.header AS summary_process_header,
+               p.parties AS summary_process_parties
         FROM public_summary_requests psr
         LEFT JOIN process_summaries ps ON ps.id = psr.summary_id
+        LEFT JOIN processes p ON p.id = psr.process_id
         WHERE psr.id = $1 AND psr.tenant_id = $2
         """,
         job_id,
@@ -216,11 +237,10 @@ async def _job_payload(
     )
     if row is None:
         return None
-    sources = await _load_sources(
-        conn,
-        process_id=row["process_id"],
-        version_id=row["version_id"],
-        summary_id=row["summary_id"],
+    claim_evidence = (
+        await load_summary_claim_evidence(conn, summary_id=row["summary_id"])
+        if row["summary_id"] is not None
+        else []
     )
     validation = (
         _json_object(row["validation"])
@@ -235,6 +255,50 @@ async def _job_payload(
             version_id=row["version_id"],
         )
     )
+    structured_output = (
+        _json_object(row["structured_output"])
+        if row["structured_output"] is not None
+        else None
+    )
+    is_secret = int(row["process_secrecy_level"] or 0) > 0
+    publishable = bool(
+        validation
+        and validation.get("passed") is True
+        and (
+            (
+                is_secret
+                and is_restricted_local_summary(
+                    row,
+                    process={
+                        "code": row["summary_process_code"],
+                        "class_name": row["summary_process_class_name"],
+                        "header": row["summary_process_header"],
+                    },
+                )
+            )
+            or (
+                not is_secret
+                and claim_evidence_is_publishable(
+                    structured_output,
+                    claim_evidence,
+                    process={
+                        "code": row["summary_process_code"],
+                        "class_name": row["summary_process_class_name"],
+                        "court": row["summary_process_court"],
+                        "header": row["summary_process_header"],
+                        "parties": row["summary_process_parties"],
+                    },
+                )
+            )
+        )
+    )
+    sources = await _load_sources(
+        conn,
+        process_id=row["process_id"],
+        version_id=row["version_id"],
+        summary_id=row["summary_id"] if publishable else None,
+    )
+    public_claim_evidence = claim_evidence if publishable and not is_secret else []
     payload = {
         "job_id": str(row["id"]),
         "poll_url": f"/v1/resumos/{row['id']}",
@@ -245,14 +309,16 @@ async def _job_payload(
         "usage": _summary_usage(row),
         "flags": flags,
         "validation": validation,
+        "claim_evidence": public_claim_evidence,
         "format": str(row["response_format"]),
         "iaSummary": (
             _summary_representation(
                 markdown=row["markdown"],
                 structured_output=row["structured_output"],
                 response_format=str(row["response_format"]),
+                hide_claim_evidence=is_secret,
             )
-            if validation and validation.get("passed") is True
+            if publishable
             else None
         ),
         "error_code": row["error_code"],
@@ -285,13 +351,31 @@ async def _latest_summary_payload(
     if summary is None:
         return None
     validation = _json_object(summary["validation"])
+    claim_evidence = await load_summary_claim_evidence(
+        conn, summary_id=summary["id"]
+    )
+    structured_output = (
+        _json_object(summary["structured_output"])
+        if summary["structured_output"] is not None
+        else None
+    )
+    is_secret = int(process["secrecy_level"] or 0) > 0
+    if is_secret:
+        if not is_restricted_local_summary(summary, process=process):
+            return None
+    elif not claim_evidence_is_publishable(
+        structured_output,
+        claim_evidence,
+        process=process,
+    ):
+        return None
     sources = await _load_sources(
         conn,
         process_id=process["id"],
         version_id=process["current_version_id"],
         summary_id=summary["id"],
     )
-    flags = {"secrecy": int(process["secrecy_level"] or 0) > 0}
+    flags = {"secrecy": is_secret}
     flags.update(
         await _load_attachment_flags(
             conn,
@@ -306,11 +390,15 @@ async def _latest_summary_payload(
         "usage": _summary_usage(summary),
         "flags": flags,
         "validation": validation,
+        "claim_evidence": (
+            [] if int(process["secrecy_level"] or 0) > 0 else claim_evidence
+        ),
         "format": response_format,
         "iaSummary": _summary_representation(
             markdown=summary["markdown"],
             structured_output=summary["structured_output"],
             response_format=response_format,
+            hide_claim_evidence=is_secret,
         ),
     }
 
@@ -468,10 +556,11 @@ async def get_summary_sources(code: str, request: Request):
         if process is None:
             raise HTTPException(status_code=404, detail="process not found")
         summary_id = None
+        summary_structured_output = None
         if process["current_version_id"] is not None:
-            summary_id = await conn.fetchval(
+            summary_row = await conn.fetchrow(
                 """
-                SELECT id
+                SELECT id, structured_output, model, prompt_version
                 FROM process_summaries
                 WHERE process_id = $1
                   AND version_id = $2
@@ -480,12 +569,17 @@ async def get_summary_sources(code: str, request: Request):
                 process["id"],
                 process["current_version_id"],
             )
-        sources = await _load_sources(
-            conn,
-            process_id=process["id"],
-            version_id=process["current_version_id"],
-            summary_id=summary_id,
-        )
+            if summary_row is not None:
+                is_secret = int(process["secrecy_level"] or 0) > 0
+                if not is_secret or is_restricted_local_summary(
+                    summary_row, process=process
+                ):
+                    summary_id = summary_row["id"]
+                    summary_structured_output = (
+                        _json_object(summary_row["structured_output"])
+                        if summary_row["structured_output"] is not None
+                        else None
+                    )
         state = getattr(request, "state", None)
         principal = getattr(state, "principal", None)
         if not isinstance(principal, RequestPrincipal):
@@ -496,6 +590,26 @@ async def get_summary_sources(code: str, request: Request):
                 process_code=canonical_code,
                 action="v1_read_sources",
             )
+        claim_evidence = (
+            await load_summary_claim_evidence(conn, summary_id=summary_id)
+            if summary_id is not None
+            else []
+        )
+        if int(process["secrecy_level"] or 0) > 0:
+            claim_evidence = []
+        elif not claim_evidence_is_publishable(
+            summary_structured_output,
+            claim_evidence,
+            process=process,
+        ):
+            summary_id = None
+            claim_evidence = []
+        sources = await _load_sources(
+            conn,
+            process_id=process["id"],
+            version_id=process["current_version_id"],
+            summary_id=summary_id,
+        )
         flags = {"secrecy": int(process["secrecy_level"] or 0) > 0}
         flags.update(
             await _load_attachment_flags(
@@ -508,5 +622,6 @@ async def get_summary_sources(code: str, request: Request):
             "cnj": canonical_code,
             "source_updated_at": process["updated_at"],
             "sources": sources,
+            "claim_evidence": claim_evidence,
             "flags": flags,
         }

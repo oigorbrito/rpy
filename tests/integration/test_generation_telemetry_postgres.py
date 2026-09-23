@@ -6,6 +6,12 @@ from datetime import datetime, timezone
 import pytest
 
 from app.api_v1 import _job_payload
+from app.claim_evidence import (
+    build_material_claims,
+    evidence_catalog,
+    process_evidence_ref,
+    validate_claim_evidence,
+)
 from app.db import create_pool
 from app.migrations import migrate
 from app.public_lifecycle import (
@@ -14,6 +20,7 @@ from app.public_lifecycle import (
     transition_summary_request,
 )
 from app.rag import _persist_summary
+from app.summary_output import structured_summary_document
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(
@@ -68,6 +75,38 @@ async def test_generation_telemetry_is_persisted_and_exposed() -> None:
                 process_id,
             )
 
+            claim_context = {
+                "code": code,
+                "class_name": None,
+                "court": None,
+                "header": {},
+                "parties": [],
+                "_process_evidence_ref": process_evidence_ref(version_id),
+                "_selected_sources": [],
+                "_attachment_sources": [],
+            }
+            summary_payload = {
+                "synthesis": "Resumo válido",
+                "timeline": [],
+                "current_status": "Situação registrada.",
+                "attention": ["Nenhuma divergência objetiva identificada."],
+                "decisions": [],
+                "deadlines": [],
+                "related_processes": [],
+                "attachments": [],
+            }
+            summary_payload["claims"] = build_material_claims(
+                summary_payload,
+                evidence_refs=[claim_context["_process_evidence_ref"]],
+            )
+            claims, claim_errors = validate_claim_evidence(
+                summary_payload, claim_context
+            )
+            assert claim_errors == []
+            structured_output = structured_summary_document(
+                summary_payload, claim_context
+            )
+
             persisted = await _persist_summary(
                 conn,
                 process_id=process_id,
@@ -85,6 +124,9 @@ async def test_generation_telemetry_is_persisted_and_exposed() -> None:
                 },
                 cache_hit=True,
                 cost_usd=0.01234567,
+                structured_output=structured_output,
+                claims=claims,
+                evidence_sources=evidence_catalog(claim_context),
             )
             assert persisted is True
             summary = await conn.fetchrow(

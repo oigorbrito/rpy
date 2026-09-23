@@ -323,6 +323,117 @@ async def test_process_read_is_tenant_scoped_audited_and_returns_current_details
 
 
 @pytest.mark.asyncio
+async def test_process_read_hides_public_summary_without_claim_provenance(
+    api_client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, pool = api_client
+    tenant = uuid4()
+    code = f"0000000-00.0000.0.00.{str(uuid4().int)[-4:]}"
+    process_id, version_id = await _seed_process(pool, tenant=tenant, code=code)
+
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO process_summaries (
+                process_id, version_id, markdown, validation, model,
+                prompt_version, generation_ms
+            )
+            VALUES ($1, $2, $3, $4::jsonb, $5, $6, 10)
+            """,
+            process_id,
+            version_id,
+            "public summary without claim provenance",
+            json.dumps({"passed": True, "errors": []}),
+            "claude-sonnet-5",
+            "process-summary-v5",
+        )
+
+    monkeypatch.setenv("RPY_BEARER_TOKENS", json.dumps({"token": str(tenant)}))
+    response = await client.get(
+        f"/processes/{code}", headers={"Authorization": "Bearer token"}
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["summary"] is None
+    assert body["iaSummary"] is None
+    assert body["summary_status"] == "not_generated"
+    assert "public summary without claim provenance" not in json.dumps(
+        body, ensure_ascii=False
+    )
+
+
+@pytest.mark.asyncio
+async def test_process_read_hides_public_history_after_process_becomes_restricted(
+    api_client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, pool = api_client
+    tenant = uuid4()
+    code = f"0000000-00.0000.0.00.{str(uuid4().int)[-4:]}"
+    process_id, version_id = await _seed_process(pool, tenant=tenant, code=code)
+
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO process_summaries (
+                process_id, version_id, markdown, validation, model,
+                prompt_version, generation_ms
+            )
+            VALUES ($1, $2, $3, $4::jsonb, $5, $6, 10)
+            """,
+            process_id,
+            version_id,
+            "public summary that must be hidden",
+            json.dumps({"passed": True, "errors": []}),
+            "claude-sonnet-5",
+            "process-summary-v5",
+        )
+        await conn.execute(
+            """
+            UPDATE processes
+            SET secrecy_level = 1,
+                header = $2::jsonb
+            WHERE id = $1
+            """,
+            process_id,
+            json.dumps(
+                {
+                    "city": "Porto Alegre",
+                    "amount": "R$ 100,00",
+                    "internal_name": "Dado restrito",
+                }
+            ),
+        )
+
+    monkeypatch.setenv("RPY_BEARER_TOKENS", json.dumps({"token": str(tenant)}))
+    response = await client.get(
+        f"/processes/{code}", headers={"Authorization": "Bearer token"}
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["summary"] is None
+    assert body["iaSummary"] is None
+    assert body["summary_status"] == "not_generated"
+    assert body["court"] is None
+    assert body["parties"] == []
+    assert body["subjects"] == []
+    assert body["recent_steps"] == []
+    assert body["header"] == {"city": "Porto Alegre"}
+    rendered = json.dumps(body, ensure_ascii=False)
+    for restricted in (
+        "public summary that must be hidden",
+        "Maria",
+        "Contrato",
+        "Processo distribuído",
+        "R$ 100,00",
+        "Dado restrito",
+        "TJ",
+    ):
+        assert restricted not in rendered
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("cached", "job_status", "expected"),
     [
