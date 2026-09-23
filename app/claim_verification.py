@@ -194,6 +194,15 @@ def _amounts(text: str) -> frozenset[Decimal]:
     return frozenset(values)
 
 
+def _labeled_process_amounts(text: str) -> frozenset[Decimal]:
+    values: set[Decimal] = set()
+    for match in _LABELED_AMOUNT_RE.finditer(text):
+        parsed = _decimal_amount(match.group("amount"))
+        if parsed is not None:
+            values.add(parsed)
+    return frozenset(values)
+
+
 def _step_counts(text: str) -> frozenset[int]:
     return frozenset(
         int(match.group("count"))
@@ -386,6 +395,7 @@ def _relation_status(
     claim_cnjs = _cnjs(claim_text)
     claim_dates = _dates(claim_text)
     claim_amounts = _amounts(claim_text)
+    canonical_process_amounts = _labeled_process_amounts(claim_text)
     claim_parties = _party_names_in_text(claim_text, known_parties)
     claim_step_counts = _step_counts(claim_text)
     fact_count = (
@@ -404,7 +414,12 @@ def _relation_status(
         return "insufficient", "cited_source_missing_cnj", fact_count
 
     if claim_amounts and not claim_amounts.issubset(evidence.amounts):
-        if evidence.kind == "process" and evidence.amounts:
+        if (
+            evidence.kind == "process"
+            and evidence.amounts
+            and canonical_process_amounts
+            and not canonical_process_amounts.issubset(evidence.amounts)
+        ):
             return "contradicted", "process_amount_mismatch", fact_count
         return "insufficient", "cited_source_missing_amount", fact_count
 
@@ -477,6 +492,7 @@ def verify_material_claims(
         claim_cnjs = _cnjs(claim.text)
         claim_dates = _dates(claim.text)
         claim_amounts = _amounts(claim.text)
+        canonical_process_amounts = _labeled_process_amounts(claim.text)
         claim_parties = _party_names_in_text(claim.text, known_parties)
         claim_step_counts = _step_counts(claim.text)
         fact_count = (
@@ -540,8 +556,8 @@ def verify_material_claims(
             status = "contradicted"
             reason = "process_cnj_mismatch"
         elif (
-            claim_amounts
-            and not claim_amounts.issubset(combined_amounts)
+            canonical_process_amounts
+            and not canonical_process_amounts.issubset(combined_amounts)
             and process_amounts
         ):
             status = "contradicted"
