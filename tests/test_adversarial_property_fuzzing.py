@@ -117,8 +117,8 @@ def test_structured_renderer_never_grants_mutated_text_new_sections(base: str, p
     rendered = render_structured_summary(payload, _context(attack))
     headings = _markdown_headings(rendered)
     allowed = {
-        "# Resumo do processo", "## Partes", "## Síntese", "## Linha do tempo relevante",
-        "## Situação atual", "## Pontos de atenção", "## Decisões", "## Anexos",
+        "# Resumo do processo", "## Partes", "## Classe", "## Assuntos",
+        "## Movimentações", "## Pontos de atenção", "## Decisões", "## Anexos",
     }
     assert set(headings) <= allowed  # nosec B101
 
