@@ -59,6 +59,7 @@ from app.summary_policy import (
     RESTRICTED_PROMPT_VERSION,
     is_restricted_local_summary,
     restricted_public_header,
+    restricted_summary_payload,
 )
 from app.tasks import PermanentTaskError, task
 from app.tpu_glossary import resolve_process_tpu_definitions
@@ -922,16 +923,7 @@ async def generate_summary(
     cost_usd: float | None = None
     if _is_secret_context(context):
         text = _secret_summary(context)
-        secret_payload = {
-            "synthesis": "Os detalhes processuais foram restringidos por sigilo.",
-            "timeline": [],
-            "current_status": "O contexto público disponível está limitado pelos dados permitidos para processo sigiloso.",
-            "attention": ["Processo com detalhes restringidos por sigilo."],
-            "decisions": [],
-            "deadlines": [],
-            "related_processes": [],
-            "attachments": [],
-        }
+        secret_payload = restricted_summary_payload()
         context["_structured_summary"] = structured_summary_document(
             secret_payload, context
         )
