@@ -17,7 +17,7 @@ from app.api_key_auth import (
 )
 from app.attachment_signals import attachment_status_flags
 from app.auth import principal_from_request, principal_from_request_unscoped, tenant_from_request
-from app.claim_evidence import claim_evidence_is_complete, load_summary_claim_evidence
+from app.claim_evidence import claim_evidence_is_publishable, load_summary_claim_evidence
 from app.judit import normalize_cnj
 from app.json_utils import decode_json_object
 from app.process_requests import request_process
@@ -224,7 +224,9 @@ async def _job_payload(
                p.secrecy_level AS process_secrecy_level,
                p.code AS summary_process_code,
                p.class_name AS summary_process_class_name,
-               p.header AS summary_process_header
+               p.court AS summary_process_court,
+               p.header AS summary_process_header,
+               p.parties AS summary_process_parties
         FROM public_summary_requests psr
         LEFT JOIN process_summaries ps ON ps.id = psr.summary_id
         LEFT JOIN processes p ON p.id = psr.process_id
@@ -276,7 +278,17 @@ async def _job_payload(
             )
             or (
                 not is_secret
-                and claim_evidence_is_complete(structured_output, claim_evidence)
+                and claim_evidence_is_publishable(
+                    structured_output,
+                    claim_evidence,
+                    process={
+                        "code": row["summary_process_code"],
+                        "class_name": row["summary_process_class_name"],
+                        "court": row["summary_process_court"],
+                        "header": row["summary_process_header"],
+                        "parties": row["summary_process_parties"],
+                    },
+                )
             )
         )
     )
@@ -351,7 +363,11 @@ async def _latest_summary_payload(
     if is_secret:
         if not is_restricted_local_summary(summary, process=process):
             return None
-    elif not claim_evidence_is_complete(structured_output, claim_evidence):
+    elif not claim_evidence_is_publishable(
+        structured_output,
+        claim_evidence,
+        process=process,
+    ):
         return None
     sources = await _load_sources(
         conn,
@@ -581,8 +597,10 @@ async def get_summary_sources(code: str, request: Request):
         )
         if int(process["secrecy_level"] or 0) > 0:
             claim_evidence = []
-        elif not claim_evidence_is_complete(
-            summary_structured_output, claim_evidence
+        elif not claim_evidence_is_publishable(
+            summary_structured_output,
+            claim_evidence,
+            process=process,
         ):
             summary_id = None
             claim_evidence = []
