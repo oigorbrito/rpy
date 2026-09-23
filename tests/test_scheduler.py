@@ -16,6 +16,12 @@ def test_positive_rejects_zero_and_negative_values(value: float) -> None:
         _positive(value, name="unsafe")
 
 
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_positive_rejects_non_finite_values(value: float) -> None:
+    with pytest.raises(ValueError, match="must be finite"):
+        _positive(value, name="unsafe_interval")
+
+
 @pytest.mark.asyncio
 async def test_expunge_rejects_non_positive_retention_before_touching_database() -> None:
     with pytest.raises(ValueError, match="retention_days"):
