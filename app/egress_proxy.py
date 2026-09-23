@@ -13,23 +13,36 @@ MAX_HEADER_BYTES = 8192
 _HOST_RE = re.compile(r"^[a-z0-9.-]{1,253}$")
 
 
-def _canonical_allowed_host(value: str) -> str:
+def _canonical_dns_hostname(value: str) -> str:
     host = value.strip().rstrip(".").casefold()
     if not host:
-        raise RuntimeError("egress proxy allowlist contains an empty hostname")
+        raise ValueError("empty hostname")
     try:
         canonical = host.encode("idna").decode("ascii")
     except UnicodeError as exc:
-        raise RuntimeError("egress proxy allowlist contains an invalid hostname") from exc
-    if not _HOST_RE.fullmatch(canonical) or ".." in canonical:
-        raise RuntimeError("egress proxy allowlist contains an invalid hostname")
+        raise ValueError("invalid hostname") from exc
     try:
         ipaddress.ip_address(canonical)
     except ValueError:
         pass
     else:
-        raise RuntimeError("egress proxy allowlist must contain DNS hostnames, not IP addresses")
+        raise ValueError("IP literals are not allowed")
+    if not _HOST_RE.fullmatch(canonical) or ".." in canonical:
+        raise ValueError("invalid hostname")
     return canonical
+
+
+def _canonical_allowed_host(value: str) -> str:
+    try:
+        return _canonical_dns_hostname(value)
+    except ValueError as exc:
+        if str(exc) == "empty hostname":
+            raise RuntimeError("egress proxy allowlist contains an empty hostname") from exc
+        if str(exc) == "IP literals are not allowed":
+            raise RuntimeError(
+                "egress proxy allowlist must contain DNS hostnames, not IP addresses"
+            ) from exc
+        raise RuntimeError("egress proxy allowlist contains an invalid hostname") from exc
 
 
 def _normalize_allowed_hosts(values: Iterable[str]) -> frozenset[str]:
@@ -66,19 +79,12 @@ def _parse_connect_target(target: str) -> str:
     if target.count(":") != 1:
         raise ValueError("CONNECT target must be hostname:port")
     raw_host, raw_port = target.rsplit(":", 1)
-    host = raw_host.strip().rstrip(".").casefold()
     try:
-        host = host.encode("idna").decode("ascii")
-    except UnicodeError as exc:
+        host = _canonical_dns_hostname(raw_host)
+    except ValueError as exc:
+        if str(exc) == "IP literals are not allowed":
+            raise ValueError("CONNECT IP literals are not allowed") from exc
         raise ValueError("invalid CONNECT hostname") from exc
-    if not _HOST_RE.fullmatch(host) or ".." in host:
-        raise ValueError("invalid CONNECT hostname")
-    try:
-        ipaddress.ip_address(host)
-    except ValueError:
-        pass
-    else:
-        raise ValueError("CONNECT IP literals are not allowed")
     try:
         port = int(raw_port)
     except ValueError as exc:
