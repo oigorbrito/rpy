@@ -48,3 +48,15 @@ def test_duration_parser_accepts_compose_units() -> None:
     assert module._duration_seconds("250ms") == pytest.approx(0.25)
     assert module._duration_seconds("40s") == pytest.approx(40)
     assert module._duration_seconds("2m") == pytest.approx(120)
+
+
+@pytest.mark.parametrize("value", ["nan", "inf", "-inf"])
+def test_rejects_non_finite_worker_shutdown_grace(value: str) -> None:
+    with pytest.raises(SystemExit, match="WORKER_SHUTDOWN_GRACE_SECONDS must be finite"):
+        module._validate_worker_shutdown(_services(app_grace=value))
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_duration_parser_rejects_non_finite_numeric_values(value: float) -> None:
+    with pytest.raises(SystemExit, match="duration must be finite"):
+        module._duration_seconds(value)
