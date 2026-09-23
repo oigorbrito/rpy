@@ -5,11 +5,14 @@ from uuid import UUID
 
 import asyncpg
 
+from app.claim_evidence import claim_evidence_is_complete, load_summary_claim_evidence
+from app.json_utils import decode_json_object
 from app.public_lifecycle import (
     transition_job_public_requests,
     transition_requests_for_judit_request,
     transition_requests_for_version,
 )
+from app.summary_policy import is_restricted_local_summary
 
 
 async def mark_job_started(
@@ -50,7 +53,11 @@ async def reconcile_generation_result(
     row = await conn.fetchrow(
         """
         SELECT ps.id AS summary_id,
+               ps.structured_output,
+               ps.model,
+               ps.prompt_version,
                COALESCE((ps.validation->>'passed')::boolean, false) AS passed,
+               p.secrecy_level,
                p.updated_at AS source_updated_at
         FROM process_summaries ps
         JOIN processes p
@@ -65,10 +72,27 @@ async def reconcile_generation_result(
     result_passed = bool(
         isinstance(result_validation, dict) and result_validation.get("passed") is True
     )
-    passed = bool(row is not None and row["passed"] and result_passed)
+    passed = False
+    if row is not None and row["passed"] and result_passed:
+        if int(row["secrecy_level"] or 0) > 0:
+            passed = is_restricted_local_summary(row)
+        else:
+            claim_evidence = await load_summary_claim_evidence(
+                conn, summary_id=row["summary_id"]
+            )
+            structured_output = (
+                decode_json_object(
+                    row["structured_output"],
+                    label="generated summary structured output",
+                )
+                if row["structured_output"] is not None
+                else None
+            )
+            passed = claim_evidence_is_complete(structured_output, claim_evidence)
+
     status = "completed" if passed else "validation_failed"
     error_code = None if passed else "validation_failed"
-    summary_id = row["summary_id"] if row is not None else None
+    summary_id = row["summary_id"] if row is not None and passed else None
     source_updated_at = row["source_updated_at"] if row is not None else None
     flags = {
         "summary_reused": bool((result or {}).get("reused")),
