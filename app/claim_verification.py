@@ -402,7 +402,11 @@ def verify_material_claims(
             value for evidence in process_evidence for value in evidence.amounts
         )
 
-        if exact_support:
+        relation_statuses = {relation.status for relation in relations}
+        if "contradicted" in relation_statuses:
+            status = "contradicted"
+            reason = "at_least_one_cited_source_contradicts_deterministic_fact"
+        elif exact_support:
             status = "supported"
             reason = "exact_text_present_in_cited_source"
         elif fact_count == 0:
