@@ -86,6 +86,10 @@ _LIST_FIELDS = (
     ("attachments", "Anexos"),
 )
 _REQUIRED_KEYS = frozenset(SUMMARY_OUTPUT_SCHEMA["required"])
+_DOCUMENT_KEYS = frozenset({"schema_version", "process", "summary"})
+_PROCESS_KEYS = frozenset({"cnj", "class_name", "court", "header", "parties"})
+_PARTY_KEYS = frozenset({"name", "side", "person_type", "masked_person_id"})
+_HEADER_KEYS = frozenset(key for key, _ in _HEADER_FIELDS)
 _SPACE_RE = re.compile(r"\s+")
 _MAX_SYNTHESIS_CHARS = 6000
 _MAX_STATUS_CHARS = 4000
@@ -201,6 +205,53 @@ def parse_structured_summary(raw: str) -> dict[str, Any]:
         "attachments": _string_list(payload.get("attachments"), key="attachments"),
         "claims": _claims(payload.get("claims", [])),
     }
+
+
+def structured_summary_document_is_canonical(value: Any) -> bool:
+    if not isinstance(value, dict) or set(value) != _DOCUMENT_KEYS:
+        return False
+    if value.get("schema_version") != 2:
+        return False
+
+    process = value.get("process")
+    if not isinstance(process, dict) or set(process) != _PROCESS_KEYS:
+        return False
+    if not isinstance(process.get("cnj"), str):
+        return False
+    if process.get("class_name") is not None and not isinstance(
+        process.get("class_name"), str
+    ):
+        return False
+    if process.get("court") is not None and not isinstance(process.get("court"), str):
+        return False
+
+    header = process.get("header")
+    if not isinstance(header, dict) or not set(header).issubset(_HEADER_KEYS):
+        return False
+    if any(isinstance(item, (dict, list)) for item in header.values()):
+        return False
+
+    parties = process.get("parties")
+    if not isinstance(parties, list):
+        return False
+    for party in parties:
+        if (
+            not isinstance(party, dict)
+            or not set(party).issubset(_PARTY_KEYS)
+            or any(not isinstance(item, str) for item in party.values())
+        ):
+            return False
+
+    summary = value.get("summary")
+    if not isinstance(summary, dict) or set(summary) != _REQUIRED_KEYS:
+        return False
+    try:
+        normalized = parse_structured_summary(
+            json.dumps(summary, ensure_ascii=False)
+        )
+    except (TypeError, ValueError):
+        return False
+    return normalized == summary
 
 
 def _append_list(lines: list[str], title: str, items: list[str]) -> None:
