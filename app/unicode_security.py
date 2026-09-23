@@ -38,6 +38,8 @@ class UnicodeModelView:
 
 def _is_default_ignorable(character: str) -> bool:
     codepoint = ord(character)
+    if codepoint < 0x0300:
+        return codepoint == 0x00AD
     if unicodedata.category(character) == "Cf":
         return True
     if codepoint in _EXTRA_DEFAULT_IGNORABLE_CODEPOINTS:
@@ -48,6 +50,15 @@ def _is_default_ignorable(character: str) -> bool:
 def _script(character: str) -> str | None:
     if not character.isalpha():
         return None
+    codepoint = ord(character)
+    # Fast path for common Latin ranges (ASCII letters, Latin-1 Supplement, Latin Extended-A/B)
+    if (
+        (65 <= codepoint <= 90)
+        or (97 <= codepoint <= 122)
+        or (192 <= codepoint <= 255 and codepoint != 215 and codepoint != 247)
+        or (256 <= codepoint <= 591)
+    ):
+        return "Latin"
     name = unicodedata.name(character, "")
     for prefix, script in (
         ("LATIN ", "Latin"),
@@ -59,62 +70,68 @@ def _script(character: str) -> str | None:
     return None
 
 
-def _mixed_script_positions(text: str) -> set[int]:
-    suspicious: set[int] = set()
-    token: list[int] = []
-
-    def flush() -> None:
-        if not token:
-            return
-        scripts = {_script(text[index]) for index in token}
-        scripts.discard(None)
-        if len(scripts) < 2:
-            token.clear()
-            return
-        primary = "Latin" if "Latin" in scripts else sorted(scripts)[0]
-        for index in token:
-            script = _script(text[index])
-            if script is not None and script != primary:
-                suspicious.add(index)
-        token.clear()
-
-    for index, character in enumerate(text):
-        if character.isalpha() or unicodedata.combining(character):
-            token.append(index)
-        else:
-            flush()
-    flush()
-    return suspicious
-
-
 def _visible_codepoint(character: str) -> str:
     name = unicodedata.name(character, "UNNAMED")
     return f"⟦U+{ord(character):04X} {name}⟧"
 
 
 def model_view_text(value: str) -> UnicodeModelView:
+    # Performance optimization:
+    # 1. Fast-path ASCII strings (no bidi, zero-width, ignorable or mixed script possible).
+    # 2. Combined single-pass analysis and rendering to avoid multi-pass string scans.
     normalized = unicodedata.normalize("NFC", str(value))
     digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-    mixed_positions = _mixed_script_positions(normalized)
+
+    if normalized.isascii():
+        return UnicodeModelView(
+            text=normalized,
+            flags=(),
+            normalized_sha256=digest,
+        )
+
     flags: set[str] = set()
     rendered: list[str] = []
+
+    token_indices: list[int] = []
+    token_scripts: list[str | None] = []
+
+    def flush_token() -> None:
+        if not token_indices:
+            return
+        distinct_scripts = {s for s in token_scripts if s is not None}
+        if len(distinct_scripts) >= 2:
+            flags.add("mixed_script")
+            primary = "Latin" if "Latin" in distinct_scripts else sorted(distinct_scripts)[0]
+            for idx, script in zip(token_indices, token_scripts):
+                if script is not None and script != primary:
+                    char = normalized[idx]
+                    rendered[idx] = _visible_codepoint(char)
+        token_indices.clear()
+        token_scripts.clear()
 
     for index, character in enumerate(normalized):
         codepoint = ord(character)
         default_ignorable = _is_default_ignorable(character)
+
         if codepoint in _BIDI_CONTROL_CODEPOINTS:
             flags.add("bidi_control")
         if codepoint in _ZERO_WIDTH_CODEPOINTS:
             flags.add("zero_width")
         if default_ignorable:
             flags.add("default_ignorable")
-        if index in mixed_positions:
-            flags.add("mixed_script")
 
-        if default_ignorable or index in mixed_positions:
+        if default_ignorable:
             rendered.append(_visible_codepoint(character))
         else:
             rendered.append(character)
+
+        if character.isalpha() or unicodedata.combining(character):
+            token_indices.append(index)
+            token_scripts.append(_script(character))
+        else:
+            flush_token()
+
+    flush_token()
 
     ordered_flags = tuple(flag for flag in _FLAG_ORDER if flag in flags)
     return UnicodeModelView(
