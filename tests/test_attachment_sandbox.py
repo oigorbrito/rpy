@@ -8,7 +8,46 @@ from app.attachment_sandbox import (
     _handle_client,
     _parse_request,
     parse_attachment_sandboxed,
+    parser_timeout_seconds,
+    server_request_timeout_seconds,
 )
+
+
+@pytest.mark.parametrize("value", ["nan", "inf", "-inf"])
+@pytest.mark.parametrize(
+    ("env_name", "reader"),
+    [
+        ("ATTACHMENT_PARSER_TIMEOUT_SECONDS", parser_timeout_seconds),
+        (
+            "ATTACHMENT_PARSER_REQUEST_TIMEOUT_SECONDS",
+            server_request_timeout_seconds,
+        ),
+    ],
+)
+def test_sandbox_timeout_env_rejects_non_finite_values(
+    monkeypatch: pytest.MonkeyPatch,
+    env_name: str,
+    reader,
+    value: str,
+) -> None:
+    monkeypatch.setenv(env_name, value)
+
+    with pytest.raises(RuntimeError, match="finite number greater than zero"):
+        reader()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+async def test_sandbox_client_rejects_non_finite_explicit_timeout(value: float) -> None:
+    with pytest.raises(ValueError, match="finite number greater than zero"):
+        await parse_attachment_sandboxed(
+            b"%PDF-1.4\n",
+            content_type="application/pdf",
+            max_bytes=50_000,
+            chunk_chars=256,
+            socket_path="/run/rpy-parser/parser.sock",
+            timeout_seconds=value,
+        )
 
 
 @pytest.mark.asyncio
