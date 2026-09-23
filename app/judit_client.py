@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import os
 import urllib.error
 import urllib.parse
@@ -61,8 +62,10 @@ def _timeout_seconds() -> float:
         value = float(raw)
     except ValueError as exc:
         raise RuntimeError("JUDIT_TIMEOUT_SECONDS must be numeric") from exc
-    if not 0 < value <= 60:
-        raise RuntimeError("JUDIT_TIMEOUT_SECONDS must be between 0 and 60")
+    if not math.isfinite(value) or not 0 < value <= 60:
+        raise RuntimeError(
+            "JUDIT_TIMEOUT_SECONDS must be a finite number between 0 and 60"
+        )
     return value
 
 
