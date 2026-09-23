@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hmac
 import ipaddress
+import math
 import os
 import re
 from collections.abc import Iterable
@@ -70,8 +71,10 @@ def _connect_timeout() -> float:
         value = float(raw)
     except ValueError as exc:
         raise RuntimeError("EGRESS_PROXY_CONNECT_TIMEOUT_SECONDS must be numeric") from exc
-    if not 0 < value <= 60:
-        raise RuntimeError("EGRESS_PROXY_CONNECT_TIMEOUT_SECONDS must be between 0 and 60")
+    if not math.isfinite(value) or not 0 < value <= 60:
+        raise RuntimeError(
+            "EGRESS_PROXY_CONNECT_TIMEOUT_SECONDS must be a finite number between 0 and 60"
+        )
     return value
 
 

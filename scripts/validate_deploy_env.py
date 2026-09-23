@@ -444,6 +444,18 @@ def validate(values: dict[str, str]) -> list[str]:
     _validate_reranker(values, errors)
     _validate_datajud(values, errors)
     _validate_langfuse(values, errors)
+    _validate_positive_numeric(
+        values,
+        errors,
+        key="EGRESS_PROXY_CONNECT_TIMEOUT_SECONDS",
+        default="10",
+        convert=float,
+        invalid_message="EGRESS_PROXY_CONNECT_TIMEOUT_SECONDS must be numeric",
+        non_positive_message=(
+            "EGRESS_PROXY_CONNECT_TIMEOUT_SECONDS must be a finite number greater than zero"
+        ),
+        require_finite=True,
+    )
     _validate_egress_allowlist(values, errors)
 
     image = values.get("RPY_IMAGE", "").strip()
