@@ -216,6 +216,111 @@ Nenhuma divergência objetiva identificada."""
 
 
 @pytest.mark.asyncio
+async def test_existing_incomplete_provenance_is_repaired_with_same_model(
+    monkeypatch,
+) -> None:
+    assert TEST_DATABASE_URL is not None
+    pool = await create_pool(TEST_DATABASE_URL, min_size=1, max_size=2)
+    try:
+        async with pool.acquire() as conn:
+            process_id, version_id, code = await _fixture(conn)
+            claim_context, payload, claims = _claim_material(code, version_id)
+            assert await _persist_summary(
+                conn,
+                process_id=process_id,
+                version_id=version_id,
+                text="summary with provenance that will be damaged",
+                validation={"passed": True, "errors": []},
+                generation_ms=111,
+                structured_output=structured_summary_document(
+                    payload, claim_context
+                ),
+                claims=claims,
+                evidence_sources=evidence_catalog(claim_context),
+            )
+            summary_id = await conn.fetchval(
+                """
+                SELECT id FROM process_summaries
+                WHERE process_id=$1 AND version_id=$2
+                """,
+                process_id,
+                version_id,
+            )
+            await conn.execute(
+                """
+                DELETE FROM process_summary_claims
+                WHERE summary_id=$1 AND claim_id='current_status'
+                """,
+                summary_id,
+            )
+
+        context_calls = 0
+        generation_calls = 0
+        repaired_summary = "# Resumo do processo\n\nResumo reparado."
+
+        async def fake_context(*args, **kwargs):
+            nonlocal context_calls
+            context_calls += 1
+            return {
+                "code": code,
+                "court": None,
+                "class_name": None,
+                "subjects": [],
+                "parties": [],
+                "secrecy_level": 0,
+                "header": {},
+                "step_count": 0,
+                "steps": [],
+                "_process_evidence_ref": process_evidence_ref(version_id),
+                "_selected_sources": [],
+                "_attachment_sources": [],
+            }
+
+        async def fake_generate(client, context, validation_errors=None):
+            nonlocal generation_calls
+            generation_calls += 1
+            _, claim_payload, _ = _claim_material(code, version_id)
+            context["_parsed_summary"] = claim_payload
+            context["_structured_summary"] = structured_summary_document(
+                claim_payload, context
+            )
+            return repaired_summary
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setattr("app.rag._load_context", fake_context)
+        monkeypatch.setattr("app.rag.anthropic_client", lambda api_key: object())
+        monkeypatch.setattr("app.rag._generate", fake_generate)
+
+        result = await generate_summary(pool, process_id, version_id)
+
+        async with pool.acquire() as conn:
+            stored = await conn.fetchrow(
+                """
+                SELECT id, markdown, model, prompt_version
+                FROM process_summaries
+                WHERE process_id=$1 AND version_id=$2
+                """,
+                process_id,
+                version_id,
+            )
+            claim_count = await conn.fetchval(
+                "SELECT count(*) FROM process_summary_claims WHERE summary_id=$1",
+                stored["id"],
+            )
+
+        assert context_calls == 1
+        assert generation_calls == 1
+        assert result["persisted"] is True
+        assert result["reused"] is False
+        assert stored["markdown"] == repaired_summary
+        assert stored["model"] == "claude-sonnet-5"
+        assert stored["prompt_version"] == "process-summary-v5"
+        assert claim_count == 3
+    finally:
+        await pool.close()
+
+
+@pytest.mark.asyncio
 async def test_public_summary_is_not_reused_after_process_becomes_secret(monkeypatch) -> None:
     assert TEST_DATABASE_URL is not None
     pool = await create_pool(TEST_DATABASE_URL, min_size=1, max_size=2)
