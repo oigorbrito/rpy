@@ -415,6 +415,7 @@ async def test_process_read_hides_public_history_after_process_becomes_restricte
     assert body["summary"] is None
     assert body["iaSummary"] is None
     assert body["summary_status"] == "not_generated"
+    assert body["court"] is None
     assert body["parties"] == []
     assert body["subjects"] == []
     assert body["recent_steps"] == []
@@ -427,6 +428,7 @@ async def test_process_read_hides_public_history_after_process_becomes_restricte
         "Processo distribuído",
         "R$ 100,00",
         "Dado restrito",
+        "TJ",
     ):
         assert restricted not in rendered
 
