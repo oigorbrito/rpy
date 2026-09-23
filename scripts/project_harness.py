@@ -60,6 +60,7 @@ def _ci_gate_observations() -> list[Observation]:
     expected = {
         "static-quality": "ruff check app scripts tests",
         "unit-tests": "pytest -q tests --ignore=tests/integration",
+        "hypothesis-reproducibility": "--hypothesis-seed=20260918",
         "synthetic-rag-eval": "python scripts/evaluate_synthetic_rag.py --check-baseline",
         "offline-pipeline-eval": "python scripts/evaluate_offline_pipeline.py --check-baseline",
         "offline-generation-eval": "python scripts/evaluate_offline_generation.py --check-baseline",
@@ -136,6 +137,7 @@ def _documentation_observations() -> list[Observation]:
     required = (
         "AGENTS.md",
         "docs/engineering/empirical-engineering.md",
+        "docs/engineering/adversarial-fuzzing.md",
         "docs/engineering/project-harness.md",
         "CONTRIBUTING.md",
     )
