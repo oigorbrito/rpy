@@ -17,9 +17,11 @@ The enforced properties are:
 - Unicode controls remain subject to the existing model-view hardening;
 - attachment mutations remain data and do not mutate the source fixture;
 - provider-authored strings cannot create new Markdown sections through the closed schema/application renderer;
-- direct generated Markdown with an unapproved heading cannot pass the publication validator.
+- direct generated Markdown with an unapproved heading cannot pass the publication validator;
+- webhook URL credentials are removed from ASGI `path`/`raw_path` for generated opaque token values before application logging;
+- malformed webhook paths never gain request-local authentication state merely because redaction recognized the prefix.
 
-Main CI passes `--hypothesis-seed=20260918` so a failing generated sequence is reproducible. Hypothesis also shrinks failing inputs. If a new minimized failure is discovered, add the minimized synthetic input to `scripts/adversarial_summary_corpus.json` before fixing the defect so it becomes a permanent regression fixture. Do not retain `@reproduce_failure` blobs as permanent evidence because Hypothesis does not guarantee those blobs across versions.
+`scripts/project_harness.py` requires both this document and the canonical `--hypothesis-seed=20260918` CI wiring, so adversarial fuzzing cannot silently disappear from the release evidence. Main CI passes that seed so a failing generated sequence is reproducible. Hypothesis also shrinks failing inputs. If a new minimized failure is discovered, add the minimized synthetic input to `scripts/adversarial_summary_corpus.json` before fixing the defect so it becomes a permanent regression fixture. Do not retain `@reproduce_failure` blobs as permanent evidence because Hypothesis does not guarantee those blobs across versions.
 
 The dependency is development-only and pinned in `requirements/constraints.txt`.
 
