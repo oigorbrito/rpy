@@ -125,6 +125,7 @@ def process_durability_violations() -> list[str]:
 def rag_invariant_violations() -> list[str]:
     errors: list[str] = []
     rag = ROOT / "app" / "rag.py"
+    summary_policy = ROOT / "app" / "summary_policy.py"
     prompts = ROOT / "app" / "prompts.py"
     validation = ROOT / "app" / "validation.py"
     retrieval = ROOT / "app" / "retrieval.py"
@@ -137,6 +138,7 @@ def rag_invariant_violations() -> list[str]:
         return ["missing app/retrieval.py"]
 
     rag_text = read(rag)
+    policy_text = read(summary_policy) if summary_policy.exists() else ""
     validation_text = read(validation)
     retrieval_text = read(retrieval)
     retrieval_compact = re.sub(r"\s+", " ", retrieval_text)
@@ -163,7 +165,9 @@ def rag_invariant_violations() -> list[str]:
         errors.append("cacheable system prompt must live in app/prompts.py")
     if "secrecy_level" not in rag_text or 'base["secrecy_level"] > 0' not in rag_text:
         errors.append("secret cases must be truncated before generation")
-    if "RESTRICTED_MODEL = \"local-deterministic\"" not in rag_text:
+    if not summary_policy.exists():
+        errors.append("missing app/summary_policy.py")
+    elif "RESTRICTED_MODEL = \"local-deterministic\"" not in policy_text:
         errors.append("restricted cases must retain deterministic local generation")
     if "class\\s*=" not in validation_text:
         errors.append("validator must reject class= in JSX")
