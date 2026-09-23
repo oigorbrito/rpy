@@ -105,7 +105,10 @@ async def test_sonnet_5_request_uses_cacheable_system_prompt_without_custom_samp
     text = await _generate(client, context)
 
     assert text.startswith("# Resumo do processo")
-    assert "## Síntese\nSíntese válida." in text
+    assert "\nSíntese válida.\n" in text
+    assert "## Classe\nProcedimento Comum" in text
+    assert "## Assuntos\nNão informado." in text
+    assert "## Movimentações\n- Distribuído." in text
     assert len(client.messages.calls) == 1
     request = client.messages.calls[0]
     assert request["model"] == MODEL == SONNET_MODEL == "claude-sonnet-5"
