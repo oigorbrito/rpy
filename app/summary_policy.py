@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from typing import Any
 
 RESTRICTED_MODEL = "local-deterministic"
-RESTRICTED_PROMPT_VERSION = "restricted-summary-v1"
+RESTRICTED_PROMPT_VERSION = "secret-summary-v1"
 RESTRICTED_HEADER_FIELDS = (
     ("instance", "Instância"),
     ("area", "Área"),
