@@ -27,6 +27,8 @@ from app.summary_output import structured_summary_document
 from app.summary_policy import RESTRICTED_MODEL, RESTRICTED_PROMPT_VERSION
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
+
+
 def _restricted_structured_output(code: str) -> dict:
     return structured_summary_document(
         {
