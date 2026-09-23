@@ -7,6 +7,7 @@ from app.summary_output import (
     parse_structured_summary,
     render_structured_summary,
     structured_summary_document,
+    structured_summary_document_is_canonical,
 )
 
 
@@ -139,6 +140,34 @@ def test_json_document_uses_same_validated_payload_and_normalized_identity() -> 
     }
     assert document["summary"] == payload
     assert "internal" not in json.dumps(document, ensure_ascii=False)
+
+
+def test_persisted_document_validator_rejects_noncanonical_shape() -> None:
+    document = structured_summary_document(_payload(), _context())
+
+    assert structured_summary_document_is_canonical(document) is True
+
+    extra_top_level = dict(document)
+    extra_top_level["debug"] = {"raw": "must not publish"}
+    assert structured_summary_document_is_canonical(extra_top_level) is False
+
+    extra_process = {**document, "process": {**document["process"], "internal": "omit"}}
+    assert structured_summary_document_is_canonical(extra_process) is False
+
+    nested_header = {
+        **document,
+        "process": {
+            **document["process"],
+            "header": {**document["process"]["header"], "area": {"raw": "Cível"}},
+        },
+    }
+    assert structured_summary_document_is_canonical(nested_header) is False
+
+    extra_summary = {
+        **document,
+        "summary": {**document["summary"], "confidence": 0.9},
+    }
+    assert structured_summary_document_is_canonical(extra_summary) is False
 
 
 def test_parser_rejects_auxiliary_claim_metadata() -> None:
