@@ -275,6 +275,11 @@ async def test_v1_idempotency_states_authorization_and_sanitized_sources(monkeyp
                                     "text": "Situação registrada.",
                                     "evidence_refs": [f"p-{version_id.hex}"],
                                 },
+                                {
+                                    "claim_id": "attention:0",
+                                    "text": "Nenhuma divergência objetiva identificada.",
+                                    "evidence_refs": [f"p-{version_id.hex}"],
+                                },
                             ],
                         },
                     }
@@ -283,6 +288,11 @@ async def test_v1_idempotency_states_authorization_and_sanitized_sources(monkeyp
             for claim_id, claim_class, claim_text in (
                 ("synthesis", "synthesis", "Resumo válido"),
                 ("current_status", "current_status", "Situação registrada."),
+                (
+                    "attention:0",
+                    "attention",
+                    "Nenhuma divergência objetiva identificada.",
+                ),
             ):
                 claim_row_id = await conn.fetchval(
                     """
