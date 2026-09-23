@@ -46,6 +46,16 @@ def test_connect_target_property_rejects_ip_literal_destinations(address) -> Non
         egress_proxy._parse_connect_target(target)
 
 
+@pytest.mark.parametrize("value", ["nan", "NaN", "inf", "+inf", "-inf"])
+def test_egress_connect_timeout_rejects_non_finite_values(
+    monkeypatch: pytest.MonkeyPatch,
+    value: str,
+) -> None:
+    monkeypatch.setenv("EGRESS_PROXY_CONNECT_TIMEOUT_SECONDS", value)
+    with pytest.raises(RuntimeError, match="finite number between 0 and 60"):
+        egress_proxy._connect_timeout()
+
+
 @pytest.mark.parametrize(
     ("target", "expected"),
     [
