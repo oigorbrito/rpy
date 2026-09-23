@@ -6,12 +6,74 @@ import ipaddress
 import math
 import os
 import re
+import socket
 from collections.abc import Iterable
 
 DEFAULT_PORT = 3128
 DEFAULT_CONNECT_TIMEOUT_SECONDS = 10.0
 MAX_HEADER_BYTES = 8192
 _HOST_RE = re.compile(r"^[a-z0-9.-]{1,253}$")
+
+
+class UnsafeEgressResolutionError(RuntimeError):
+    pass
+
+
+def _public_endpoints_from_addrinfo(
+    records: Iterable[tuple[int, int, int, str, tuple]],
+) -> tuple[tuple[int, str], ...]:
+    endpoints: list[tuple[int, str]] = []
+    seen: set[tuple[int, str]] = set()
+    for family, _socktype, _proto, _canonname, sockaddr in records:
+        if family not in {socket.AF_INET, socket.AF_INET6} or not sockaddr:
+            raise UnsafeEgressResolutionError("egress DNS returned an unsupported address")
+        address = str(sockaddr[0])
+        try:
+            parsed = ipaddress.ip_address(address)
+        except ValueError as exc:
+            raise UnsafeEgressResolutionError(
+                "egress DNS returned an invalid address"
+            ) from exc
+        if not parsed.is_global:
+            raise UnsafeEgressResolutionError(
+                "egress DNS resolved an allowlisted hostname to a non-global address"
+            )
+        endpoint = (family, parsed.compressed)
+        if endpoint not in seen:
+            seen.add(endpoint)
+            endpoints.append(endpoint)
+    if not endpoints:
+        raise OSError("egress DNS returned no addresses")
+    return tuple(endpoints)
+
+
+async def _resolve_public_endpoints(host: str) -> tuple[tuple[int, str], ...]:
+    loop = asyncio.get_running_loop()
+    records = await loop.getaddrinfo(
+        host,
+        443,
+        type=socket.SOCK_STREAM,
+        proto=socket.IPPROTO_TCP,
+    )
+    return _public_endpoints_from_addrinfo(records)
+
+
+async def _open_public_connection(
+    host: str,
+) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+    endpoints = await _resolve_public_endpoints(host)
+    last_error: OSError | None = None
+    for family, address in endpoints:
+        try:
+            return await asyncio.open_connection(
+                address,
+                443,
+                family=family,
+                flags=socket.AI_NUMERICHOST,
+            )
+        except OSError as exc:
+            last_error = exc
+    raise last_error or OSError("no public egress endpoint could be reached")
 
 
 def _canonical_dns_hostname(value: str) -> str:
@@ -178,9 +240,12 @@ async def _handle_client(
             return
         try:
             upstream_reader, upstream_writer = await asyncio.wait_for(
-                asyncio.open_connection(authorized_host, 443),
+                _open_public_connection(authorized_host),
                 timeout=timeout_seconds,
             )
+        except UnsafeEgressResolutionError:
+            await _write_response(writer, "403 Forbidden")
+            return
         except (OSError, TimeoutError):
             await _write_response(writer, "502 Bad Gateway")
             return
