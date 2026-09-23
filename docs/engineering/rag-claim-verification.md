@@ -54,8 +54,8 @@ For every cited claim/evidence relation the application records one of:
   its cited sources;
 - `contradicted`: a cited canonical process source contains a conflicting deterministic
   CNJ or amount. Any cited contradiction makes the aggregate claim contradicted;
-- `insufficient`: the claim contains a deterministic CNJ, date, amount, or known party
-  anchor that is not present in the cited evidence set;
+- `insufficient`: the claim contains a deterministic CNJ, date, amount, known party, or
+  movement-count anchor that is not present in the cited evidence set;
 - `not_evaluated`: no deterministic fact anchor is available, so the application does
   not pretend to have established semantic entailment.
 
