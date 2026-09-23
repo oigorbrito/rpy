@@ -131,11 +131,11 @@ async def test_secret_generation_does_not_require_or_call_anthropic(monkeypatch)
 
     result = await rag.generate_summary(_Pool(), uuid4(), uuid4())
 
-    assert result["model"] == rag.SECRET_MODEL
+    assert result["model"] == rag.RESTRICTED_MODEL
     assert result["validation"]["passed"] is True
     assert result["persisted"] is True
-    assert persisted["model"] == rag.SECRET_MODEL
-    assert persisted["prompt_version"] == rag.SECRET_PROMPT_VERSION
+    assert persisted["model"] == rag.RESTRICTED_MODEL
+    assert persisted["prompt_version"] == rag.RESTRICTED_PROMPT_VERSION
     assert persisted["text"] == rag._secret_summary(context)
 
 
@@ -170,7 +170,7 @@ async def test_secret_generation_rejects_regression_that_leaks_party_name(monkey
 
     result = await rag.generate_summary(_Pool(), uuid4(), uuid4())
 
-    assert result["model"] == rag.SECRET_MODEL
+    assert result["model"] == rag.RESTRICTED_MODEL
     assert result["validation"]["passed"] is False
     assert "party names are prohibited for secret summary" in result["validation"]["errors"]
     assert persisted["validation"]["passed"] is False
