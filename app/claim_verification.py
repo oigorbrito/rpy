@@ -6,9 +6,11 @@ import re
 import unicodedata
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from typing import Any, Protocol, Sequence
 from zoneinfo import ZoneInfo
+
+from app.legal_facts import decimal_amount as _decimal_amount
 
 _EVIDENCE_REF_RE = re.compile(r"^[pma]-[0-9a-f]{32}$")
 _CNJ_RE = re.compile(r"\b\d{7}-?\d{2}\.?\d{4}\.?\d\.?\d{2}\.?\d{4}\b")
@@ -185,26 +187,6 @@ def _dates(text: str) -> frozenset[str]:
         if value.tzinfo is not None:
             values.add(value.astimezone(_SAO_PAULO).date().isoformat())
     return frozenset(values)
-
-
-def _decimal_amount(value: Any) -> Decimal | None:
-    if value is None or isinstance(value, bool):
-        return None
-    rendered = str(value).strip().replace("\u00a0", " ")
-    rendered = re.sub(r"^(?:R\$|BRL)\s*", "", rendered, flags=re.IGNORECASE)
-    rendered = re.sub(r"\s+", "", rendered)
-    if not rendered:
-        return None
-    if re.fullmatch(r"-?\d{1,3}(?:\.\d{3})+(?:,\d+)?", rendered):
-        rendered = rendered.replace(".", "").replace(",", ".")
-    elif re.fullmatch(r"-?\d+,\d+", rendered):
-        rendered = rendered.replace(",", ".")
-    elif not re.fullmatch(r"-?\d+(?:\.\d+)?", rendered):
-        return None
-    try:
-        return Decimal(rendered)
-    except InvalidOperation:
-        return None
 
 
 def _amounts(text: str) -> frozenset[Decimal]:

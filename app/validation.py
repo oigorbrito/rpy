@@ -5,10 +5,11 @@ import re
 import unicodedata
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from app.legal_facts import decimal_amount as _decimal_amount
 from app.summary_contract import CONDITIONAL_SECTION_ORDER, CORE_SECTION_ORDER
 
 _CPF_CNPJ_RE = re.compile(
@@ -283,34 +284,6 @@ def _unexpected_heading_errors(
         if _normalize_party_name(title) not in allowed:
             errors.append(f"summary heading is not allowed: {title}")
     return errors
-
-
-def _decimal_amount(value: Any) -> Decimal | None:
-    if value is None or isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float, Decimal)):
-        try:
-            return Decimal(str(value))
-        except InvalidOperation:
-            return None
-
-    rendered = str(value).strip().replace("\u00a0", " ")
-    rendered = re.sub(r"^(?:R\$|BRL)\s*", "", rendered, flags=re.IGNORECASE)
-    rendered = re.sub(r"\s+", "", rendered)
-    if not rendered:
-        return None
-
-    if re.fullmatch(r"-?\d{1,3}(?:\.\d{3})+(?:,\d+)?", rendered):
-        rendered = rendered.replace(".", "").replace(",", ".")
-    elif re.fullmatch(r"-?\d+,\d+", rendered):
-        rendered = rendered.replace(",", ".")
-    elif not re.fullmatch(r"-?\d+(?:\.\d+)?", rendered):
-        return None
-
-    try:
-        return Decimal(rendered)
-    except InvalidOperation:
-        return None
 
 
 def _source_amounts(source_text: str) -> set[Decimal]:
