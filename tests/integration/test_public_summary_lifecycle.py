@@ -321,16 +321,19 @@ async def test_public_lifecycle_runs_through_fake_pipeline(
 - Tribunal: TJRS
 </ProcessHeader>
 
-## Síntese
 O processo contém registros de distribuição, citação e sentença.
 
-## Linha do tempo relevante
+## Classe
+Procedimento Comum
+
+## Assuntos
+- Obrigação
+
+## Movimentações
 - Distribuição inicial.
 - Citação registrada.
 - Sentença registrada.
-
-## Situação atual
-O último movimento fornecido é uma sentença.
+- Estado atual: o último movimento fornecido é uma sentença.
 
 ## Pontos de atenção
 Nenhuma divergência objetiva identificada.
