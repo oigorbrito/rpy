@@ -106,6 +106,7 @@ async def test_claim_verification_round_trips_with_persisted_evidence() -> None:
         )
         verification = ClaimVerification(
             claim_id="current_status",
+            claim_class="current_status",
             status="supported",
             reason="at_least_one_cited_source_supports_deterministic_fact",
             deterministic_fact_count=1,
