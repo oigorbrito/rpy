@@ -7,6 +7,8 @@ from uuid import UUID
 
 import asyncpg
 
+from app.json_utils import decode_json_list
+
 _EVIDENCE_REF_RE = re.compile(r"^[pma]-[0-9a-f]{32}$")
 _CLAIM_ID_RE = re.compile(
     r"^(?:synthesis|current_status|"
@@ -387,7 +389,11 @@ async def load_summary_claim_evidence(
             "text": str(row["claim_text"]),
             "evidence_refs": [
                 str(item["evidence_ref"])
-                for item in list(row["sources"] or [])
+                for item in decode_json_list(
+                    row["sources"],
+                    label="claim evidence sources",
+                )
+                if isinstance(item, dict) and item.get("evidence_ref") is not None
             ],
         }
         for row in rows
