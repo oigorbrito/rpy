@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 
@@ -15,6 +16,7 @@ _SECRET_ENV_NAMES = (
     "LANGFUSE_SECRET_KEY",
     "JUDIT_WEBHOOK_TOKEN",
     "RPY_BEARER_TOKENS",
+    "RPY_DEMO_BEARER_TOKEN",
     "RPY_OPS_TOKEN",
     "POSTGRES_PASSWORD",
     "DATABASE_URL",
@@ -41,7 +43,18 @@ def _configured_secret_values() -> list[str]:
     values: list[str] = []
     for name in _SECRET_ENV_NAMES:
         value = os.environ.get(name)
-        if value and len(value) >= 4:
+        if not value or len(value) < 4:
+            continue
+        if name == "RPY_BEARER_TOKENS":
+            try:
+                parsed = json.loads(value)
+                if isinstance(parsed, dict):
+                    for token in parsed.keys():
+                        if isinstance(token, str) and len(token) >= 4:
+                            values.append(token)
+            except Exception:
+                pass
+        else:
             values.append(value)
     return sorted(set(values), key=len, reverse=True)
 
