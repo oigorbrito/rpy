@@ -99,8 +99,10 @@ not include PDFium or Pillow.
 
 PDF OCR controls:
 
-- `ATTACHMENT_PDF_OCR_SCALE`, default 2.0 (144 DPI relative to PDF's 72 DPI base);
+- `ATTACHMENT_PDF_OCR_SCALE`, default 2.0 (144 DPI relative to PDF's 72 DPI base), required to be finite and greater than zero;
 - `ATTACHMENT_PDF_OCR_MAX_PAGES`, default 100.
+
+Production preflight validates the OCR boolean/numeric controls before deployment; non-finite raster scales such as `NaN`/`Infinity` are rejected both by preflight and runtime rather than reaching PDFium.
 
 When OCR is disabled, PDFs without a text layer keep the historical
 `unreadable/pdf_text_unavailable` result. When OCR is enabled, a page-count limit
