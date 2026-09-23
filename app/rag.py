@@ -15,7 +15,7 @@ from app.attachment_signals import attachment_status_warnings
 from app.claim_evidence import (
     EvidenceSource,
     MaterialClaim,
-    claim_evidence_is_complete,
+    claim_evidence_is_publishable,
     evidence_catalog,
     movement_evidence_ref,
     process_evidence_ref,
@@ -52,7 +52,6 @@ from app.summary_output import (
     parse_structured_summary,
     render_structured_summary,
     structured_summary_document,
-    structured_summary_document_is_canonical,
 )
 from app.summary_policy import (
     RESTRICTED_HEADER_FIELDS,
@@ -659,7 +658,9 @@ async def _summary_row_is_publishable(
             process={
                 "code": row["process_code"],
                 "class_name": row["process_class_name"],
+                "court": row["process_court"],
                 "header": row["process_header"],
+                "parties": row["process_parties"],
             },
         )
 
@@ -673,7 +674,17 @@ async def _summary_row_is_publishable(
         )
     except (TypeError, ValueError):
         return False
-    return claim_evidence_is_complete(structured_output, claim_evidence)
+    return claim_evidence_is_publishable(
+        structured_output,
+        claim_evidence,
+        process={
+            "code": row["process_code"],
+            "class_name": row["process_class_name"],
+            "court": row["process_court"],
+            "header": row["process_header"],
+            "parties": row["process_parties"],
+        },
+    )
 
 
 async def _persist_summary(
@@ -708,7 +719,9 @@ async def _persist_summary(
                    p.secrecy_level,
                    p.code AS process_code,
                    p.class_name AS process_class_name,
-                   p.header AS process_header
+                   p.court AS process_court,
+                   p.header AS process_header,
+                   p.parties AS process_parties
             FROM process_summaries ps
             JOIN processes p ON p.id = ps.process_id
             WHERE ps.process_id = $1 AND ps.version_id = $2
@@ -742,9 +755,16 @@ async def _persist_summary(
                     }
                     for claim in (claims or [])
                 ]
-                incoming_publishable = claim_evidence_is_complete(
+                incoming_publishable = claim_evidence_is_publishable(
                     structured_output,
                     incoming_claim_evidence,
+                    process={
+                        "code": existing["process_code"],
+                        "class_name": existing["process_class_name"],
+                        "court": existing["process_court"],
+                        "header": existing["process_header"],
+                        "parties": existing["process_parties"],
+                    },
                 )
         replace_approved = False
         if existing is not None and bool(existing["passed"]) and incoming_publishable:
@@ -843,7 +863,9 @@ async def _load_publishable_summary(
                    p.secrecy_level,
                    p.code AS process_code,
                    p.class_name AS process_class_name,
-                   p.header AS process_header
+                   p.court AS process_court,
+                   p.header AS process_header,
+                   p.parties AS process_parties
             FROM process_summaries ps
             JOIN processes p
               ON p.id = ps.process_id
