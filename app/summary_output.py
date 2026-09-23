@@ -36,7 +36,7 @@ SUMMARY_OUTPUT_SCHEMA: dict[str, Any] = {
         },
         "claims": {
             "type": "array",
-            "maxItems": 80,
+            "maxItems": 96,
             "items": {
                 "type": "object",
                 "properties": {
@@ -129,7 +129,7 @@ def _string_list(value: Any, *, key: str, require_nonempty: bool = False) -> lis
 
 
 def _claims(value: Any) -> list[dict[str, Any]]:
-    if not isinstance(value, list) or len(value) > 80:
+    if not isinstance(value, list) or len(value) > 96:
         raise ValueError("structured summary claims must be a bounded array")
     claims: list[dict[str, Any]] = []
     for item in value:
