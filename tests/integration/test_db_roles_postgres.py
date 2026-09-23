@@ -3,10 +3,12 @@ from __future__ import annotations
 import importlib.util
 import os
 from pathlib import Path
+from uuid import uuid4
 
 import asyncpg
 import pytest
 
+from app.claim_evidence import load_summary_claim_evidence
 from app.migrations import migrate
 
 MODULE_PATH = Path(__file__).resolve().parents[2] / "scripts" / "provision_db_roles.py"
@@ -221,6 +223,10 @@ async def test_runtime_database_roles_are_least_privilege(monkeypatch: pytest.Mo
         assert await api.fetchval("SELECT count(*) FROM process_summary_attachment_sources") is not None
         assert await api.fetchval("SELECT count(*) FROM process_summary_claims") is not None
         assert await api.fetchval("SELECT count(*) FROM process_summary_claim_sources") is not None
+        assert await load_summary_claim_evidence(
+            api,
+            summary_id=uuid4(),
+        ) == []
         with pytest.raises(asyncpg.InsufficientPrivilegeError):
             await api.fetchval("SELECT count(*) FROM process_datajud_field_provenance")
         with pytest.raises(asyncpg.InsufficientPrivilegeError):
