@@ -12,17 +12,22 @@ from app.webhook_security import (
     webhook_token_from_scope,
 )
 
+async def _run_middleware(scope: dict[str, Any]) -> dict[str, Any]:
+    seen: dict[str, Any] = {}
+
+    async def app(inner_scope, receive, send) -> None:
+        seen["path"] = inner_scope["path"]
+        seen["raw_path"] = inner_scope["raw_path"]
+        seen["state"] = dict(inner_scope.get("state") or {})
+
+    middleware = JuditWebhookSecretRedactionMiddleware(app)
+    seen = await _run_middleware(scope)
+    return seen
+
+
 
 @pytest.mark.asyncio
 async def test_judit_webhook_token_is_removed_from_asgi_path() -> None:
-    seen: dict[str, Any] = {}
-
-    async def app(scope, receive, send) -> None:
-        seen["path"] = scope["path"]
-        seen["raw_path"] = scope["raw_path"]
-        seen["state"] = dict(scope.get("state") or {})
-
-    middleware = JuditWebhookSecretRedactionMiddleware(app)
     scope = {
         "type": "http",
         "method": "POST",
@@ -31,7 +36,7 @@ async def test_judit_webhook_token_is_removed_from_asgi_path() -> None:
         "state": {},
     }
 
-    await middleware(scope, None, None)
+    seen = await _run_middleware(scope)
 
     assert seen["path"] == f"/webhooks/judit/{REDACTED_WEBHOOK_TOKEN}"
     assert b"super-secret-token" not in seen["raw_path"]
@@ -41,14 +46,6 @@ async def test_judit_webhook_token_is_removed_from_asgi_path() -> None:
 
 @pytest.mark.asyncio
 async def test_non_webhook_path_is_not_rewritten() -> None:
-    seen: dict[str, Any] = {}
-
-    async def app(scope, receive, send) -> None:
-        seen["path"] = scope["path"]
-        seen["raw_path"] = scope["raw_path"]
-        seen["state"] = dict(scope.get("state") or {})
-
-    middleware = JuditWebhookSecretRedactionMiddleware(app)
     scope = {
         "type": "http",
         "method": "GET",
@@ -57,7 +54,7 @@ async def test_non_webhook_path_is_not_rewritten() -> None:
         "state": {},
     }
 
-    await middleware(scope, None, None)
+    seen = await _run_middleware(scope)
 
     assert seen["path"] == "/health"
     assert seen["raw_path"] == b"/health"
@@ -74,14 +71,6 @@ def test_webhook_token_falls_back_to_route_value_without_middleware_state() -> N
 async def test_malformed_webhook_path_redacts_token_without_making_route_valid(
     tail: str,
 ) -> None:
-    seen: dict[str, Any] = {}
-
-    async def app(scope, receive, send) -> None:
-        seen["path"] = scope["path"]
-        seen["raw_path"] = scope["raw_path"]
-        seen["state"] = dict(scope.get("state") or {})
-
-    middleware = JuditWebhookSecretRedactionMiddleware(app)
     scope = {
         "type": "http",
         "method": "POST",
@@ -90,7 +79,7 @@ async def test_malformed_webhook_path_redacts_token_without_making_route_valid(
         "state": {},
     }
 
-    await middleware(scope, None, None)
+    seen = await _run_middleware(scope)
 
     assert seen["path"] == f"/webhooks/judit/{REDACTED_WEBHOOK_TOKEN}{tail}"
     assert b"super-secret-token" not in seen["raw_path"]
@@ -109,14 +98,6 @@ _TOKEN_STRATEGY = st.text(_TOKEN_ALPHABET, min_size=1, max_size=128)
 @given(token=_TOKEN_STRATEGY)
 @pytest.mark.asyncio
 async def test_webhook_redaction_property_never_exposes_valid_route_token(token: str) -> None:
-    seen: dict[str, Any] = {}
-
-    async def app(scope, receive, send) -> None:
-        seen["path"] = scope["path"]
-        seen["raw_path"] = scope["raw_path"]
-        seen["state"] = dict(scope.get("state") or {})
-
-    middleware = JuditWebhookSecretRedactionMiddleware(app)
     path = f"/webhooks/judit/{token}"
     scope = {
         "type": "http",
@@ -126,7 +107,7 @@ async def test_webhook_redaction_property_never_exposes_valid_route_token(token:
         "state": {},
     }
 
-    await middleware(scope, None, None)
+    seen = await _run_middleware(scope)
 
     redacted_path = f"/webhooks/judit/{REDACTED_WEBHOOK_TOKEN}"
     assert seen["path"] == redacted_path  # nosec B101
@@ -142,14 +123,6 @@ async def test_webhook_redaction_property_malformed_paths_never_gain_auth_state(
     token: str,
     tail: str,
 ) -> None:
-    seen: dict[str, Any] = {}
-
-    async def app(scope, receive, send) -> None:
-        seen["path"] = scope["path"]
-        seen["raw_path"] = scope["raw_path"]
-        seen["state"] = dict(scope.get("state") or {})
-
-    middleware = JuditWebhookSecretRedactionMiddleware(app)
     path = f"/webhooks/judit/{token}{tail}"
     scope = {
         "type": "http",
@@ -159,7 +132,7 @@ async def test_webhook_redaction_property_malformed_paths_never_gain_auth_state(
         "state": {},
     }
 
-    await middleware(scope, None, None)
+    seen = await _run_middleware(scope)
 
     expected_path = f"/webhooks/judit/{REDACTED_WEBHOOK_TOKEN}{tail}"
     assert seen["path"] == expected_path  # nosec B101
