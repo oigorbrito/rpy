@@ -17,6 +17,46 @@ def test_worker_settings_defaults(monkeypatch) -> None:
     assert settings.task_timeout_seconds > 0
 
 
+@pytest.mark.parametrize(
+    "field",
+    [
+        "poll_interval_seconds",
+        "heartbeat_interval_seconds",
+        "task_timeout_seconds",
+        "reclaim_interval_seconds",
+        "shutdown_grace_seconds",
+    ],
+)
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_worker_settings_reject_non_finite_timing(field: str, value: float) -> None:
+    settings = WorkerSettings(
+        database_url="postgresql://unused/rpy",
+        concurrency=1,
+        poll_interval_seconds=1,
+        heartbeat_interval_seconds=1,
+        stale_after_seconds=2,
+        task_timeout_seconds=1,
+        reclaim_interval_seconds=1,
+        shutdown_grace_seconds=1,
+    )
+    setattr(settings, field, value)
+
+    with pytest.raises(ValueError, match=rf"{field} must be finite"):
+        settings.validate()
+
+
+@pytest.mark.parametrize("value", ["nan", "inf", "-inf"])
+def test_worker_settings_from_env_reject_non_finite_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+    value: str,
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", "postgresql://localhost/rpy")
+    monkeypatch.setenv("WORKER_TASK_TIMEOUT_SECONDS", value)
+
+    with pytest.raises(ValueError, match="task_timeout_seconds must be finite"):
+        WorkerSettings.from_env()
+
+
 def test_decode_payload_accepts_mapping_and_json_string() -> None:
     assert _decode_payload({"request_id": "req-1"}) == {"request_id": "req-1"}
     assert _decode_payload('{"request_id":"req-2"}') == {"request_id": "req-2"}
