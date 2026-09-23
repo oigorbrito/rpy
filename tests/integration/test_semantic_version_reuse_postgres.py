@@ -6,10 +6,18 @@ from uuid import uuid4
 
 import pytest
 
+from app.claim_evidence import (
+    build_material_claims,
+    evidence_catalog,
+    process_evidence_ref,
+    validate_claim_evidence,
+)
 from app.db import create_pool
 from app.judit_tasks import finalize_judit_request_task
 from app.migrations import migrate
 from app.processes import stage_version
+from app.rag import _persist_summary
+from app.summary_output import structured_summary_document
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(
@@ -127,15 +135,48 @@ async def test_semantically_equal_response_reuses_current_version_and_summary(
 
     async with pool.acquire() as conn:
         process_id = await conn.fetchval("SELECT id FROM processes WHERE code = $1", code)
-        await conn.execute(
-            """
-            INSERT INTO process_summaries (
-                process_id, version_id, markdown, validation, model, prompt_version, generation_ms
-            ) VALUES ($1, $2, '# resumo sintético', $3::jsonb, 'fake', 'semantic-reuse-test', 1)
-            """,
-            process_id,
-            first_version,
-            json.dumps({"passed": True, "errors": []}),
+        claim_context = {
+            "code": code,
+            "class_name": "Procedimento Comum",
+            "court": "TJRS",
+            "header": {},
+            "parties": [],
+            "_process_evidence_ref": process_evidence_ref(first_version),
+            "_selected_sources": [],
+            "_attachment_sources": [],
+        }
+        claim_payload = {
+            "synthesis": "Resumo sintético",
+            "timeline": [],
+            "current_status": "Situação atual registrada.",
+            "attention": [],
+            "decisions": [],
+            "deadlines": [],
+            "related_processes": [],
+            "attachments": [],
+        }
+        claim_payload["claims"] = build_material_claims(
+            claim_payload,
+            evidence_refs=[claim_context["_process_evidence_ref"]],
+        )
+        claims, claim_errors = validate_claim_evidence(
+            claim_payload,
+            claim_context,
+        )
+        assert claim_errors == []
+        assert await _persist_summary(
+            conn,
+            process_id=process_id,
+            version_id=first_version,
+            text="# resumo sintético",
+            validation={"passed": True, "errors": []},
+            generation_ms=1,
+            structured_output=structured_summary_document(
+                claim_payload,
+                claim_context,
+            ),
+            claims=claims,
+            evidence_sources=evidence_catalog(claim_context),
         )
 
     duplicate_request = f"req-duplicate-{uuid4()}"
