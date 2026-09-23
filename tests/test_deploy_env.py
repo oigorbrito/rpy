@@ -324,7 +324,21 @@ def test_datajud_requires_positive_numeric_timeout() -> None:
     values = _valid_values()
     _enable_datajud(values)
     values["DATAJUD_TIMEOUT_SECONDS"] = "0"
-    assert "DATAJUD_TIMEOUT_SECONDS must be greater than zero" in preflight.validate(values)
+    assert (
+        "DATAJUD_TIMEOUT_SECONDS must be a finite number greater than zero"
+        in preflight.validate(values)
+    )
+
+
+def test_datajud_rejects_non_finite_timeout() -> None:
+    for value in ("nan", "inf", "-inf"):
+        values = _valid_values()
+        _enable_datajud(values)
+        values["DATAJUD_TIMEOUT_SECONDS"] = value
+        _require_error(
+            values,
+            "DATAJUD_TIMEOUT_SECONDS must be a finite number greater than zero",
+        )
 
 
 def _enable_langfuse(values: dict[str, str]) -> None:
