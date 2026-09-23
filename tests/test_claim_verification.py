@@ -72,6 +72,22 @@ def test_process_amount_mismatch_is_contradicted() -> None:
     ]
 
 
+def test_labeled_amount_without_currency_prefix_is_verified() -> None:
+    claim = MaterialClaim(
+        claim_id="synthesis",
+        claim_class="synthesis",
+        text="Valor da causa: 2.000,00.",
+        evidence_refs=(process_evidence_ref(VERSION_ID),),
+    )
+
+    verification = verify_material_claims([claim], _context())
+
+    assert verification["synthesis"].status == "contradicted"
+    assert verification_errors(verification) == [
+        "claim contradicted by cited evidence: synthesis"
+    ]
+
+
 def test_movement_date_anchor_is_supported() -> None:
     claim = MaterialClaim(
         claim_id="timeline:0",
