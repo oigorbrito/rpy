@@ -9,7 +9,7 @@ The migration creates:
 - `process_summary_claims`, one row per material claim in a persisted summary;
 - `process_summary_claim_sources`, one or more authorized evidence references per claim.
 
-Material claim identities are deterministic: `synthesis`, `current_status`, and zero-based list ids such as `timeline:0`, `decisions:1`, `deadlines:0`, `related_processes:0`, and `attachments:0`.
+Material claim identities are deterministic: `synthesis`, `current_status`, and zero-based list ids such as `timeline:0`, `attention:0`, `decisions:1`, `deadlines:0`, `related_processes:0`, and `attachments:0`.
 
 ## Evidence references
 
@@ -47,8 +47,9 @@ Before release, verify:
 4. unknown or mismatched refs fail closed;
 5. movement/chunk refs from another process or version fail;
 6. duplicate claims and duplicate evidence refs fail at the validator/schema boundary;
-7. deleting a summary cascades through claims and claim sources;
-8. legacy non-secret summaries without claim provenance are not publishable.
+7. every `attention` item also carries deterministic claim provenance;
+8. deleting a summary cascades through claims and claim sources;
+9. legacy non-secret summaries without claim provenance are not publishable.
 
 ## What this migration does not prove
 
