@@ -53,7 +53,9 @@ Engineering must not silently resolve either decision.
 
 ## Current repository-qualified candidate
 
-The current repository-qualified candidate is `a1d754dd8fe054642a56d904bb000e70e970639c`. Its exact-head CI, CodeQL and vulnerability scan are green. The frontend gate now includes a real headless Chromium smoke that exercises the checked-in HTML/CSS/JavaScript, authorization header behavior, successful process/summary rendering, inert JSX handling and explicit missing-process acquisition.
+The current repository-qualified candidate is `0ebc14958e5fd9adb7be54d7d4ea4fc93b771965`. Exact-head CI #2652, CodeQL #667 and vulnerability scan #76 completed successfully. The candidate includes the previously qualified browser/container/restore/PostgreSQL/offline-smoke gates plus the latest offline hardening: shared deterministic monetary parsing with property-based equivalence checks (#302), structured credential redaction fuzzing (#303), aggregate webhook-body limit fuzzing across chunk boundaries and underdeclared Content-Length (#304), and malformed webhook-path credential redaction that preserves invalid routing (#305).
+
+These observations qualify repository-local behavior only. They do not demonstrate live provider compatibility, production ingress redaction, legal authorization, real BGE quality/latency, or production RTO/SLO performance.
 
 This commit is a **repository/offline candidate**, not a production activation decision. Any later code change creates a new candidate and must repeat the exact-head gates.
 
