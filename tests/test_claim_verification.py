@@ -93,6 +93,22 @@ def test_process_step_count_is_supported_and_mismatch_is_contradicted() -> None:
     )
 
 
+def test_partial_phrase_is_not_treated_as_exact_lexical_support() -> None:
+    context = _context()
+    context["steps"][0]["text"] = "Pedido deferido parcialmente"
+    claim = MaterialClaim(
+        claim_id="timeline:0",
+        claim_class="procedural_event",
+        text="Pedido deferido.",
+        evidence_refs=(f"m-{STEP_ID.hex}",),
+    )
+
+    result = verify_material_claims([claim], context)["timeline:0"]
+
+    assert result.status == "not_evaluated"
+    assert result.reason == "no_deterministic_fact_anchor"
+
+
 def test_terminal_punctuation_does_not_block_exact_movement_support() -> None:
     context = _context()
     context["steps"][0]["text"] = "SENTENÇA proferida"
