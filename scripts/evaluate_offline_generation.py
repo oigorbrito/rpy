@@ -207,6 +207,7 @@ async def evaluate_generation(cases: list[dict[str, Any]]) -> dict[str, Any]:
         "insufficient": 0,
         "not_evaluated": 0,
     }
+    verification_counts_by_class: dict[str, dict[str, int]] = {}
     per_case: dict[str, dict[str, Any]] = {}
 
     for case in cases:
@@ -266,9 +267,20 @@ async def evaluate_generation(cases: list[dict[str, Any]]) -> dict[str, Any]:
 
             if not claim_errors:
                 verification = verify_material_claims(validated_claims, context)
-                for result in verification.values():
+                for claim in validated_claims:
+                    result = verification[claim.claim_id]
                     verification_counts[result.status] += 1
                     case_verification_counts[result.status] += 1
+                    class_counts = verification_counts_by_class.setdefault(
+                        claim.claim_class,
+                        {
+                            "supported": 0,
+                            "contradicted": 0,
+                            "insufficient": 0,
+                            "not_evaluated": 0,
+                        },
+                    )
+                    class_counts[result.status] += 1
 
         if validation.passed:
             final_valid += 1
@@ -337,6 +349,7 @@ async def evaluate_generation(cases: list[dict[str, Any]]) -> dict[str, Any]:
             "material_claims": material_claims,
             "structurally_unsupported_claims": structurally_unsupported_claims,
             "claim_verification": verification_counts,
+            "claim_verification_by_class": verification_counts_by_class,
         },
         "case_metrics": per_case,
     }
