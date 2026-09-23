@@ -256,6 +256,28 @@ async def finalize_judit_request_task(payload: dict[str, Any]) -> dict[str, Any]
                     process_id=staged["process_id"],
                 ):
                     pass
+                elif not promoted and equivalent_to_version_id is not None:
+                    await transition_requests_for_judit_request(
+                        conn,
+                        judit_request_id=request_id,
+                        status="indexing",
+                        process_id=staged["process_id"],
+                        version_id=equivalent_to_version_id,
+                    )
+                    job = await enqueue(
+                        conn,
+                        task_name="generate_process_summary",
+                        payload={
+                            "process_id": str(staged["process_id"]),
+                            "version_id": str(equivalent_to_version_id),
+                            "code": staged["code"],
+                            "judit_request_id": request_id,
+                        },
+                        idempotency_key=(
+                            f"summary-repair:{equivalent_to_version_id}:{request_id}"
+                        ),
+                    )
+                    summary_enqueued = job is not None
                 else:
                     error_code = (
                         "cached_response_not_generated"
