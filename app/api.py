@@ -12,6 +12,7 @@ from fastapi import FastAPI, HTTPException, Request
 from app.api_key_middleware import ApiKeySecurityMiddleware
 from app.api_v1 import router as api_v1_router
 from app.auth import configured_bearer_tokens, tenant_from_request
+from app.claim_evidence import claim_evidence_is_complete, load_summary_claim_evidence
 from app.db import create_pool
 from app.frontend import router as frontend_router
 from app.http_auth_config import validate_http_auth_config
@@ -192,7 +193,8 @@ async def get_process_summary(code: str, request: Request) -> dict:
         is_restricted = int(process["secrecy_level"] or 0) > 0
         summary = await conn.fetchrow(
             """
-            SELECT markdown, validation, model, prompt_version, generation_ms, created_at
+            SELECT id, markdown, structured_output, validation, model, prompt_version,
+                   generation_ms, created_at
             FROM process_summaries
             WHERE process_id = $1
               AND version_id = $2
@@ -201,12 +203,26 @@ async def get_process_summary(code: str, request: Request) -> dict:
             process["id"],
             process["current_version_id"],
         )
-        if (
-            is_restricted
-            and summary is not None
-            and not is_restricted_local_summary(summary)
-        ):
-            summary = None
+        if summary is not None:
+            if is_restricted:
+                if not is_restricted_local_summary(summary):
+                    summary = None
+            else:
+                claim_evidence = await load_summary_claim_evidence(
+                    conn, summary_id=summary["id"]
+                )
+                structured_output = (
+                    decode_json_object(
+                        summary["structured_output"],
+                        label="summary structured output",
+                    )
+                    if summary["structured_output"] is not None
+                    else None
+                )
+                if not claim_evidence_is_complete(
+                    structured_output, claim_evidence
+                ):
+                    summary = None
         steps = []
         summary_job_status = None
         cached_response = False
@@ -241,6 +257,8 @@ async def get_process_summary(code: str, request: Request) -> dict:
 
     summary_data = dict(summary) if summary else None
     if summary_data is not None:
+        summary_data.pop("id", None)
+        summary_data.pop("structured_output", None)
         summary_data["validation"] = decode_json_object(
             summary_data.get("validation"), label="summary validation"
         )
