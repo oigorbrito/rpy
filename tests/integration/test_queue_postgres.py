@@ -319,7 +319,7 @@ async def test_fail_retries_then_dead_letters_at_max_attempts() -> None:
 async def test_reclaimed_summary_worker_cannot_reconcile_late(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    assert TEST_DATABASE_URL is not None
+    assert TEST_DATABASE_URL is not None  # nosec B101
     pool = await create_pool(TEST_DATABASE_URL, min_size=2, max_size=4)
     stale_worker = uuid4()
     replacement_worker = uuid4()
@@ -362,9 +362,9 @@ async def test_reclaimed_summary_worker_cannot_reconcile_late(
                 idempotency_key="integration:late-summary-fencing",
                 max_attempts=3,
             )
-            assert enqueued is not None
+            assert enqueued is not None  # nosec B101
             first = await claim(conn, stale_worker)
-            assert first is not None
+            assert first is not None  # nosec B101
 
         worker = Worker(
             pool,
@@ -388,10 +388,10 @@ async def test_reclaimed_summary_worker_cannot_reconcile_late(
                 first["id"],
             )
             reclaimed = await reclaim_stale(conn, timeout_seconds=30)
-            assert any(item["id"] == first["id"] for item in reclaimed)
+            assert any(item["id"] == first["id"] for item in reclaimed)  # nosec B101
             second = await claim(conn, replacement_worker)
-            assert second is not None
-            assert second["id"] == first["id"]
+            assert second is not None  # nosec B101
+            assert second["id"] == first["id"]  # nosec B101
 
         release_handler.set()
         await asyncio.wait_for(running, timeout=2)
@@ -402,10 +402,10 @@ async def test_reclaimed_summary_worker_cannot_reconcile_late(
                 first["id"],
             )
 
-        assert reconciled == []
-        assert state is not None
-        assert state["status"] == "processing"
-        assert state["worker_id"] == replacement_worker
+        assert reconciled == []  # nosec B101
+        assert state is not None  # nosec B101
+        assert state["status"] == "processing"  # nosec B101
+        assert state["worker_id"] == replacement_worker  # nosec B101
     finally:
         release_handler.set()
         await pool.close()
