@@ -256,7 +256,12 @@ async def test_existing_incomplete_provenance_is_repaired_with_same_model(
 
         context_calls = 0
         generation_calls = 0
-        repaired_summary = "# Resumo do processo\n\nResumo reparado."
+        repaired_summary = """# Resumo do processo
+
+Resumo válido sem dados sensíveis.
+
+## Pontos de atenção
+Nenhuma divergência objetiva identificada."""
 
         async def fake_context(*args, **kwargs):
             nonlocal context_calls
