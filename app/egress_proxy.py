@@ -13,29 +13,42 @@ MAX_HEADER_BYTES = 8192
 _HOST_RE = re.compile(r"^[a-z0-9.-]{1,253}$")
 
 
+def _canonical_allowed_host(value: str) -> str:
+    host = value.strip().rstrip(".").casefold()
+    if not host:
+        raise RuntimeError("egress proxy allowlist contains an empty hostname")
+    try:
+        canonical = host.encode("idna").decode("ascii")
+    except UnicodeError as exc:
+        raise RuntimeError("egress proxy allowlist contains an invalid hostname") from exc
+    if not _HOST_RE.fullmatch(canonical) or ".." in canonical:
+        raise RuntimeError("egress proxy allowlist contains an invalid hostname")
+    try:
+        ipaddress.ip_address(canonical)
+    except ValueError:
+        pass
+    else:
+        raise RuntimeError("egress proxy allowlist must contain DNS hostnames, not IP addresses")
+    return canonical
+
+
+def _normalize_allowed_hosts(values: Iterable[str]) -> frozenset[str]:
+    hosts = frozenset(_canonical_allowed_host(str(item)) for item in values)
+    if not hosts:
+        raise RuntimeError("egress proxy allowlist must not be empty")
+    return hosts
+
+
 def _allowed_hosts(raw: str | None = None) -> frozenset[str]:
     value = os.environ.get("EGRESS_PROXY_ALLOWED_HOSTS", "") if raw is None else raw
-    hosts: set[str] = set()
-    for item in value.split(","):
-        host = item.strip().rstrip(".").casefold()
-        if not host:
-            continue
-        try:
-            canonical = host.encode("idna").decode("ascii")
-        except UnicodeError as exc:
-            raise RuntimeError("EGRESS_PROXY_ALLOWED_HOSTS contains an invalid hostname") from exc
-        if not _HOST_RE.fullmatch(canonical) or ".." in canonical:
-            raise RuntimeError("EGRESS_PROXY_ALLOWED_HOSTS contains an invalid hostname")
-        try:
-            ipaddress.ip_address(canonical)
-        except ValueError:
-            pass
-        else:
-            raise RuntimeError("EGRESS_PROXY_ALLOWED_HOSTS must contain DNS hostnames, not IP addresses")
-        hosts.add(canonical)
-    if not hosts:
+    items = [item for item in value.split(",") if item.strip()]
+    if not items:
         raise RuntimeError("EGRESS_PROXY_ALLOWED_HOSTS must contain at least one hostname")
-    return frozenset(hosts)
+    try:
+        return _normalize_allowed_hosts(items)
+    except RuntimeError as exc:
+        message = str(exc).replace("egress proxy allowlist", "EGRESS_PROXY_ALLOWED_HOSTS")
+        raise RuntimeError(message) from exc
 
 
 def _connect_timeout() -> float:
@@ -201,12 +214,10 @@ async def serve(
         raise RuntimeError("EGRESS_PROXY_BIND_HOST is required")
 
     configured = (
-        frozenset(item.casefold().rstrip(".") for item in allowed_hosts)
+        _normalize_allowed_hosts(allowed_hosts)
         if allowed_hosts is not None
         else _allowed_hosts()
     )
-    if not configured:
-        raise RuntimeError("egress proxy allowlist must not be empty")
     timeout_seconds = _connect_timeout()
     server = await asyncio.start_server(
         lambda reader, writer: _handle_client(
