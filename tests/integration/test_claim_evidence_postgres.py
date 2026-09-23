@@ -173,12 +173,18 @@ async def test_partial_used_source_loss_breaks_declared_claim_completeness() -> 
         )
         structured_output = {
             "schema_version": 2,
-            "process": {},
+            "process": {
+                "cnj": "0000000-00.2026.8.21.2500",
+                "class_name": None,
+                "court": None,
+                "header": {},
+                "parties": [],
+            },
             "summary": {
                 "synthesis": "Síntese.",
                 "timeline": [],
                 "current_status": "Situação.",
-                "attention": [],
+                "attention": ["Sem divergência material."],
                 "decisions": [],
                 "deadlines": [],
                 "related_processes": [],
