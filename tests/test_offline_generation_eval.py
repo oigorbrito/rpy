@@ -24,6 +24,29 @@ def test_offline_generation_matches_versioned_baseline() -> None:
     assert report["counts"]["forced_retries"] >= 1
     assert report["counts"]["forced_retries"] == report["counts"]["recovered_retries"]
     assert report["counts"]["secret_provider_calls"] == 0
+    verification_counts = report["counts"]["claim_verification"]
+    assert sum(verification_counts.values()) == report["counts"]["material_claims"]
+    assert set(verification_counts) == {
+        "supported",
+        "contradicted",
+        "insufficient",
+        "not_evaluated",
+    }
+    assert 0.0 <= report["metrics"]["deterministic_supported_claim_rate"] <= 1.0
+    assert 0.0 <= report["metrics"]["semantic_unverified_claim_rate"] <= 1.0
+    assert (
+        report["metrics"]["deterministic_supported_claim_rate"]
+        + report["metrics"]["semantic_unverified_claim_rate"]
+        == pytest.approx(1.0)
+    )
+    verification_by_class = report["counts"]["claim_verification_by_class"]
+    assert verification_by_class
+    assert sum(
+        sum(class_counts.values())
+        for class_counts in verification_by_class.values()
+    ) == report["counts"]["material_claims"]
+    assert verification_by_class["current_status"]["not_evaluated"] > 0
+    assert verification_by_class["attention"]["not_evaluated"] > 0
 
 
 def test_generation_regression_is_reported() -> None:

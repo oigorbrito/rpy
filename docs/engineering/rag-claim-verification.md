@@ -42,30 +42,66 @@ Procedural events, decisions, deadlines, attachment facts, and similar event-lev
 
 The deterministic validator checks reference identity and scope; it does not infer which source *ought* to support a sentence.
 
-## Semantic boundary
+## Deterministic semantic baseline
 
-Claim-level provenance is not semantic entailment.
+Issue #267 builds on the structural provenance layer with a deliberately narrow
+deterministic verifier. It does not introduce a second LLM.
 
-A valid evidence ref means that the source was authorized, supplied to generation, and deterministically linked to the claim. It does not establish that the source logically implies every proposition in the claim, nor does it detect all subtle contradictions or overstatements.
+For every cited claim/evidence relation the application records one of:
 
-Accordingly, #250 must not be described as resolving #267.
+- `supported`: exact normalized claim text is present in the cited provider-visible
+  source, or all deterministic fact anchors checked for the claim are present across
+  its cited sources;
+- `contradicted`: a cited canonical process source conflicts with an unambiguous
+  deterministic field such as labeled process amount or total movement count. Any cited
+  contradiction makes the aggregate claim contradicted;
+- `insufficient`: the claim contains a deterministic CNJ, date, amount, known party, or
+  movement-count anchor that is not present in the cited evidence set;
+- `not_evaluated`: no deterministic fact anchor is available, so the application does
+  not pretend to have established semantic entailment.
 
-Issue #267 owns any later semantic layer, including classifications such as:
+The verifier evaluates only the text and structured metadata that were actually supplied
+to generation. Movement checks use the provider-visible bounded movement representation;
+attachment checks use the bounded chunk representation. Process-level checks use the
+normalized process projection represented by the process evidence ref.
 
-- `supported`;
-- `contradicted`;
-- `insufficient`.
+A `contradicted` claim fails closed before publication. Deterministic `insufficient`
+claims and intrinsically factual claim classes (`procedural_event`, `decision`,
+`deadline`, `related_process`, and `attachment`) that remain `not_evaluated`
+participate in the existing single correction attempt; a second failure remains
+persisted in the normal validation result. Narrative `synthesis`, `current_status`,
+and generic `attention` prose remain measurable as `not_evaluated` when they contain
+no deterministic anchor, rather than being treated as automatically material. Any of
+those fields that do contain deterministic facts are still subject to the normal
+supported/insufficient/contradicted checks.
 
-A probabilistic verifier or second model should be introduced only if evaluation shows that deterministic checks leave a material residual unsupported-assertion rate that justifies the added cost and failure modes.
+When available, the durable audit layer stores a bounded literal evidence excerpt in a
+worker/backup-only table. The API-readable claim relation stores its SHA-256 and available
+attachment page/character ranges. Literal excerpts remain internal: the public v1 JSON
+representation exposes verification status/reason, refs, hashes and positions but never
+the excerpt itself.
+
+## Remaining semantic boundary
+
+This deterministic baseline still does not establish general natural-language entailment.
+It intentionally avoids heuristics for broad legal or procedural statements whose truth
+cannot be established from exact text or the deterministic anchors above.
+
+In particular, `not_evaluated` does not mean supported. A probabilistic verifier or
+second model should be introduced only if evaluation demonstrates a material residual
+unsupported-assertion rate and the added cost/failure modes are justified.
 
 ## Evaluation
 
-The deterministic layer should be measured at claim granularity. At minimum, evaluation should report:
+Evaluation must keep structural provenance and semantic verification separate. At minimum
+the report should include:
 
 - count of material claims;
-- claims with missing refs;
-- claims with unknown/stale/cross-version refs;
-- claims whose text diverges from the structured field;
-- publishable vs rejected summaries due to provenance.
+- structural failures: missing, unknown, stale or cross-version refs and text mismatches;
+- claim counts by `supported`, `contradicted`, `insufficient`, and `not_evaluated`;
+- deterministic retry/failure counts;
+- publishable vs rejected summaries due to claim verification;
+- residual unsupported-assertion rate measured independently of structural provenance.
 
-Future semantic evaluation should report unsupported-assertion rate separately. Structural provenance success must not be counted as semantic support.
+Structural provenance success must never be counted as semantic support, and
+`not_evaluated` must never be counted as `supported`.

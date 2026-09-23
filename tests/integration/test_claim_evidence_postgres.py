@@ -6,7 +6,14 @@ from uuid import UUID, uuid4
 import asyncpg
 import pytest
 
-from app.claim_evidence import claim_evidence_is_complete, load_summary_claim_evidence
+from app.claim_evidence import (
+    EvidenceSource,
+    MaterialClaim,
+    claim_evidence_is_complete,
+    load_summary_claim_evidence,
+    replace_summary_claim_evidence,
+)
+from app.claim_verification import ClaimRelationVerification, ClaimVerification
 from app.migrations import migrate
 
 
@@ -59,6 +66,120 @@ async def _process_version(conn: asyncpg.Connection, *, code: str):
         version_id,
     )
     return process_id, version_id
+
+
+@pytest.mark.asyncio
+async def test_claim_verification_round_trips_with_persisted_evidence() -> None:
+    assert TEST_DATABASE_URL is not None
+    await migrate(TEST_DATABASE_URL)
+    conn = await asyncpg.connect(TEST_DATABASE_URL)
+    try:
+        await _reset(conn)
+        process_id, version_id = await _process_version(
+            conn, code="0000000-00.2026.8.21.2499"
+        )
+        summary_id = await conn.fetchval(
+            """
+            INSERT INTO process_summaries (
+                process_id, version_id, markdown, validation, model, prompt_version
+            ) VALUES ($1, $2, '# resumo', '{"passed":true}'::jsonb, 'fake', 'test-v1')
+            RETURNING id
+            """,
+            process_id,
+            version_id,
+        )
+        process_ref = _ref("p", version_id)
+        claim = MaterialClaim(
+            claim_id="current_status",
+            claim_class="current_status",
+            text="Situação atual registrada.",
+            evidence_refs=(process_ref,),
+        )
+        relation = ClaimRelationVerification(
+            evidence_ref=process_ref,
+            status="supported",
+            reason="exact_text_present",
+            evidence_excerpt='{"status":"Situação atual registrada."}',
+            evidence_excerpt_sha256=(
+                "7f8f7656b893152e240a6c29197486733570225eb0304866052553fb2588d77c"
+            ),
+        )
+        verification = ClaimVerification(
+            claim_id="current_status",
+            claim_class="current_status",
+            status="supported",
+            reason="at_least_one_cited_source_supports_deterministic_fact",
+            deterministic_fact_count=1,
+            relations=(relation,),
+        )
+
+        await replace_summary_claim_evidence(
+            conn,
+            summary_id=summary_id,
+            process_id=process_id,
+            version_id=version_id,
+            claims=[claim],
+            catalog={
+                process_ref: EvidenceSource(
+                    evidence_ref=process_ref,
+                    kind="process",
+                )
+            },
+            verification={"current_status": verification},
+        )
+
+        loaded = await load_summary_claim_evidence(conn, summary_id=summary_id)
+        stored_excerpt = await conn.fetchval(
+            """
+            SELECT evidence_excerpt
+            FROM process_summary_claim_evidence_excerpts
+            WHERE claim_row_id = (
+                SELECT id
+                FROM process_summary_claims
+                WHERE summary_id=$1 AND claim_id='current_status'
+            )
+              AND evidence_ref=$2
+            """,
+            summary_id,
+            process_ref,
+        )
+
+        assert stored_excerpt == '{"status":"Situação atual registrada."}'
+        assert all(
+            "evidence_excerpt" not in source
+            for item in loaded
+            for source in item["sources"]
+        )
+        assert loaded == [
+            {
+                "claim_id": "current_status",
+                "claim_class": "current_status",
+                "text": "Situação atual registrada.",
+                "evidence_refs": [process_ref],
+                "verification_status": "supported",
+                "verification_reason": (
+                    "at_least_one_cited_source_supports_deterministic_fact"
+                ),
+                "sources": [
+                    {
+                        "evidence_ref": process_ref,
+                        "source_kind": "process",
+                        "source_order": 0,
+                        "verification_status": "supported",
+                        "verification_reason": "exact_text_present",
+                        "evidence_excerpt_sha256": (
+                            "7f8f7656b893152e240a6c29197486733570225eb0304866052553fb2588d77c"
+                        ),
+                        "page_start": None,
+                        "page_end": None,
+                        "char_start": None,
+                        "char_end": None,
+                    }
+                ],
+            }
+        ]
+    finally:
+        await conn.close()
 
 
 @pytest.mark.asyncio

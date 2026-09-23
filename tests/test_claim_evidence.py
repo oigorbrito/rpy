@@ -247,6 +247,74 @@ def test_publication_gate_rejects_tampered_process_projection() -> None:
     ) is False
 
 
+def test_publication_gate_rejects_contradicted_semantic_verification() -> None:
+    payload = _payload()
+    complete = build_material_claims(
+        payload,
+        evidence_refs=[movement_evidence_ref(STEP_ID)],
+    )
+    structured = _structured_output(payload, complete)
+    process = {
+        "code": "0000000-00.2026.8.21.0001",
+        "class_name": None,
+        "court": None,
+        "header": {},
+        "parties": [],
+    }
+    persisted = [dict(item) for item in complete]
+    persisted[0] = {
+        **persisted[0],
+        "verification_status": "contradicted",
+        "sources": [
+            {
+                "evidence_ref": movement_evidence_ref(STEP_ID),
+                "verification_status": "contradicted",
+            }
+        ],
+    }
+
+    assert claim_evidence_is_publishable(
+        structured,
+        persisted,
+        process=process,
+    ) is False
+
+
+def test_publication_gate_allows_explicit_not_evaluated_semantic_status() -> None:
+    payload = _payload()
+    complete = build_material_claims(
+        payload,
+        evidence_refs=[movement_evidence_ref(STEP_ID)],
+    )
+    structured = _structured_output(payload, complete)
+    process = {
+        "code": "0000000-00.2026.8.21.0001",
+        "class_name": None,
+        "court": None,
+        "header": {},
+        "parties": [],
+    }
+    persisted = [
+        {
+            **item,
+            "verification_status": "not_evaluated",
+            "sources": [
+                {
+                    "evidence_ref": movement_evidence_ref(STEP_ID),
+                    "verification_status": "not_evaluated",
+                }
+            ],
+        }
+        for item in complete
+    ]
+
+    assert claim_evidence_is_publishable(
+        structured,
+        persisted,
+        process=process,
+    ) is True
+
+
 def test_publication_completeness_rejects_noncanonical_document() -> None:
     payload = _payload()
     refs = [movement_evidence_ref(STEP_ID)]

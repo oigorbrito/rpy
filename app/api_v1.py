@@ -58,20 +58,63 @@ def _summary_representation(
     structured_output: Any,
     response_format: str,
     hide_claim_evidence: bool = False,
+    claim_evidence: list[dict[str, Any]] | None = None,
 ) -> Any:
     if response_format == "jsx":
         return markdown
     if structured_output is None:
         return None
     rendered = _json_object(structured_output)
-    if not hide_claim_evidence:
-        return rendered
     summary = rendered.get("summary")
     if not isinstance(summary, dict) or "claims" not in summary:
         return rendered
+    if hide_claim_evidence:
+        public_summary = dict(summary)
+        public_summary.pop("claims", None)
+        return {**rendered, "summary": public_summary}
+
+    evidence_by_claim = {
+        str(item.get("claim_id")): item
+        for item in (claim_evidence or [])
+        if isinstance(item, dict) and item.get("claim_id") is not None
+    }
+    public_claims: list[Any] = []
+    for raw_claim in summary.get("claims", []):
+        if not isinstance(raw_claim, dict):
+            public_claims.append(raw_claim)
+            continue
+        claim = dict(raw_claim)
+        evidence = evidence_by_claim.get(str(claim.get("claim_id")))
+        if evidence is not None:
+            claim["verification"] = {
+                "status": evidence.get("verification_status"),
+                "reason": evidence.get("verification_reason"),
+                "sources": evidence.get("sources", []),
+            }
+        public_claims.append(claim)
     public_summary = dict(summary)
-    public_summary.pop("claims", None)
+    public_summary["claims"] = public_claims
     return {**rendered, "summary": public_summary}
+
+
+def _public_claim_evidence(
+    claim_evidence: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    rendered: list[dict[str, Any]] = []
+    for item in claim_evidence:
+        if not isinstance(item, dict):
+            continue
+        public_item = dict(item)
+        public_sources: list[dict[str, Any]] = []
+        for source in item.get("sources", []):
+            if not isinstance(source, dict):
+                continue
+            public_source = dict(source)
+            public_source.pop("evidence_excerpt", None)
+            public_sources.append(public_source)
+        public_item["sources"] = public_sources
+        rendered.append(public_item)
+    return rendered
 
 
 def _summary_usage(row: asyncpg.Record) -> dict[str, Any] | None:
@@ -298,7 +341,11 @@ async def _job_payload(
         version_id=row["version_id"],
         summary_id=row["summary_id"] if publishable else None,
     )
-    public_claim_evidence = claim_evidence if publishable and not is_secret else []
+    public_claim_evidence = (
+        _public_claim_evidence(claim_evidence)
+        if publishable and not is_secret
+        else []
+    )
     payload = {
         "job_id": str(row["id"]),
         "poll_url": f"/v1/resumos/{row['id']}",
@@ -317,6 +364,7 @@ async def _job_payload(
                 structured_output=row["structured_output"],
                 response_format=str(row["response_format"]),
                 hide_claim_evidence=is_secret,
+                claim_evidence=public_claim_evidence,
             )
             if publishable
             else None
@@ -391,7 +439,9 @@ async def _latest_summary_payload(
         "flags": flags,
         "validation": validation,
         "claim_evidence": (
-            [] if int(process["secrecy_level"] or 0) > 0 else claim_evidence
+            []
+            if int(process["secrecy_level"] or 0) > 0
+            else _public_claim_evidence(claim_evidence)
         ),
         "format": response_format,
         "iaSummary": _summary_representation(
@@ -399,6 +449,7 @@ async def _latest_summary_payload(
             structured_output=summary["structured_output"],
             response_format=response_format,
             hide_claim_evidence=is_secret,
+            claim_evidence=_public_claim_evidence(claim_evidence),
         ),
     }
 

@@ -13,9 +13,11 @@ from uuid import NAMESPACE_URL, uuid5
 from app.claim_evidence import (
     build_material_claims,
     expected_material_claims,
+    movement_evidence_ref,
     process_evidence_ref,
     validate_claim_evidence,
 )
+from app.claim_verification import verify_material_claims
 from app.rag import (
     EMPTY_STEPS_WARNING,
     _generate,
@@ -96,6 +98,14 @@ def _context(case: dict[str, Any]) -> tuple[dict[str, Any], str | None]:
         "header": {"instance": int(case.get("instance", 1))},
         "step_count": count,
         "steps": _serialize_steps(ranked),
+        "_selected_sources": [
+            {
+                "evidence_ref": movement_evidence_ref(item.step.id),
+                "step_id": item.step.id,
+            }
+            for item in ranked
+        ],
+        "_attachment_sources": [],
         "_process_evidence_ref": process_evidence_ref(
             uuid5(NAMESPACE_URL, f"rpy:generation:{case_id}:version")
         ),
@@ -138,7 +148,7 @@ class _FakeMessages:
             "current_status": (
                 "Recomendo que a parte tome providências."
                 if force_first_failure
-                else "Situação atual registrada nos autos."
+                else str((steps[-1] if steps else {}).get("text") or "Sem movimentação processual.")
             ),
             "attention": (
                 [str(warning) for warning in warnings]
@@ -154,6 +164,26 @@ class _FakeMessages:
             payload,
             evidence_refs=[str(process["evidence_ref"])],
         )
+        if steps:
+            current_status_ref = str(steps[-1].get("evidence_ref") or "")
+            if current_status_ref:
+                for claim in payload["claims"]:
+                    if claim["claim_id"] == "current_status":
+                        claim["evidence_refs"] = [current_status_ref]
+
+        if milestone:
+            movement_ref = next(
+                (
+                    str(step.get("evidence_ref") or "")
+                    for step in steps
+                    if milestone in str(step.get("text") or "")
+                ),
+                "",
+            )
+            if movement_ref:
+                for claim in payload["claims"]:
+                    if claim["claim_id"] == "timeline:0":
+                        claim["evidence_refs"] = [movement_ref]
         text = json.dumps(payload, ensure_ascii=False)
         return SimpleNamespace(content=[SimpleNamespace(type="text", text=text)])
 
@@ -178,6 +208,13 @@ async def evaluate_generation(cases: list[dict[str, Any]]) -> dict[str, Any]:
     secret_provider_calls = 0
     material_claims = 0
     structurally_unsupported_claims = 0
+    verification_counts = {
+        "supported": 0,
+        "contradicted": 0,
+        "insufficient": 0,
+        "not_evaluated": 0,
+    }
+    verification_counts_by_class: dict[str, dict[str, int]] = {}
     per_case: dict[str, dict[str, Any]] = {}
 
     for case in cases:
@@ -212,6 +249,12 @@ async def evaluate_generation(cases: list[dict[str, Any]]) -> dict[str, Any]:
 
         claim_total = 0
         claim_unsupported = 0
+        case_verification_counts = {
+            "supported": 0,
+            "contradicted": 0,
+            "insufficient": 0,
+            "not_evaluated": 0,
+        }
         parsed = context.get("_parsed_summary")
         if isinstance(parsed, dict):
             expected_claims = expected_material_claims(parsed)
@@ -228,6 +271,23 @@ async def evaluate_generation(cases: list[dict[str, Any]]) -> dict[str, Any]:
             if claim_errors and claim_unsupported == 0:
                 claim_unsupported = claim_total
             structurally_unsupported_claims += claim_unsupported
+
+            if not claim_errors:
+                verification = verify_material_claims(validated_claims, context)
+                for claim in validated_claims:
+                    result = verification[claim.claim_id]
+                    verification_counts[result.status] += 1
+                    case_verification_counts[result.status] += 1
+                    class_counts = verification_counts_by_class.setdefault(
+                        claim.claim_class,
+                        {
+                            "supported": 0,
+                            "contradicted": 0,
+                            "insufficient": 0,
+                            "not_evaluated": 0,
+                        },
+                    )
+                    class_counts[result.status] += 1
 
         if validation.passed:
             final_valid += 1
@@ -247,6 +307,7 @@ async def evaluate_generation(cases: list[dict[str, Any]]) -> dict[str, Any]:
             ),
             "material_claims": claim_total,
             "structurally_unsupported_claims": claim_unsupported,
+            "claim_verification_counts": case_verification_counts,
         }
 
     return {
@@ -267,6 +328,21 @@ async def evaluate_generation(cases: list[dict[str, Any]]) -> dict[str, Any]:
                 if material_claims
                 else 0.0
             ),
+            "deterministic_supported_claim_rate": (
+                verification_counts["supported"] / material_claims
+                if material_claims
+                else 0.0
+            ),
+            "semantic_unverified_claim_rate": (
+                (
+                    verification_counts["contradicted"]
+                    + verification_counts["insufficient"]
+                    + verification_counts["not_evaluated"]
+                )
+                / material_claims
+                if material_claims
+                else 0.0
+            ),
         },
         "counts": {
             "public_cases": public_cases,
@@ -279,6 +355,8 @@ async def evaluate_generation(cases: list[dict[str, Any]]) -> dict[str, Any]:
             "secret_provider_calls": secret_provider_calls,
             "material_claims": material_claims,
             "structurally_unsupported_claims": structurally_unsupported_claims,
+            "claim_verification": verification_counts,
+            "claim_verification_by_class": verification_counts_by_class,
         },
         "case_metrics": per_case,
     }

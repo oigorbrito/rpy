@@ -79,6 +79,7 @@ async def test_v1_idempotency_states_authorization_and_sanitized_sources(monkeyp
     token_a = "sk_test_public_v1_tenant_a_00000001"
     token_b = "sk_test_public_v1_tenant_b_00000002"
     raw_sentinel = "RAW-SOURCE-PAYLOAD-MUST-NOT-LEAK"
+    claim_excerpt_sentinel = "CLAIM-EVIDENCE-EXCERPT-MUST-NOT-LEAK"
 
     try:
         await _reset(pool)
@@ -323,6 +324,28 @@ async def test_v1_idempotency_states_authorization_and_sanitized_sources(monkeyp
                     f"p-{version_id.hex}",
                 )
 
+            await conn.execute(
+                """
+                UPDATE process_summary_claim_sources
+                SET evidence_excerpt_sha256=$2
+                WHERE summary_id=$1 AND source_order=0
+                """,
+                summary_id,
+                "a" * 64,
+            )
+            await conn.execute(
+                """
+                INSERT INTO process_summary_claim_evidence_excerpts (
+                    claim_row_id, evidence_ref, evidence_excerpt
+                )
+                SELECT claim_row_id, evidence_ref, $2
+                FROM process_summary_claim_sources
+                WHERE summary_id=$1 AND source_order=0
+                """,
+                summary_id,
+                claim_excerpt_sentinel,
+            )
+
             completed_request, _ = await create_or_get_summary_request(
                 conn,
                 tenant_id=tenant_a,
@@ -448,6 +471,19 @@ async def test_v1_idempotency_states_authorization_and_sanitized_sources(monkeyp
             assert json_job.json()["iaSummary"]["schema_version"] == 2
             assert json_job.json()["iaSummary"]["process"]["cnj"] == other_code
             assert json_job.json()["iaSummary"]["summary"]["synthesis"] == "Resumo válido"
+            json_claims = json_job.json()["iaSummary"]["summary"]["claims"]
+            synthesis_claim = next(
+                item for item in json_claims if item["claim_id"] == "synthesis"
+            )
+            assert synthesis_claim["verification"]["status"] == "not_evaluated"
+            assert all(
+                "evidence_excerpt" not in source
+                for source in synthesis_claim["verification"]["sources"]
+            )
+            assert claim_excerpt_sentinel not in json.dumps(
+                json_job.json(),
+                ensure_ascii=False,
+            )
 
             summary = await client.get(
                 f"/v1/processos/{other_code}/resumo", headers=auth_a

@@ -12,6 +12,11 @@ import asyncpg
 
 from app.attachment_context import load_attachment_context, resolve_generation_tenant
 from app.attachment_signals import attachment_status_warnings
+from app.claim_verification import (
+    ClaimVerification,
+    verification_errors,
+    verify_material_claims,
+)
 from app.claim_evidence import (
     EvidenceSource,
     MaterialClaim,
@@ -472,11 +477,19 @@ def _validate_provider_summary(text: str, context: dict[str, Any]) -> Validation
         ),
     )
     parsed = context.get("_parsed_summary")
+    semantic_errors: list[str] = []
     if not isinstance(parsed, dict):
         evidence_errors = ["structured summary claim provenance is unavailable"]
+        context.pop("_claim_verification", None)
     else:
-        _, evidence_errors = validate_claim_evidence(parsed, context)
-    errors = [*result.errors, *evidence_errors]
+        claims, evidence_errors = validate_claim_evidence(parsed, context)
+        if not evidence_errors:
+            claim_verification = verify_material_claims(claims, context)
+            context["_claim_verification"] = claim_verification
+            semantic_errors = verification_errors(claim_verification)
+        else:
+            context.pop("_claim_verification", None)
+    errors = [*result.errors, *evidence_errors, *semantic_errors]
     return ValidationResult(passed=not errors, errors=errors)
 
 
@@ -708,6 +721,7 @@ async def _persist_summary(
     structured_output: dict[str, Any] | None = None,
     claims: list[MaterialClaim] | None = None,
     evidence_sources: dict[str, EvidenceSource] | None = None,
+    claim_verification: dict[str, ClaimVerification] | None = None,
 ) -> bool:
     async with conn.transaction():
         existing = await conn.fetchrow(
@@ -750,14 +764,32 @@ async def _persist_summary(
                     },
                 )
             else:
-                incoming_claim_evidence = [
-                    {
-                        "claim_id": claim.claim_id,
-                        "text": claim.text,
-                        "evidence_refs": list(claim.evidence_refs),
-                    }
-                    for claim in (claims or [])
-                ]
+                incoming_claim_evidence = []
+                for claim in claims or []:
+                    verification = (claim_verification or {}).get(claim.claim_id)
+                    incoming_claim_evidence.append(
+                        {
+                            "claim_id": claim.claim_id,
+                            "text": claim.text,
+                            "evidence_refs": list(claim.evidence_refs),
+                            "verification_status": (
+                                verification.status
+                                if verification is not None
+                                else "not_evaluated"
+                            ),
+                            "sources": (
+                                [
+                                    {
+                                        "evidence_ref": relation.evidence_ref,
+                                        "verification_status": relation.status,
+                                    }
+                                    for relation in verification.relations
+                                ]
+                                if verification is not None
+                                else []
+                            ),
+                        }
+                    )
                 incoming_publishable = claim_evidence_is_publishable(
                     structured_output,
                     incoming_claim_evidence,
@@ -841,6 +873,7 @@ async def _persist_summary(
             version_id=version_id,
             claims=claims or [],
             catalog=evidence_sources or {},
+            verification=claim_verification,
         )
         await replace_summary_glossary_sources(
             conn,
@@ -966,12 +999,16 @@ async def generate_summary(
 
     claims: list[MaterialClaim] = []
     evidence_sources: dict[str, EvidenceSource] = {}
+    claim_verification: dict[str, ClaimVerification] = {}
     if not _is_secret_context(context) and result.passed:
         parsed = context.get("_parsed_summary")
         if isinstance(parsed, dict):
             claims, claim_errors = validate_claim_evidence(parsed, context)
             if claim_errors:
                 raise RuntimeError("validated summary has invalid claim evidence")
+            claim_verification = verify_material_claims(claims, context)
+            if verification_errors(claim_verification):
+                raise RuntimeError("validated summary has invalid semantic claim evidence")
             evidence_sources = evidence_catalog(context)
 
     generation_ms = max(0, round((perf_counter() - started) * 1000))
@@ -1000,6 +1037,7 @@ async def generate_summary(
             ),
             claims=claims,
             evidence_sources=evidence_sources,
+            claim_verification=claim_verification,
         )
     return {
         "validation": validation,

@@ -7,6 +7,7 @@ from uuid import UUID
 
 import asyncpg
 
+from app.claim_verification import ClaimVerification, VERIFICATION_STATUSES
 from app.json_utils import decode_json_list, decode_json_object
 from app.summary_output import (
     structured_summary_document_is_canonical,
@@ -300,10 +301,33 @@ def claim_evidence_is_publishable(
         }
     except (KeyError, TypeError, ValueError):
         return False
-    return (
-        claim_evidence_is_complete(structured_output, claim_evidence)
-        and structured_summary_document_matches_process(structured_output, context)
-    )
+    if not claim_evidence_is_complete(structured_output, claim_evidence):
+        return False
+    if not structured_summary_document_matches_process(structured_output, context):
+        return False
+    for item in claim_evidence:
+        status = item.get("verification_status")
+        if status is not None and status not in VERIFICATION_STATUSES:
+            return False
+        if status == "contradicted":
+            return False
+        sources = item.get("sources")
+        if sources is None:
+            continue
+        if not isinstance(sources, list):
+            return False
+        for source in sources:
+            if not isinstance(source, dict):
+                return False
+            relation_status = source.get("verification_status")
+            if (
+                relation_status is not None
+                and relation_status not in VERIFICATION_STATUSES
+            ):
+                return False
+            if relation_status == "contradicted":
+                return False
+    return True
 
 
 async def replace_summary_claim_evidence(
@@ -314,6 +338,7 @@ async def replace_summary_claim_evidence(
     version_id: UUID,
     claims: list[MaterialClaim],
     catalog: dict[str, EvidenceSource],
+    verification: dict[str, ClaimVerification] | None = None,
 ) -> None:
     await conn.execute(
         "DELETE FROM process_summary_claims WHERE summary_id = $1",
@@ -322,12 +347,25 @@ async def replace_summary_claim_evidence(
     if not claims:
         return
 
+    verification = verification or {}
     for claim in claims:
+        claim_verification = verification.get(claim.claim_id)
+        verification_status = (
+            claim_verification.status
+            if claim_verification is not None
+            else "not_evaluated"
+        )
+        verification_reason = (
+            claim_verification.reason
+            if claim_verification is not None
+            else "semantic_verifier_not_run"
+        )
         claim_row_id = await conn.fetchval(
             """
             INSERT INTO process_summary_claims (
-                summary_id, process_id, version_id, claim_id, claim_class, claim_text
-            ) VALUES ($1, $2, $3, $4, $5, $6)
+                summary_id, process_id, version_id, claim_id, claim_class, claim_text,
+                verification_status, verification_reason
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING id
             """,
             summary_id,
@@ -336,14 +374,27 @@ async def replace_summary_claim_evidence(
             claim.claim_id,
             claim.claim_class,
             claim.text,
+            verification_status,
+            verification_reason,
         )
         if claim_row_id is None:
             raise RuntimeError("claim row was not returned")
+
+        relation_by_ref = (
+            {
+                relation.evidence_ref: relation
+                for relation in claim_verification.relations
+            }
+            if claim_verification is not None
+            else {}
+        )
         records: list[tuple[Any, ...]] = []
+        excerpt_records: list[tuple[Any, ...]] = []
         for source_order, ref in enumerate(claim.evidence_refs):
             source = catalog.get(ref)
             if source is None:
                 raise ValueError(f"claim evidence ref is not in validated catalog: {ref}")
+            relation = relation_by_ref.get(ref)
             records.append(
                 (
                     claim_row_id,
@@ -355,17 +406,51 @@ async def replace_summary_claim_evidence(
                     source.step_id,
                     source.attachment_chunk_id,
                     source_order,
+                    relation.status if relation is not None else "not_evaluated",
+                    (
+                        relation.reason
+                        if relation is not None
+                        else "semantic_verifier_not_run"
+                    ),
+                    (
+                        relation.evidence_excerpt_sha256
+                        if relation is not None
+                        else None
+                    ),
+                    relation.page_start if relation is not None else None,
+                    relation.page_end if relation is not None else None,
+                    relation.char_start if relation is not None else None,
+                    relation.char_end if relation is not None else None,
                 )
             )
+            if relation is not None and relation.evidence_excerpt:
+                excerpt_records.append(
+                    (claim_row_id, ref, relation.evidence_excerpt)
+                )
         await conn.executemany(
             """
             INSERT INTO process_summary_claim_sources (
                 claim_row_id, summary_id, process_id, version_id,
-                evidence_ref, source_kind, step_id, attachment_chunk_id, source_order
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                evidence_ref, source_kind, step_id, attachment_chunk_id, source_order,
+                verification_status, verification_reason,
+                evidence_excerpt_sha256,
+                page_start, page_end, char_start, char_end
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9,
+                $10, $11, $12, $13, $14, $15, $16
+            )
             """,
             records,
         )
+        if excerpt_records:
+            await conn.executemany(
+                """
+                INSERT INTO process_summary_claim_evidence_excerpts (
+                    claim_row_id, evidence_ref, evidence_excerpt
+                ) VALUES ($1, $2, $3)
+                """,
+                excerpt_records,
+            )
 
 
 async def load_summary_claim_evidence(
@@ -376,12 +461,20 @@ async def load_summary_claim_evidence(
     rows = await conn.fetch(
         """
         SELECT c.id, c.claim_id, c.claim_class, c.claim_text,
+               c.verification_status, c.verification_reason,
                COALESCE(
                    jsonb_agg(
                        jsonb_build_object(
                            'evidence_ref', s.evidence_ref,
                            'source_kind', s.source_kind,
-                           'source_order', s.source_order
+                           'source_order', s.source_order,
+                           'verification_status', s.verification_status,
+                           'verification_reason', s.verification_reason,
+                           'evidence_excerpt_sha256', s.evidence_excerpt_sha256,
+                           'page_start', s.page_start,
+                           'page_end', s.page_end,
+                           'char_start', s.char_start,
+                           'char_end', s.char_end
                        )
                        ORDER BY s.source_order
                    ) FILTER (
@@ -444,24 +537,57 @@ async def load_summary_claim_evidence(
          AND version.process_id = c.process_id
         LEFT JOIN process_summary_claim_sources s ON s.claim_row_id = c.id
         WHERE c.summary_id = $1
-        GROUP BY c.id, c.claim_id, c.claim_class, c.claim_text
+        GROUP BY c.id, c.claim_id, c.claim_class, c.claim_text,
+                 c.verification_status, c.verification_reason
         ORDER BY c.claim_id
         """,
         summary_id,
     )
-    return [
-        {
-            "claim_id": str(row["claim_id"]),
-            "claim_class": str(row["claim_class"]),
-            "text": str(row["claim_text"]),
-            "evidence_refs": [
-                str(item["evidence_ref"])
-                for item in decode_json_list(
-                    row["sources"],
-                    label="claim evidence sources",
-                )
-                if isinstance(item, dict) and item.get("evidence_ref") is not None
-            ],
-        }
-        for row in rows
-    ]
+
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        raw_sources = decode_json_list(
+            row["sources"],
+            label="claim evidence sources",
+        )
+        sources = [
+            {
+                "evidence_ref": str(item["evidence_ref"]),
+                "source_kind": str(item["source_kind"]),
+                "source_order": int(item["source_order"]),
+                "verification_status": str(item["verification_status"]),
+                "verification_reason": (
+                    str(item["verification_reason"])
+                    if item.get("verification_reason") is not None
+                    else None
+                ),
+                "evidence_excerpt_sha256": (
+                    str(item["evidence_excerpt_sha256"])
+                    if item.get("evidence_excerpt_sha256") is not None
+                    else None
+                ),
+                "page_start": item.get("page_start"),
+                "page_end": item.get("page_end"),
+                "char_start": item.get("char_start"),
+                "char_end": item.get("char_end"),
+            }
+            for item in raw_sources
+            if isinstance(item, dict) and item.get("evidence_ref") is not None
+        ]
+        result.append(
+            {
+                "claim_id": str(row["claim_id"]),
+                "claim_class": str(row["claim_class"]),
+                "text": str(row["claim_text"]),
+                "evidence_refs": [source["evidence_ref"] for source in sources],
+                "verification_status": str(row["verification_status"]),
+                "verification_reason": (
+                    str(row["verification_reason"])
+                    if row["verification_reason"] is not None
+                    else None
+                ),
+                "sources": sources,
+            }
+        )
+    return result
+
