@@ -327,13 +327,23 @@ async def test_v1_idempotency_states_authorization_and_sanitized_sources(monkeyp
             await conn.execute(
                 """
                 UPDATE process_summary_claim_sources
-                SET evidence_excerpt=$2,
-                    evidence_excerpt_sha256=$3
+                SET evidence_excerpt_sha256=$2
+                WHERE summary_id=$1 AND source_order=0
+                """,
+                summary_id,
+                "a" * 64,
+            )
+            await conn.execute(
+                """
+                INSERT INTO process_summary_claim_evidence_excerpts (
+                    claim_row_id, evidence_ref, evidence_excerpt
+                )
+                SELECT claim_row_id, evidence_ref, $2
+                FROM process_summary_claim_sources
                 WHERE summary_id=$1 AND source_order=0
                 """,
                 summary_id,
                 claim_excerpt_sentinel,
-                "a" * 64,
             )
 
             completed_request, _ = await create_or_get_summary_request(
