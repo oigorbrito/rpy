@@ -15,6 +15,7 @@ from app.db import create_pool
 from app.migrations import migrate
 from app.rag import _persist_summary, generate_summary
 from app.summary_output import structured_summary_document
+from app.summary_policy import RESTRICTED_PROMPT_VERSION
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(
@@ -293,7 +294,7 @@ async def test_public_summary_is_not_reused_after_process_becomes_secret(monkeyp
         assert result["reused"] is False
         assert stored is not None
         assert stored["model"] == "local-deterministic"
-        assert stored["prompt_version"] == "secret-summary-v1"
+        assert stored["prompt_version"] == RESTRICTED_PROMPT_VERSION
         assert "detalhes processuais foram restringidos por sigilo" in stored["markdown"]
         assert claim_count == 0
     finally:
