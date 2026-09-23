@@ -18,6 +18,7 @@ from app.migrations import migrate
 from app.processes import stage_version
 from app.public_lifecycle import (
     create_or_get_summary_request,
+    link_summary_request_to_acquisition,
     request_fingerprint,
     transition_summary_request,
 )
@@ -265,6 +266,209 @@ async def test_semantically_equal_response_reuses_current_version_and_summary(
     assert summaries == 1
 
     await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_equivalent_response_repairs_nonpublishable_current_summary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert TEST_DATABASE_URL is not None
+    await migrate(TEST_DATABASE_URL)
+    monkeypatch.setenv("DATABASE_URL", TEST_DATABASE_URL)
+    pool = await create_pool(TEST_DATABASE_URL, min_size=1, max_size=4)
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                TRUNCATE public_summary_requests, tenant_judit_requests, jobs,
+                         process_summaries, process_steps, tenant_processes,
+                         access_log, process_versions, processes, tenants
+                RESTART IDENTITY CASCADE
+                """
+            )
+
+        code = "0000000-00.2026.8.21.0200"
+        first_request = f"req-first-{uuid4()}"
+        _, first_version = await _stage(
+            pool,
+            _lawsuit_event(
+                request_id=first_request,
+                response_id=f"resp-first-{uuid4()}",
+                callback_id=f"cb-first-{uuid4()}",
+                code=code,
+            ),
+        )
+        first_result = await finalize_judit_request_task({"request_id": first_request})
+        assert first_result["promoted"] is True
+
+        async with pool.acquire() as conn:
+            process = await conn.fetchrow(
+                """
+                SELECT id, code, class_name, court, header, parties
+                FROM processes
+                WHERE code = $1
+                """,
+                code,
+            )
+            assert process is not None
+            header = process["header"]
+            parties = process["parties"]
+            if isinstance(header, str):
+                header = json.loads(header)
+            if isinstance(parties, str):
+                parties = json.loads(parties)
+            claim_context = {
+                "code": process["code"],
+                "class_name": process["class_name"],
+                "court": process["court"],
+                "header": header,
+                "parties": parties,
+                "_process_evidence_ref": process_evidence_ref(first_version),
+                "_selected_sources": [],
+                "_attachment_sources": [],
+            }
+            claim_payload = {
+                "synthesis": "Resumo sintético",
+                "timeline": [],
+                "current_status": "Situação atual registrada.",
+                "attention": ["Nenhum ponto adicional de atenção."],
+                "decisions": [],
+                "deadlines": [],
+                "related_processes": [],
+                "attachments": [],
+            }
+            claim_payload["claims"] = build_material_claims(
+                claim_payload,
+                evidence_refs=[claim_context["_process_evidence_ref"]],
+            )
+            claims, claim_errors = validate_claim_evidence(
+                claim_payload,
+                claim_context,
+            )
+            assert claim_errors == []
+            assert await _persist_summary(
+                conn,
+                process_id=process["id"],
+                version_id=first_version,
+                text="# resumo sintético",
+                validation={"passed": True, "errors": []},
+                generation_ms=1,
+                structured_output=structured_summary_document(
+                    claim_payload,
+                    claim_context,
+                ),
+                claims=claims,
+                evidence_sources=evidence_catalog(claim_context),
+            )
+
+            summary_id = await conn.fetchval(
+                """
+                SELECT id FROM process_summaries
+                WHERE process_id=$1 AND version_id=$2
+                """,
+                process["id"],
+                first_version,
+            )
+            assert summary_id is not None
+            await conn.execute(
+                """
+                DELETE FROM process_summary_claim_sources
+                WHERE summary_id=$1
+                """,
+                summary_id,
+            )
+
+        duplicate_request = f"req-duplicate-{uuid4()}"
+        _, duplicate_version = await _stage(
+            pool,
+            _lawsuit_event(
+                request_id=duplicate_request,
+                response_id=f"resp-duplicate-{uuid4()}",
+                callback_id=f"cb-duplicate-{uuid4()}",
+                code=code,
+            ),
+        )
+
+        tenant_id = uuid4()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO tenants (id, name) VALUES ($1, 'repair tenant')",
+                tenant_id,
+            )
+            public_request, _ = await create_or_get_summary_request(
+                conn,
+                tenant_id=tenant_id,
+                process_code=code,
+                idempotency_key="repair-equivalent",
+                fingerprint=request_fingerprint({"cnj": code}),
+            )
+            tenant_request_id = await conn.fetchval(
+                """
+                INSERT INTO tenant_judit_requests (
+                    tenant_id, process_code, judit_request_id, status, attempt_number
+                )
+                VALUES ($1, $2, $3, 'processing', 1)
+                RETURNING id
+                """,
+                tenant_id,
+                code,
+                duplicate_request,
+            )
+            await link_summary_request_to_acquisition(
+                conn,
+                request_id=public_request.id,
+                tenant_id=tenant_id,
+                process_code=code,
+                tenant_judit_request_id=tenant_request_id,
+            )
+            await transition_summary_request(
+                conn,
+                request_id=public_request.id,
+                status="fetching",
+            )
+
+        result = await finalize_judit_request_task({"request_id": duplicate_request})
+
+        assert result["status"] == "finalized_unchanged"
+        assert result["promoted"] is False
+        assert result["equivalent_to_version_id"] == str(first_version)
+        assert result["summary_enqueued"] is True
+        assert duplicate_version != first_version
+
+        async with pool.acquire() as conn:
+            request_state = await conn.fetchrow(
+                """
+                SELECT status::text, process_id, version_id, summary_id, error_code
+                FROM public_summary_requests
+                WHERE id=$1
+                """,
+                public_request.id,
+            )
+            repair_job = await conn.fetchrow(
+                """
+                SELECT task_name, payload, status::text
+                FROM jobs
+                WHERE idempotency_key=$1
+                """,
+                f"summary-repair:{first_version}:{duplicate_request}",
+            )
+
+        assert request_state["status"] == "indexing"
+        assert request_state["process_id"] == process["id"]
+        assert request_state["version_id"] == first_version
+        assert request_state["summary_id"] is None
+        assert request_state["error_code"] is None
+        assert repair_job is not None
+        assert repair_job["task_name"] == "generate_process_summary"
+        repair_payload = repair_job["payload"]
+        if isinstance(repair_payload, str):
+            repair_payload = json.loads(repair_payload)
+        assert repair_payload["process_id"] == str(process["id"])
+        assert repair_payload["version_id"] == str(first_version)
+        assert repair_payload["judit_request_id"] == duplicate_request
+        assert repair_job["status"] == "pending"
+    finally:
+        await pool.close()
 
 
 @pytest.mark.asyncio
