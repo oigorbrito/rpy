@@ -7,12 +7,12 @@ introduced by #250. It does not replace or weaken the structural publication gat
 
 `process_summary_claims` stores the aggregate claim status and reason.
 `process_summary_claim_sources` stores the status/reason for each cited evidence
-relation plus optional audit material:
+relation plus the excerpt SHA-256 and available page/character ranges.
 
-- a bounded provider-visible evidence excerpt;
-- SHA-256 of that stored excerpt;
-- page range when the attachment extractor supplied one;
-- character range when the attachment extractor supplied one.
+Literal provider-visible excerpts are stored separately in
+`process_summary_claim_evidence_excerpts`. That table is intentionally excluded from
+the `rpy_api` role and is readable/writable only by the worker (with backup read access),
+so public API database credentials cannot retrieve the literal audit text.
 
 Allowed statuses are `supported`, `contradicted`, `insufficient`, and
 `not_evaluated`. Existing rows migrate safely as `not_evaluated`.
@@ -44,9 +44,9 @@ and known-party anchors. It does not infer general legal entailment.
 
 ## Public API
 
-Literal evidence excerpts are audit-only and are not returned by the public v1 API.
-Public JSON may expose verification status/reason, evidence ref/kind/order, excerpt hash,
-and available page/character ranges.
+Literal evidence excerpts are audit-only, live in the worker/backup-only excerpt table,
+and are not returned by the public v1 API. Public JSON may expose verification
+status/reason, evidence ref/kind/order, excerpt hash, and available page/character ranges.
 
 Restricted-process behavior remains local/provider-free and does not expose claim evidence.
 
