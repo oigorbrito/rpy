@@ -84,9 +84,9 @@ _META_OUTPUT_MARKERS = (
 
 _CORE_SECTION_ORDER = (
     "Partes",
-    "Síntese",
-    "Linha do tempo relevante",
-    "Situação atual",
+    "Classe",
+    "Assuntos",
+    "Movimentações",
     "Pontos de atenção",
 )
 _CONDITIONAL_SECTION_ORDER = (
