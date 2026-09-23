@@ -83,3 +83,32 @@ def test_cohere_retry_policy_is_status_bound() -> None:
 def test_cohere_rejects_unknown_model() -> None:
     with pytest.raises(RuntimeError, match="unsupported Cohere embedding model"):
         CohereEmbeddingEncoder(model="other")
+
+
+def test_cohere_embed_rejects_oversized_response(monkeypatch) -> None:
+    class OversizedResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self, amount: int = -1) -> bytes:
+            if amount != embeddings_cohere.COHERE_EMBED_MAX_RESPONSE_BYTES + 1:
+                raise AssertionError(f"unexpected read bound: {amount}")
+            return b"x" * amount
+
+    monkeypatch.setattr(
+        embeddings_cohere,
+        "urlopen",
+        lambda request, timeout: OversizedResponse(),
+    )
+    with pytest.raises(CohereProviderError, match="exceeded safe size"):
+        embeddings_cohere._post_embed_sync(
+            api_key="synthetic-key",
+            texts=["texto"],
+            model="embed-v4.0",
+            input_type="search_document",
+            dimensions=1024,
+            timeout_seconds=1,
+        )
