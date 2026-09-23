@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import os
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -94,8 +95,10 @@ def datajud_config() -> DataJudConfig:
         timeout_seconds = float(raw_timeout)
     except ValueError as exc:
         raise RuntimeError("DATAJUD_TIMEOUT_SECONDS must be numeric") from exc
-    if timeout_seconds <= 0:
-        raise RuntimeError("DATAJUD_TIMEOUT_SECONDS must be greater than zero")
+    if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+        raise RuntimeError(
+            "DATAJUD_TIMEOUT_SECONDS must be a finite number greater than zero"
+        )
     if enabled and not authorized_use:
         raise RuntimeError(
             "DATAJUD_ENABLED requires DATAJUD_AUTHORIZED_USE=true after deployment/legal review"
