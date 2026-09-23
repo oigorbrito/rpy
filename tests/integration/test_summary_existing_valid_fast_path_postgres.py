@@ -320,7 +320,7 @@ Nenhuma divergência objetiva identificada."""
         assert stored["markdown"] == repaired_summary
         assert stored["model"] == "claude-sonnet-5"
         assert stored["prompt_version"] == "process-summary-v5"
-        assert claim_count == 3
+        assert claim_count == 2
     finally:
         await pool.close()
 
