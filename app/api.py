@@ -280,7 +280,7 @@ async def get_process_summary(code: str, request: Request) -> dict:
     return {
         "code": process["code"],
         "class_name": process["class_name"],
-        "court": process["court"],
+        "court": None if is_restricted else process["court"],
         "parties": parties if isinstance(parties, list) else [],
         "subjects": subjects if isinstance(subjects, list) else [],
         "header": header if isinstance(header, dict) else {},
