@@ -142,6 +142,20 @@ def test_labeled_amount_without_currency_prefix_is_verified() -> None:
     ]
 
 
+def test_unlabeled_amount_mismatch_is_insufficient_not_contradicted() -> None:
+    claim = MaterialClaim(
+        claim_id="current_status",
+        claim_class="current_status",
+        text="Foi determinado pagamento de R$ 2.000,00.",
+        evidence_refs=(process_evidence_ref(VERSION_ID),),
+    )
+
+    result = verify_material_claims([claim], _context())["current_status"]
+
+    assert result.status == "insufficient"
+    assert result.reason == "cited_sources_do_not_support_all_deterministic_facts"
+
+
 def test_movement_date_anchor_is_supported() -> None:
     claim = MaterialClaim(
         claim_id="timeline:0",
