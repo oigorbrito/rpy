@@ -52,6 +52,7 @@ from app.summary_output import (
     parse_structured_summary,
     render_structured_summary,
     structured_summary_document,
+    structured_summary_document_is_canonical,
 )
 from app.summary_policy import (
     RESTRICTED_HEADER_FIELDS,
@@ -712,6 +713,7 @@ async def _persist_summary(
                 incoming_publishable = (
                     model == RESTRICTED_MODEL
                     and prompt_version == RESTRICTED_PROMPT_VERSION
+                    and structured_summary_document_is_canonical(structured_output)
                 )
             else:
                 incoming_claim_evidence = [
