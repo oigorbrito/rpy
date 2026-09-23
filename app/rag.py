@@ -645,6 +645,28 @@ async def _generate(
     return render_structured_summary(payload, context)
 
 
+async def _summary_row_is_publishable(
+    conn: asyncpg.Connection,
+    row: asyncpg.Record,
+) -> bool:
+    if not bool(row["passed"]):
+        return False
+    if int(row["secrecy_level"] or 0) > 0:
+        return is_restricted_local_summary(row)
+
+    claim_evidence = await load_summary_claim_evidence(
+        conn, summary_id=row["id"]
+    )
+    try:
+        structured_output = decode_json_object(
+            row["structured_output"],
+            label="summary structured output",
+        )
+    except (TypeError, ValueError):
+        return False
+    return claim_evidence_is_complete(structured_output, claim_evidence)
+
+
 async def _persist_summary(
     conn: asyncpg.Connection,
     *,
@@ -667,6 +689,27 @@ async def _persist_summary(
     evidence_sources: dict[str, EvidenceSource] | None = None,
 ) -> bool:
     async with conn.transaction():
+        existing = await conn.fetchrow(
+            """
+            SELECT ps.id,
+                   ps.structured_output,
+                   ps.model,
+                   ps.prompt_version,
+                   COALESCE((ps.validation->>'passed')::boolean, false) AS passed,
+                   p.secrecy_level
+            FROM process_summaries ps
+            JOIN processes p ON p.id = ps.process_id
+            WHERE ps.process_id = $1 AND ps.version_id = $2
+            FOR UPDATE OF ps
+            """,
+            process_id,
+            version_id,
+        )
+        replace_unpublishable = bool(
+            existing is not None
+            and not await _summary_row_is_publishable(conn, existing)
+        )
+
         row = await conn.fetchrow(
             """
             INSERT INTO process_summaries (
@@ -689,7 +732,8 @@ async def _persist_summary(
                           unicode_security_flags = EXCLUDED.unicode_security_flags,
                           structured_output = EXCLUDED.structured_output,
                           created_at = NOW()
-            WHERE COALESCE((process_summaries.validation->>'passed')::boolean, false) = false
+            WHERE $13::boolean
+               OR COALESCE((process_summaries.validation->>'passed')::boolean, false) = false
                OR (
                     process_summaries.structured_output IS NULL
                     AND EXCLUDED.structured_output IS NOT NULL
@@ -715,6 +759,7 @@ async def _persist_summary(
             cost_usd,
             json.dumps(unicode_security_flags or []),
             json.dumps(structured_output) if structured_output is not None else None,
+            replace_unpublishable,
         )
         if row is None:
             return False
@@ -760,6 +805,7 @@ async def _load_publishable_summary(
             """
             SELECT ps.id, ps.validation, ps.model, ps.prompt_version, ps.generation_ms,
                    ps.usage, ps.cache_hit, ps.cost_usd, ps.structured_output,
+                   COALESCE((ps.validation->>'passed')::boolean, false) AS passed,
                    p.secrecy_level
             FROM process_summaries ps
             JOIN processes p
@@ -774,18 +820,8 @@ async def _load_publishable_summary(
         )
         if row is None:
             return None
-        if int(row["secrecy_level"] or 0) > 0:
-            if not is_restricted_local_summary(row):
-                return None
-        else:
-            claim_evidence = await load_summary_claim_evidence(
-                conn, summary_id=row["id"]
-            )
-            structured_output = decode_json_object(
-                row["structured_output"], label="summary structured output"
-            )
-            if not claim_evidence_is_complete(structured_output, claim_evidence):
-                return None
+        if not await _summary_row_is_publishable(conn, row):
+            return None
     return {
         "validation": decode_json_object(row["validation"], label="summary validation"),
         "model": row["model"],
