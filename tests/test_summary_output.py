@@ -107,6 +107,34 @@ def test_renderer_owns_document_structure_and_source_identity() -> None:
     ]
 
 
+
+
+def test_renderer_keeps_attention_before_conditional_sections() -> None:
+    payload = _payload()
+    payload["decisions"] = ["Sentença registrada."]
+    payload["deadlines"] = ["Prazo registrado."]
+    payload["related_processes"] = ["Processo relacionado registrado."]
+    payload["attachments"] = ["Anexo lido."]
+
+    rendered = render_structured_summary(payload, _context())
+    headings = [
+        line.removeprefix("## ")
+        for line in rendered.splitlines()
+        if line.startswith("## ")
+    ]
+
+    assert headings == [
+        "Partes",
+        "Classe",
+        "Assuntos",
+        "Movimentações",
+        "Pontos de atenção",
+        "Decisões",
+        "Prazos em curso",
+        "Processos relacionados",
+        "Anexos",
+    ]
+
 def test_model_cannot_create_new_heading_or_jsx_control_line() -> None:
     payload = _payload()
     payload["synthesis"] = "## Receita de lasanha"
