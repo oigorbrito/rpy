@@ -237,7 +237,25 @@ def test_missing_deterministic_date_is_insufficient_and_retryable() -> None:
     ]
 
 
-def test_unanchored_material_claim_is_not_evaluated_and_retryable() -> None:
+def test_unanchored_intrinsically_material_claim_is_retryable() -> None:
+    claim = MaterialClaim(
+        claim_id="decisions:0",
+        claim_class="decision",
+        text="Houve decisão relevante sobre a controvérsia.",
+        evidence_refs=(f"m-{STEP_ID.hex}",),
+    )
+
+    verification = verify_material_claims([claim], _context())
+
+    assert verification["decisions:0"].status == "not_evaluated"
+    assert verification["decisions:0"].claim_class == "decision"
+    assert verification["decisions:0"].deterministic_fact_count == 0
+    assert verification_errors(verification) == [
+        "material claim was not evaluated: decisions:0"
+    ]
+
+
+def test_unanchored_narrative_current_status_remains_measured_without_retry() -> None:
     claim = MaterialClaim(
         claim_id="current_status",
         claim_class="current_status",
@@ -248,11 +266,7 @@ def test_unanchored_material_claim_is_not_evaluated_and_retryable() -> None:
     verification = verify_material_claims([claim], _context())
 
     assert verification["current_status"].status == "not_evaluated"
-    assert verification["current_status"].claim_class == "current_status"
-    assert verification["current_status"].deterministic_fact_count == 0
-    assert verification_errors(verification) == [
-        "material claim was not evaluated: current_status"
-    ]
+    assert verification_errors(verification) == []
 
 
 def test_generic_attention_can_remain_measured_not_evaluated_without_retry() -> None:
