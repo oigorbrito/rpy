@@ -721,10 +721,17 @@ async def _persist_summary(
         incoming_publishable = False
         if existing is not None and incoming_passed:
             if int(existing["secrecy_level"] or 0) > 0:
-                incoming_publishable = (
-                    model == RESTRICTED_MODEL
-                    and prompt_version == RESTRICTED_PROMPT_VERSION
-                    and structured_summary_document_is_canonical(structured_output)
+                incoming_publishable = is_restricted_local_summary(
+                    {
+                        "model": model,
+                        "prompt_version": prompt_version,
+                        "structured_output": structured_output,
+                    },
+                    process={
+                        "code": existing["process_code"],
+                        "class_name": existing["process_class_name"],
+                        "header": existing["process_header"],
+                    },
                 )
             else:
                 incoming_claim_evidence = [
@@ -833,7 +840,10 @@ async def _load_publishable_summary(
             SELECT ps.id, ps.validation, ps.model, ps.prompt_version, ps.generation_ms,
                    ps.usage, ps.cache_hit, ps.cost_usd, ps.structured_output,
                    COALESCE((ps.validation->>'passed')::boolean, false) AS passed,
-                   p.secrecy_level
+                   p.secrecy_level,
+                   p.code AS process_code,
+                   p.class_name AS process_class_name,
+                   p.header AS process_header
             FROM process_summaries ps
             JOIN processes p
               ON p.id = ps.process_id
