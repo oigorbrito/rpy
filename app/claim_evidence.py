@@ -7,8 +7,11 @@ from uuid import UUID
 
 import asyncpg
 
-from app.json_utils import decode_json_list
-from app.summary_output import structured_summary_document_is_canonical
+from app.json_utils import decode_json_list, decode_json_object
+from app.summary_output import (
+    structured_summary_document_is_canonical,
+    structured_summary_document_matches_process,
+)
 
 _EVIDENCE_REF_RE = re.compile(r"^[pma]-[0-9a-f]{32}$")
 _CLAIM_ID_RE = re.compile(
@@ -271,6 +274,34 @@ def claim_evidence_is_complete(
         observed[claim_id] = item
 
     return set(observed) == set(expected)
+
+
+def claim_evidence_is_publishable(
+    structured_output: dict[str, Any] | None,
+    claim_evidence: list[dict[str, Any]],
+    *,
+    process: Any,
+) -> bool:
+    try:
+        context = {
+            "code": process["code"],
+            "class_name": process["class_name"],
+            "court": process["court"],
+            "header": decode_json_object(
+                process["header"],
+                label="summary process header",
+            ),
+            "parties": decode_json_list(
+                process["parties"],
+                label="summary process parties",
+            ),
+        }
+    except (KeyError, TypeError, ValueError):
+        return False
+    return (
+        claim_evidence_is_complete(structured_output, claim_evidence)
+        and structured_summary_document_matches_process(structured_output, context)
+    )
 
 
 async def replace_summary_claim_evidence(
