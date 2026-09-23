@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from app.auth import configured_bearer_tokens
 from app.claim_evidence import (
     build_material_claims,
-    claim_evidence_is_complete,
+    claim_evidence_is_publishable,
     evidence_catalog,
     load_summary_claim_evidence,
     validate_claim_evidence,
@@ -45,7 +45,8 @@ async def seed_demo(database_url: str) -> None:
 
             existing = await conn.fetchrow(
                 """
-                SELECT p.id, p.current_version_id
+                SELECT p.id, p.code, p.class_name, p.court, p.header, p.parties,
+                       p.current_version_id
                 FROM processes p
                 JOIN tenant_processes tp ON tp.process_id = p.id
                 WHERE tp.tenant_id = $1 AND p.code = $2
@@ -74,8 +75,10 @@ async def seed_demo(database_url: str) -> None:
                         summary_row["structured_output"],
                         label="demo structured summary",
                     )
-                    summary_ok = claim_evidence_is_complete(
-                        structured_output, claim_evidence
+                    summary_ok = claim_evidence_is_publishable(
+                        structured_output,
+                        claim_evidence,
+                        process=existing,
                     )
                 if summary_ok:
                     print("RPY LOCAL DEMO: READY")
