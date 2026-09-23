@@ -45,6 +45,17 @@ def test_datajud_config_requires_explicit_authorized_use(monkeypatch) -> None:
         datajud_config()
 
 
+@pytest.mark.parametrize("value", ["nan", "inf", "-inf"])
+def test_datajud_config_rejects_non_finite_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+    value: str,
+) -> None:
+    monkeypatch.setenv("DATAJUD_TIMEOUT_SECONDS", value)
+
+    with pytest.raises(RuntimeError, match="finite number greater than zero"):
+        datajud_config()
+
+
 class _Response:
     def __init__(self, payload: dict) -> None:
         self._raw = json.dumps(payload).encode("utf-8")
