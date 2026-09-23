@@ -205,7 +205,7 @@ async def get_process_summary(code: str, request: Request) -> dict:
         )
         if summary is not None:
             if is_restricted:
-                if not is_restricted_local_summary(summary):
+                if not is_restricted_local_summary(summary, process=process):
                     summary = None
             else:
                 claim_evidence = await load_summary_claim_evidence(
