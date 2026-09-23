@@ -17,7 +17,6 @@ ALTER TABLE process_summary_claim_sources
             )
         ),
     ADD COLUMN IF NOT EXISTS verification_reason TEXT,
-    ADD COLUMN IF NOT EXISTS evidence_excerpt TEXT,
     ADD COLUMN IF NOT EXISTS evidence_excerpt_sha256 TEXT
         CHECK (
             evidence_excerpt_sha256 IS NULL
@@ -57,3 +56,17 @@ CREATE INDEX IF NOT EXISTS idx_process_summary_claims_verification
 
 CREATE INDEX IF NOT EXISTS idx_process_summary_claim_sources_verification
     ON process_summary_claim_sources (summary_id, verification_status);
+
+CREATE TABLE IF NOT EXISTS process_summary_claim_evidence_excerpts (
+    claim_row_id UUID NOT NULL,
+    evidence_ref TEXT NOT NULL,
+    evidence_excerpt TEXT NOT NULL CHECK (length(evidence_excerpt) > 0),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (claim_row_id, evidence_ref),
+    FOREIGN KEY (claim_row_id, evidence_ref)
+        REFERENCES process_summary_claim_sources (claim_row_id, evidence_ref)
+        ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_process_summary_claim_evidence_excerpts_claim
+    ON process_summary_claim_evidence_excerpts (claim_row_id);
