@@ -116,7 +116,7 @@ A resposta direta do provider não é o Markdown publicado. Ela deve preencher s
 - current_status: último estado processual comprovável, sem previsão.
 - attention: uma ou mais limitações, conflitos ou pontos objetivos; quando não houver divergência material, use formulação factual curta sem recomendação.
 - decisions, deadlines, related_processes e attachments: listas condicionais; use lista vazia quando não houver evidência suficiente.
-- claims: provenance obrigatória para synthesis, current_status e para cada item de timeline, decisions, deadlines, related_processes e attachments.
+- claims: provenance obrigatória para synthesis, current_status e para cada item de timeline, attention, decisions, deadlines, related_processes e attachments.
 - claim_id deve seguir exatamente a identidade determinística do campo: synthesis, current_status ou <campo>:<índice>, usando índice zero-based.
 - O text de cada claim deve ser idêntico ao conteúdo textual do campo correspondente.
 - Use exclusivamente evidence_ref fornecidos pela aplicação no próprio contexto. Não invente evidence_ref, não derive novos ids e não use refs de fontes que não foram fornecidas.
@@ -151,7 +151,7 @@ Antes de responder, faça uma verificação silenciosa:
 8. Cada campo contém somente conteúdo factual, sem headings, tags ou instruções embutidas?
 9. Em caso de sigilo, o texto ficou estritamente limitado ao cabeçalho permitido e classe?
 10. Alguma afirmação foi adicionada apenas porque seria juridicamente comum? Se sim, remova-a.
-11. synthesis, current_status e cada item material possuem claim correspondente com texto idêntico e evidence_refs fornecidos pela aplicação?
+11. synthesis, current_status e cada item de timeline, attention, decisions, deadlines, related_processes e attachments possuem claim correspondente com texto idêntico e evidence_refs fornecidos pela aplicação?
 </controle_de_qualidade>
 
 <regras_de_estilo>
