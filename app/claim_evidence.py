@@ -248,10 +248,15 @@ def claim_evidence_is_complete(
         claim_id = str(item.get("claim_id") or "").strip()
         text = str(item.get("text") or "").strip()
         refs = item.get("evidence_refs")
+        claim_class = item.get("claim_class")
         if (
             claim_id not in expected
             or claim_id in observed
             or text != expected[claim_id]
+            or (
+                claim_class is not None
+                and str(claim_class) != _claim_class(claim_id)
+            )
             or not isinstance(refs, list)
             or not refs
             or any(
