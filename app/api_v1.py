@@ -97,6 +97,26 @@ def _summary_representation(
     return {**rendered, "summary": public_summary}
 
 
+def _public_claim_evidence(
+    claim_evidence: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    rendered: list[dict[str, Any]] = []
+    for item in claim_evidence:
+        if not isinstance(item, dict):
+            continue
+        public_item = dict(item)
+        public_sources: list[dict[str, Any]] = []
+        for source in item.get("sources", []):
+            if not isinstance(source, dict):
+                continue
+            public_source = dict(source)
+            public_source.pop("evidence_excerpt", None)
+            public_sources.append(public_source)
+        public_item["sources"] = public_sources
+        rendered.append(public_item)
+    return rendered
+
+
 def _summary_usage(row: asyncpg.Record) -> dict[str, Any] | None:
     if row["model"] is None:
         return None
@@ -321,7 +341,11 @@ async def _job_payload(
         version_id=row["version_id"],
         summary_id=row["summary_id"] if publishable else None,
     )
-    public_claim_evidence = claim_evidence if publishable and not is_secret else []
+    public_claim_evidence = (
+        _public_claim_evidence(claim_evidence)
+        if publishable and not is_secret
+        else []
+    )
     payload = {
         "job_id": str(row["id"]),
         "poll_url": f"/v1/resumos/{row['id']}",
@@ -415,7 +439,9 @@ async def _latest_summary_payload(
         "flags": flags,
         "validation": validation,
         "claim_evidence": (
-            [] if int(process["secrecy_level"] or 0) > 0 else claim_evidence
+            []
+            if int(process["secrecy_level"] or 0) > 0
+            else _public_claim_evidence(claim_evidence)
         ),
         "format": response_format,
         "iaSummary": _summary_representation(
@@ -423,7 +449,7 @@ async def _latest_summary_payload(
             structured_output=summary["structured_output"],
             response_format=response_format,
             hide_claim_evidence=is_secret,
-            claim_evidence=claim_evidence,
+            claim_evidence=_public_claim_evidence(claim_evidence),
         ),
     }
 
