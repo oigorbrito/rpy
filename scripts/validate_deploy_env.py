@@ -383,14 +383,18 @@ def _validate_datajud(values: dict[str, str], errors: list[str]) -> None:
     if not base_url.startswith("https://"):
         errors.append("DATAJUD_BASE_URL must use https")
 
-    raw_timeout = str(values.get("DATAJUD_TIMEOUT_SECONDS") or "20").strip()
-    try:
-        timeout = float(raw_timeout)
-    except ValueError:
-        errors.append("DATAJUD_TIMEOUT_SECONDS must be numeric")
-        return
-    if timeout <= 0:
-        errors.append("DATAJUD_TIMEOUT_SECONDS must be greater than zero")
+    _validate_positive_numeric(
+        values,
+        errors,
+        key="DATAJUD_TIMEOUT_SECONDS",
+        default="20",
+        convert=float,
+        invalid_message="DATAJUD_TIMEOUT_SECONDS must be numeric",
+        non_positive_message=(
+            "DATAJUD_TIMEOUT_SECONDS must be a finite number greater than zero"
+        ),
+        require_finite=True,
+    )
 
 
 
