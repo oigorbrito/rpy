@@ -88,16 +88,19 @@ async def test_judit_to_summary_end_to_end(monkeypatch: pytest.MonkeyPatch) -> N
 - Tribunal: TJRS
 </ProcessHeader>
 
-## Síntese
 O processo contém registros de distribuição, citação e sentença.
 
-## Linha do tempo relevante
+## Classe
+Procedimento Comum
+
+## Assuntos
+- Obrigação
+
+## Movimentações
 - Distribuição inicial.
 - Citação registrada.
 - Sentença registrada.
-
-## Situação atual
-O último movimento fornecido é uma sentença.
+- Estado atual: o último movimento fornecido é uma sentença.
 
 ## Pontos de atenção
 Nenhuma divergência objetiva identificada.

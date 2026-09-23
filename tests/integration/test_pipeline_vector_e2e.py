@@ -129,16 +129,19 @@ async def test_large_process_uses_offline_embeddings_and_hybrid_retrieval(
 - Tribunal: TJRS
 </ProcessHeader>
 
-## Síntese
 O processo possui histórico extenso e foi recuperado por seleção híbrida offline.
 
-## Linha do tempo relevante
+## Classe
+Procedimento Comum
+
+## Assuntos
+- Obrigação
+
+## Movimentações
 - Ajuizamento registrado.
 - Decisão intermediária registrada.
 - Sentença registrada.
-
-## Situação atual
-O último movimento fornecido integra a versão processual atual.
+- Estado atual: o último movimento fornecido integra a versão processual atual.
 
 ## Pontos de atenção
 Nenhuma divergência objetiva identificada.

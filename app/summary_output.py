@@ -4,6 +4,8 @@ import json
 import re
 from typing import Any
 
+from app.summary_contract import CONDITIONAL_SUMMARY_FIELDS
+
 SUMMARY_OUTPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -78,13 +80,7 @@ _HEADER_FIELDS = (
     ("city", "Cidade"),
     ("amount", "Valor"),
 )
-_LIST_FIELDS = (
-    ("timeline", "Linha do tempo relevante"),
-    ("decisions", "Decisões"),
-    ("deadlines", "Prazos em curso"),
-    ("related_processes", "Processos relacionados"),
-    ("attachments", "Anexos"),
-)
+_LIST_FIELDS = (("timeline", "Movimentações"), *CONDITIONAL_SUMMARY_FIELDS)
 _REQUIRED_KEYS = frozenset(SUMMARY_OUTPUT_SCHEMA["required"])
 _DOCUMENT_KEYS = frozenset({"schema_version", "process", "summary"})
 _PROCESS_KEYS = frozenset({"cnj", "class_name", "court", "header", "parties"})
@@ -319,6 +315,21 @@ def structured_summary_document(
     }
 
 
+def _subject_names(context: dict[str, Any]) -> list[str]:
+    subjects = context.get("subjects")
+    if not isinstance(subjects, list):
+        return []
+    names: list[str] = []
+    for item in subjects:
+        if isinstance(item, dict):
+            name = _inline(item.get("name") or item.get("label") or item.get("description"))
+        else:
+            name = _inline(item)
+        if name:
+            names.append(name)
+    return names
+
+
 def render_structured_summary(payload: dict[str, Any], context: dict[str, Any]) -> str:
     lines = ["# Resumo do processo", "", '<ProcessHeader className="process-header">']
     lines.append(f"- Processo: {_inline(context.get('code'))}")
@@ -337,25 +348,40 @@ def render_structured_summary(payload: dict[str, Any], context: dict[str, Any]) 
             lines.append(f"- {label}: {rendered}")
     lines.append("</ProcessHeader>")
 
+    lines.extend(["", payload["synthesis"]])
+
     parties = context.get("parties")
-    if isinstance(parties, list):
-        party_names = [
+    party_names = (
+        [
             _inline(item.get("name") or item.get("nome"))
             for item in parties
             if isinstance(item, dict)
         ]
-        party_names = [name for name in party_names if name]
-        if party_names:
-            lines.extend(["", "## Partes", *(f"- {name}" for name in party_names)])
+        if isinstance(parties, list)
+        else []
+    )
+    party_names = [name for name in party_names if name]
+    lines.extend(["", "## Partes"])
+    lines.extend((f"- {name}" for name in party_names) if party_names else ["Não informado."])
 
-    lines.extend(["", "## Síntese", payload["synthesis"]])
-    _append_list(lines, "Linha do tempo relevante", payload["timeline"])
-    lines.extend(["", "## Situação atual", payload["current_status"]])
+    lines.extend(["", "## Classe", class_name or "Não informado."])
+
+    subject_names = _subject_names(context)
+    lines.extend(["", "## Assuntos"])
+    lines.extend((f"- {name}" for name in subject_names) if subject_names else ["Não informado."])
+
+    lines.extend(["", "## Movimentações"])
+    if payload["timeline"]:
+        lines.extend(f"- {item}" for item in payload["timeline"])
+    else:
+        lines.append("Nenhuma movimentação relevante selecionada.")
+    lines.extend(["", f"Estado atual: {payload['current_status']}"])
+
     lines.extend(
         ["", "## Pontos de atenção", *(f"- {item}" for item in payload["attention"])]
     )
 
-    for key, title in _LIST_FIELDS[1:]:
+    for key, title in CONDITIONAL_SUMMARY_FIELDS:
         _append_list(lines, title, payload[key])
 
     return "\n".join(lines).strip()

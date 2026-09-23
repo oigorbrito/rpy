@@ -54,6 +54,7 @@ def _context() -> dict:
         "court": "TJRS",
         "header": {"instance": 1, "area": "Cível"},
         "parties": [{"name": "Maria da Silva"}],
+        "subjects": [{"name": "Responsabilidade civil"}],
     }
 
 
@@ -86,10 +87,53 @@ def test_renderer_owns_document_structure_and_source_identity() -> None:
     assert "- Classe: Procedimento Comum" in rendered
     assert "- Tribunal: TJRS" in rendered
     assert "## Partes\n- Maria da Silva" in rendered
-    assert "## Síntese\nSíntese factual." in rendered
-    assert "## Situação atual\nSituação atual registrada." in rendered
+    assert "\nSíntese factual.\n" in rendered
+    assert "## Classe\nProcedimento Comum" in rendered
+    assert "## Assuntos\n- Responsabilidade civil" in rendered
+    assert "## Movimentações\n- Movimento relevante registrado." in rendered
+    assert "Estado atual: Situação atual registrada." in rendered
     assert "## Pontos de atenção" in rendered
+    headings = [
+        line.removeprefix("## ")
+        for line in rendered.splitlines()
+        if line.startswith("## ")
+    ]
+    assert headings == [
+        "Partes",
+        "Classe",
+        "Assuntos",
+        "Movimentações",
+        "Pontos de atenção",
+    ]
 
+
+
+
+def test_renderer_keeps_attention_before_conditional_sections() -> None:
+    payload = _payload()
+    payload["decisions"] = ["Sentença registrada."]
+    payload["deadlines"] = ["Prazo registrado."]
+    payload["related_processes"] = ["Processo relacionado registrado."]
+    payload["attachments"] = ["Anexo lido."]
+
+    rendered = render_structured_summary(payload, _context())
+    headings = [
+        line.removeprefix("## ")
+        for line in rendered.splitlines()
+        if line.startswith("## ")
+    ]
+
+    assert headings == [
+        "Partes",
+        "Classe",
+        "Assuntos",
+        "Movimentações",
+        "Pontos de atenção",
+        "Decisões",
+        "Prazos em curso",
+        "Processos relacionados",
+        "Anexos",
+    ]
 
 def test_model_cannot_create_new_heading_or_jsx_control_line() -> None:
     payload = _payload()
@@ -106,8 +150,8 @@ def test_model_cannot_create_new_heading_or_jsx_control_line() -> None:
         for line in rendered.splitlines()
     ) == 1
     assert sum(line.startswith("## ") for line in rendered.splitlines()) == 5
-    assert "## Síntese\n\u2060## Receita de lasanha" in rendered
-    assert "## Situação atual\n\u2060<ProcessHeader" in rendered
+    assert "\n\u2060## Receita de lasanha\n" in rendered
+    assert "Estado atual: \u2060<ProcessHeader" in rendered
 
 
 def test_parser_requires_nonempty_attention() -> None:
