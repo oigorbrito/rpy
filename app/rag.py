@@ -728,11 +728,14 @@ async def _persist_summary(
                     structured_output,
                     incoming_claim_evidence,
                 )
-        replace_unpublishable = bool(
-            existing is not None
-            and incoming_publishable
-            and not await _summary_row_is_publishable(conn, existing)
-        )
+        replace_approved = False
+        if existing is not None and bool(existing["passed"]) and incoming_publishable:
+            existing_publishable = await _summary_row_is_publishable(conn, existing)
+            replace_approved = bool(
+                not existing_publishable
+                or existing["prompt_version"] != prompt_version
+                or existing["model"] != model
+            )
 
         row = await conn.fetchrow(
             """
@@ -758,17 +761,6 @@ async def _persist_summary(
                           created_at = NOW()
             WHERE $13::boolean
                OR COALESCE((process_summaries.validation->>'passed')::boolean, false) = false
-               OR (
-                    process_summaries.structured_output IS NULL
-                    AND EXCLUDED.structured_output IS NOT NULL
-               )
-               OR (
-                    COALESCE((EXCLUDED.validation->>'passed')::boolean, false) = true
-                    AND (
-                        process_summaries.prompt_version IS DISTINCT FROM EXCLUDED.prompt_version
-                        OR process_summaries.model IS DISTINCT FROM EXCLUDED.model
-                    )
-               )
             RETURNING id
             """,
             process_id,
@@ -783,7 +775,7 @@ async def _persist_summary(
             cost_usd,
             json.dumps(unicode_security_flags or []),
             json.dumps(structured_output) if structured_output is not None else None,
-            replace_unpublishable,
+            replace_approved,
         )
         if row is None:
             return False
