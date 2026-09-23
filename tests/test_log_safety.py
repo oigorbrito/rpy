@@ -1,4 +1,5 @@
 import pytest
+from hypothesis import given, settings, strategies as st
 
 from app.log_safety import REDACTED, sanitize_error_message
 
@@ -98,3 +99,43 @@ def test_sanitize_error_message_redacts_authorization_schemes(scheme: str) -> No
 
     assert "opaque-secret-credential" not in rendered
     assert f"Authorization: {scheme} {REDACTED}" in rendered
+
+
+_CREDENTIAL_ALPHABET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+
+
+@settings(max_examples=120, deadline=None)
+@given(
+    key=st.sampled_from(("api_key", "api-key", "token", "access_token", "password", "secret")),
+    key_quote=st.sampled_from(("", '"', "'")),
+    value_quote=st.sampled_from(("", '"', "'")),
+    secret=st.text(alphabet=_CREDENTIAL_ALPHABET, min_size=12, max_size=48),
+)
+def test_sanitize_error_message_redacts_structured_key_value_credentials(
+    key: str,
+    key_quote: str,
+    value_quote: str,
+    secret: str,
+) -> None:
+    rendered = sanitize_error_message(
+        f"{key_quote}{key}{key_quote}: {value_quote}{secret}{value_quote}"
+    )
+
+    assert secret not in rendered  # nosec B101
+    assert REDACTED in rendered  # nosec B101
+
+
+@settings(max_examples=100, deadline=None)
+@given(
+    prefix=st.sampled_from(("sk-proj-", "sk-svcacct-", "sk-ant-api03-", "sk-")),
+    suffix=st.text(alphabet=_CREDENTIAL_ALPHABET, min_size=12, max_size=48),
+)
+def test_sanitize_error_message_redacts_standalone_sk_token_families(
+    prefix: str,
+    suffix: str,
+) -> None:
+    token = prefix + suffix
+    rendered = sanitize_error_message(f"provider exception credential={token}")
+
+    assert token not in rendered  # nosec B101
+    assert REDACTED in rendered  # nosec B101

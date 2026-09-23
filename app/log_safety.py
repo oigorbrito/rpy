@@ -33,12 +33,19 @@ _URI_CREDENTIALS_RE = re.compile(r"(?P<scheme>[a-zA-Z][a-zA-Z0-9+.-]*://)(?P<use
 _AUTHORIZATION_RE = re.compile(
     r"(?i)(authorization\s*[:=]\s*(?:bearer|apikey|basic|token|digest|negotiate|oauth)\s+)([^\s,;]+)"
 )
-_QUERY_SECRET_RE = re.compile(
-    r"(?i)(\b(?:api[_-]?key|token|access[_-]?token|password|secret)\s*[=:]\s*)([^\s,;&]+)"
+_STRUCTURED_SECRET_RE = re.compile(
+    r"""(?ix)
+    (?P<prefix>["']?(?:api[_-]?key|token|access[_-]?token|password|secret)["']?\s*[=:]\s*)
+    (?P<quote>["']?)
+    (?P<secret>[^"'\s,;&}\]]+)
+    (?P=quote)
+    """
 )
 # Redact application/provider API keys even when not configured in env or when
 # appearing without authorization headers or query parameter names.
-_API_KEY_TOKEN_RE = re.compile(r"\b(?:sk_(?:live|test)|sk-ant-api)[a-zA-Z0-9_-]+\b")
+_API_KEY_TOKEN_RE = re.compile(
+    r"\b(?:sk_(?:live|test)_[a-zA-Z0-9_-]+|sk-[a-zA-Z0-9_-]{12,})\b"
+)
 
 
 def _configured_bearer_token_keys(value: str) -> list[str]:
@@ -81,7 +88,13 @@ def sanitize_error_message(value: object, *, max_chars: int = MAX_ERROR_MESSAGE_
     text = _AUTHORIZATION_RE.sub(
         lambda match: f"{match.group(1)}{REDACTED}", text
     )
-    text = _QUERY_SECRET_RE.sub(lambda match: f"{match.group(1)}{REDACTED}", text)
+    text = _STRUCTURED_SECRET_RE.sub(
+        lambda match: (
+            f"{match.group('prefix')}{match.group('quote')}"
+            f"{REDACTED}{match.group('quote')}"
+        ),
+        text,
+    )
     text = _API_KEY_TOKEN_RE.sub(REDACTED, text)
 
     if max_chars <= 0:
