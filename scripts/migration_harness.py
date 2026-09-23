@@ -163,8 +163,8 @@ def rag_invariant_violations() -> list[str]:
         errors.append("cacheable system prompt must live in app/prompts.py")
     if "secrecy_level" not in rag_text or 'base["secrecy_level"] > 0' not in rag_text:
         errors.append("secret cases must be truncated before generation")
-    if "SECRET_MODEL = \"local-deterministic\"" not in rag_text:
-        errors.append("secret cases must retain deterministic local generation")
+    if "RESTRICTED_MODEL = \"local-deterministic\"" not in rag_text:
+        errors.append("restricted cases must retain deterministic local generation")
     if "class\\s*=" not in validation_text:
         errors.append("validator must reject class= in JSX")
     if "LEXICAL_WEIGHT = 0.5" not in retrieval_text or "VECTOR_WEIGHT = 0.5" not in retrieval_text:
