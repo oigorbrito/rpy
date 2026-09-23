@@ -85,6 +85,11 @@ def test_empty_steps_warning_must_be_inside_attention_section() -> None:
                 "text": "Situação atual registrada.",
                 "evidence_refs": ["p-00000000000000000000000000000001"],
             },
+            {
+                "claim_id": "attention:0",
+                "text": "Nenhuma divergência objetiva identificada.",
+                "evidence_refs": ["p-00000000000000000000000000000001"],
+            },
         ],
     },
     }
@@ -140,6 +145,11 @@ async def test_empty_steps_warning_is_sent_to_single_correction_attempt(monkeypa
             {
                 "claim_id": "current_status",
                 "text": "Situação atual registrada.",
+                "evidence_refs": ["p-00000000000000000000000000000001"],
+            },
+            {
+                "claim_id": "attention:0",
+                "text": "Nenhuma divergência objetiva identificada.",
                 "evidence_refs": ["p-00000000000000000000000000000001"],
             },
         ],
