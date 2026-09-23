@@ -87,6 +87,42 @@ def test_movement_date_anchor_is_supported() -> None:
     assert result.relations[0].status == "supported"
 
 
+def test_iso_timestamp_uses_sao_paulo_date_without_accepting_raw_utc_day() -> None:
+    context = _context()
+    context["steps"][0]["occurred_at"] = "2026-09-10T01:30:00+00:00"
+    context["steps"][0]["text"] = "Audiência registrada."
+
+    wrong_day = MaterialClaim(
+        claim_id="timeline:0",
+        claim_class="procedural_event",
+        text="Audiência registrada em 10/09/2026.",
+        evidence_refs=(f"m-{STEP_ID.hex}",),
+    )
+    local_day = MaterialClaim(
+        claim_id="timeline:0",
+        claim_class="procedural_event",
+        text="Audiência registrada em 09/09/2026.",
+        evidence_refs=(f"m-{STEP_ID.hex}",),
+    )
+
+    assert verify_material_claims([wrong_day], context)["timeline:0"].status == "insufficient"
+    assert verify_material_claims([local_day], context)["timeline:0"].status == "supported"
+
+
+def test_known_party_anchor_handles_punctuation_in_claim_and_process_json() -> None:
+    claim = MaterialClaim(
+        claim_id="current_status",
+        claim_class="current_status",
+        text="Maria da Silva, parte autora, consta no processo.",
+        evidence_refs=(process_evidence_ref(VERSION_ID),),
+    )
+
+    result = verify_material_claims([claim], _context())["current_status"]
+
+    assert result.status == "supported"
+    assert result.deterministic_fact_count == 1
+
+
 def test_missing_deterministic_date_is_insufficient_and_retryable() -> None:
     claim = MaterialClaim(
         claim_id="timeline:0",
