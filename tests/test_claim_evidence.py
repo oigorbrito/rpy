@@ -174,9 +174,25 @@ def _structured_output(
         summary["claims"] = [dict(item) for item in claims]
     return {
         "schema_version": 2,
-        "process": {},
+        "process": {
+            "cnj": "0000000-00.2026.8.21.0001",
+            "class_name": None,
+            "court": None,
+            "header": {},
+            "parties": [],
+        },
         "summary": summary,
     }
+
+
+def test_publication_completeness_rejects_noncanonical_document() -> None:
+    payload = _payload()
+    refs = [movement_evidence_ref(STEP_ID)]
+    complete = build_material_claims(payload, evidence_refs=refs)
+    structured = _structured_output(payload, complete)
+
+    tampered = {**structured, "debug": "must not publish"}
+    assert claim_evidence_is_complete(tampered, complete) is False
 
 
 def test_publication_completeness_requires_exact_claim_coverage() -> None:
