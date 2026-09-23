@@ -12,6 +12,7 @@ from app.api import app
 from app.api_key_auth import api_key_hash_and_fingerprint
 from app.db import create_pool
 from app.migrations import migrate
+from app.summary_output import structured_summary_document
 from app.summary_policy import RESTRICTED_MODEL, RESTRICTED_PROMPT_VERSION
 from app.public_lifecycle import (
     create_or_get_summary_request,
@@ -481,6 +482,56 @@ async def test_v1_idempotency_states_authorization_and_sanitized_sources(monkeyp
             assert "source_payload" not in rendered_sources
 
             async with pool.acquire() as conn:
+                original_structured_output = await conn.fetchval(
+                    "SELECT structured_output FROM process_summaries WHERE id=$1",
+                    summary_id,
+                )
+                await conn.execute(
+                    """
+                    UPDATE process_summaries
+                    SET structured_output = jsonb_set(
+                        structured_output,
+                        '{process,parties}',
+                        '[{"name":"PARTE INJETADA"}]'::jsonb,
+                        true
+                    )
+                    WHERE id=$1
+                    """,
+                    summary_id,
+                )
+
+            tampered_job = await client.get(
+                f"/v1/resumos/{completed_request.id}", headers=auth_a
+            )
+            assert tampered_job.status_code == 200
+            assert tampered_job.json()["iaSummary"] is None
+            assert tampered_job.json()["claim_evidence"] == []
+            assert all(
+                "used_for_summary" not in item
+                for item in tampered_job.json()["sources"]
+            )
+
+            tampered_latest = await client.get(
+                f"/v1/processos/{other_code}/resumo?format=json", headers=auth_a
+            )
+            assert tampered_latest.status_code == 404
+
+            tampered_sources = await client.get(
+                f"/v1/processos/{other_code}/fontes", headers=auth_a
+            )
+            assert tampered_sources.status_code == 200
+            assert tampered_sources.json()["claim_evidence"] == []
+            assert all(
+                "used_for_summary" not in item
+                for item in tampered_sources.json()["sources"]
+            )
+
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE process_summaries SET structured_output=$2::jsonb WHERE id=$1",
+                    summary_id,
+                    json.dumps(original_structured_output),
+                )
                 await conn.execute(
                     "UPDATE processes SET secrecy_level=1 WHERE id=$1",
                     process_id,
@@ -564,16 +615,40 @@ async def test_v1_idempotency_states_authorization_and_sanitized_sources(monkeyp
                     "UPDATE processes SET secrecy_level=1 WHERE id=$1",
                     process_id,
                 )
+                restricted_structured_output = structured_summary_document(
+                    {
+                        "synthesis": "Os detalhes processuais foram restringidos por sigilo.",
+                        "timeline": [],
+                        "current_status": (
+                            "O contexto público disponível está limitado pelos dados "
+                            "permitidos para processo sigiloso."
+                        ),
+                        "attention": ["Processo com detalhes restringidos por sigilo."],
+                        "decisions": [],
+                        "deadlines": [],
+                        "related_processes": [],
+                        "attachments": [],
+                    },
+                    {
+                        "code": other_code,
+                        "class_name": "Procedimento Comum",
+                        "court": None,
+                        "header": {},
+                        "parties": [],
+                    },
+                )
                 await conn.execute(
                     """
                     UPDATE process_summaries
-                    SET markdown=$2, model=$3, prompt_version=$4
+                    SET markdown=$2, model=$3, prompt_version=$4,
+                        structured_output=$5::jsonb
                     WHERE id=$1
                     """,
                     summary_id,
                     "# Resumo sigiloso local",
                     RESTRICTED_MODEL,
                     RESTRICTED_PROMPT_VERSION,
+                    json.dumps(restricted_structured_output),
                 )
                 await conn.execute(
                     "DELETE FROM process_summary_claims WHERE summary_id=$1",
