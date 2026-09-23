@@ -59,6 +59,7 @@ from app.summary_policy import (
     RESTRICTED_MODEL,
     RESTRICTED_PROMPT_VERSION,
     is_restricted_local_summary,
+    restricted_public_header,
 )
 from app.tasks import PermanentTaskError, task
 from app.tpu_glossary import resolve_process_tpu_definitions
@@ -267,7 +268,7 @@ async def _load_context(
             "code": base["code"],
             "class_name": base["class_name"],
             "secrecy_level": base["secrecy_level"],
-            "header": base["header"],
+            "header": restricted_public_header(base["header"]),
             "validation_parties": base["parties"],
             "parties": [],
             "representatives": [],
@@ -653,7 +654,14 @@ async def _summary_row_is_publishable(
     if not bool(row["passed"]):
         return False
     if int(row["secrecy_level"] or 0) > 0:
-        return is_restricted_local_summary(row)
+        return is_restricted_local_summary(
+            row,
+            process={
+                "code": row["process_code"],
+                "class_name": row["process_class_name"],
+                "header": row["process_header"],
+            },
+        )
 
     claim_evidence = await load_summary_claim_evidence(
         conn, summary_id=row["id"]
@@ -697,7 +705,10 @@ async def _persist_summary(
                    ps.model,
                    ps.prompt_version,
                    COALESCE((ps.validation->>'passed')::boolean, false) AS passed,
-                   p.secrecy_level
+                   p.secrecy_level,
+                   p.code AS process_code,
+                   p.class_name AS process_class_name,
+                   p.header AS process_header
             FROM process_summaries ps
             JOIN processes p ON p.id = ps.process_id
             WHERE ps.process_id = $1 AND ps.version_id = $2
