@@ -110,6 +110,11 @@ def test_gap_warning_must_appear_inside_attention_section() -> None:
                 "text": "Situação atual registrada.",
                 "evidence_refs": ["p-00000000000000000000000000000001"],
             },
+            {
+                "claim_id": "attention:0",
+                "text": "Nenhuma divergência objetiva identificada.",
+                "evidence_refs": ["p-00000000000000000000000000000001"],
+            },
         ],
     },
     }
