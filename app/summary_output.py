@@ -4,6 +4,8 @@ import json
 import re
 from typing import Any
 
+from app.summary_contract import CONDITIONAL_SUMMARY_FIELDS
+
 SUMMARY_OUTPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -78,13 +80,7 @@ _HEADER_FIELDS = (
     ("city", "Cidade"),
     ("amount", "Valor"),
 )
-_LIST_FIELDS = (
-    ("timeline", "Movimentações"),
-    ("decisions", "Decisões"),
-    ("deadlines", "Prazos em curso"),
-    ("related_processes", "Processos relacionados"),
-    ("attachments", "Anexos"),
-)
+_LIST_FIELDS = (("timeline", "Movimentações"), *CONDITIONAL_SUMMARY_FIELDS)
 _REQUIRED_KEYS = frozenset(SUMMARY_OUTPUT_SCHEMA["required"])
 _DOCUMENT_KEYS = frozenset({"schema_version", "process", "summary"})
 _PROCESS_KEYS = frozenset({"cnj", "class_name", "court", "header", "parties"})
@@ -385,7 +381,7 @@ def render_structured_summary(payload: dict[str, Any], context: dict[str, Any]) 
         ["", "## Pontos de atenção", *(f"- {item}" for item in payload["attention"])]
     )
 
-    for key, title in _LIST_FIELDS[1:]:
+    for key, title in CONDITIONAL_SUMMARY_FIELDS:
         _append_list(lines, title, payload[key])
 
     return "\n".join(lines).strip()
