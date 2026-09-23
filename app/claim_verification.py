@@ -24,6 +24,12 @@ _AMOUNT_RE = re.compile(
     r"(?<!\w)(?:R\$|BRL)\s*-?\d(?:[\d.\s]*\d)?(?:,\d+)?(?!\w)",
     re.IGNORECASE,
 )
+_LABELED_AMOUNT_RE = re.compile(
+    r"\bvalor(?:\s+da\s+causa)?\s*"
+    r"(?::|é(?:\s+de)?|de)?\s*"
+    r"(?P<amount>-?\d{1,3}(?:\.\d{3})*(?:,\d+)?|-?\d+(?:[.,]\d+)?)",
+    re.IGNORECASE,
+)
 _SPACE_RE = re.compile(r"\s+")
 _SAO_PAULO = ZoneInfo("America/Sao_Paulo")
 _MAX_EXCERPT_CHARS = 4000
@@ -136,8 +142,12 @@ def _decimal_amount(value: Any) -> Decimal | None:
 
 def _amounts(text: str) -> frozenset[Decimal]:
     values: set[Decimal] = set()
-    for match in _AMOUNT_RE.finditer(text):
-        parsed = _decimal_amount(match.group(0))
+    candidates = [
+        *(match.group(0) for match in _AMOUNT_RE.finditer(text)),
+        *(match.group("amount") for match in _LABELED_AMOUNT_RE.finditer(text)),
+    ]
+    for candidate in candidates:
+        parsed = _decimal_amount(candidate)
         if parsed is not None:
             values.add(parsed)
     return frozenset(values)
