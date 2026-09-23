@@ -10,10 +10,12 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from app.datajud_enrichment import DataJudMetadata
+from app.http_safety import ResponseTooLargeError, read_bounded_response
 from app.judit import normalize_cnj
 
 DEFAULT_DATAJUD_BASE_URL = "https://api-publica.datajud.cnj.jus.br"
 DEFAULT_DATAJUD_TIMEOUT_SECONDS = 20.0
+DATAJUD_MAX_RESPONSE_BYTES = 1024 * 1024
 
 LookupStatus = Literal[
     "ok",
@@ -228,7 +230,15 @@ def _perform_lookup(
     )
     try:
         with urlopen(request, timeout=timeout_seconds) as response:  # noqa: S310
-            raw = response.read()
+            raw = read_bounded_response(
+                response,
+                max_bytes=DATAJUD_MAX_RESPONSE_BYTES,
+            )
+    except ResponseTooLargeError:
+        return DataJudLookupResult(
+            status="unavailable",
+            error_code="response_too_large",
+        )
     except HTTPError as exc:
         if exc.code in {401, 403}:
             return DataJudLookupResult(status="auth_error", error_code=f"http_{exc.code}")

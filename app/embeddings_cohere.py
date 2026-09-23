@@ -11,11 +11,13 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from app.embedding_spaces import COHERE_MODEL, COHERE_PROVIDER, EmbeddingSpace, assert_embedding_dimensions
+from app.http_safety import ResponseTooLargeError, read_bounded_response
 from app.providers import call_with_retries, embedding_settings
 
 COHERE_EMBED_URL = "https://api.cohere.com/v2/embed"
 COHERE_DOCUMENT_INPUT_TYPE = "search_document"
 COHERE_QUERY_INPUT_TYPE = "search_query"
+COHERE_EMBED_MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 
 
 @dataclass(slots=True)
@@ -99,7 +101,14 @@ def _post_embed_sync(
     )
     try:
         with urlopen(request, timeout=timeout_seconds) as response:
-            raw = response.read()
+            raw = read_bounded_response(
+                response,
+                max_bytes=COHERE_EMBED_MAX_RESPONSE_BYTES,
+            )
+    except ResponseTooLargeError as exc:
+        raise CohereProviderError(
+            "Cohere embed response exceeded safe size"
+        ) from exc
     except HTTPError as exc:
         raise CohereProviderError(
             f"Cohere embed request failed with HTTP {exc.code}",

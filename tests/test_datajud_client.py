@@ -63,8 +63,8 @@ class _Response:
     def __exit__(self, exc_type, exc, tb) -> None:
         return None
 
-    def read(self) -> bytes:
-        return self._raw
+    def read(self, amount: int = -1) -> bytes:
+        return self._raw if amount < 0 else self._raw[:amount]
 
 
 @pytest.mark.asyncio
@@ -195,3 +195,34 @@ async def test_secret_lookup_skips_before_invalid_runtime_config(monkeypatch) ->
     )
 
     assert result.status == "skipped_secrecy"
+
+
+@pytest.mark.asyncio
+async def test_datajud_rejects_oversized_response_before_decode(monkeypatch) -> None:
+    class OversizedResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def read(self, amount: int = -1) -> bytes:
+            if amount != client.DATAJUD_MAX_RESPONSE_BYTES + 1:
+                raise AssertionError(f"unexpected read bound: {amount}")
+            return b"x" * amount
+
+    monkeypatch.setattr(client, "urlopen", lambda request, timeout: OversizedResponse())
+    result = await lookup_datajud_metadata(
+        code="0000000-00.2026.8.21.0001",
+        secrecy_level=0,
+        config=DataJudConfig(
+            enabled=True,
+            authorized_use=True,
+            api_key="synthetic-key",
+        ),
+    )
+
+    if result.status != "unavailable":
+        raise AssertionError(f"unexpected status: {result.status}")
+    if result.error_code != "response_too_large":
+        raise AssertionError(f"unexpected error code: {result.error_code}")
