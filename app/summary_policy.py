@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from app.json_utils import decode_json_object
-from app.summary_output import structured_summary_document_is_canonical
+from app.summary_output import structured_summary_document_matches_process
 
 RESTRICTED_MODEL = "local-deterministic"
 RESTRICTED_PROMPT_VERSION = "secret-summary-v1"
@@ -16,10 +16,6 @@ RESTRICTED_HEADER_FIELDS = (
     ("state", "Estado"),
     ("city", "Cidade"),
 )
-
-
-def _inline(value: Any) -> str:
-    return " ".join(str(value or "").split())
 
 
 def is_restricted_local_summary(
@@ -41,18 +37,18 @@ def is_restricted_local_summary(
             process["header"],
             label="restricted process header",
         )
-        expected_process = {
-            "cnj": _inline(process["code"]),
-            "class_name": _inline(process["class_name"]) or None,
+        restricted_context = {
+            "code": process["code"],
+            "class_name": process["class_name"],
             "court": None,
             "header": restricted_public_header(process_header),
             "parties": [],
         }
     except (KeyError, TypeError, ValueError):
         return False
-    return (
-        structured_summary_document_is_canonical(structured_output)
-        and structured_output["process"] == expected_process
+    return structured_summary_document_matches_process(
+        structured_output,
+        restricted_context,
     )
 
 
