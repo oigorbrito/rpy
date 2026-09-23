@@ -12,6 +12,7 @@ from app.webhook_security import (
     webhook_token_from_scope,
 )
 
+
 async def _run_middleware(scope: dict[str, Any]) -> dict[str, Any]:
     seen: dict[str, Any] = {}
 
@@ -21,9 +22,8 @@ async def _run_middleware(scope: dict[str, Any]) -> dict[str, Any]:
         seen["state"] = dict(inner_scope.get("state") or {})
 
     middleware = JuditWebhookSecretRedactionMiddleware(app)
-    seen = await _run_middleware(scope)
+    await middleware(scope, None, None)
     return seen
-
 
 
 @pytest.mark.asyncio
