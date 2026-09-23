@@ -34,6 +34,11 @@ def _context() -> dict:
                 "text": "Situação atual registrada.",
                 "evidence_refs": ["p-00000000000000000000000000000001"],
             },
+            {
+                "claim_id": "attention:0",
+                "text": "Nenhuma divergência objetiva identificada.",
+                "evidence_refs": ["p-00000000000000000000000000000001"],
+            },
         ],
     },
         "steps": [
