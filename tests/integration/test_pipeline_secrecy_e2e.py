@@ -217,7 +217,7 @@ async def test_secret_process_completes_locally_without_any_ai_provider(
 
             summary = await conn.fetchrow(
                 """
-                SELECT markdown, validation, model, prompt_version
+                SELECT markdown, structured_output, validation, model, prompt_version
                 FROM process_summaries
                 WHERE process_id = $1 AND version_id = $2
                 """,
@@ -229,6 +229,28 @@ async def test_secret_process_completes_locally_without_any_ai_provider(
             assert validation["passed"] is True
             assert summary["model"] == rag.RESTRICTED_MODEL == "local-deterministic"
             assert summary["prompt_version"] == rag.RESTRICTED_PROMPT_VERSION
+            assert rag.is_restricted_local_summary(summary) is True
+
+            await conn.execute(
+                """
+                UPDATE process_summaries
+                SET structured_output = structured_output || '{"debug":"must-not-publish"}'::jsonb
+                WHERE process_id = $1 AND version_id = $2
+                """,
+                process["id"],
+                process["current_version_id"],
+            )
+            tampered_summary = await conn.fetchrow(
+                """
+                SELECT structured_output, model, prompt_version
+                FROM process_summaries
+                WHERE process_id = $1 AND version_id = $2
+                """,
+                process["id"],
+                process["current_version_id"],
+            )
+            assert tampered_summary is not None
+            assert rag.is_restricted_local_summary(tampered_summary) is False
 
             markdown = summary["markdown"]
             assert "sigilo" in markdown.casefold()
