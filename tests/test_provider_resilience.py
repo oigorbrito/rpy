@@ -127,6 +127,44 @@ async def test_embedding_provider_connection_failure_is_bounded() -> None:
     assert calls == 2
 
 
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_provider_timeout_must_be_finite(value: float) -> None:
+    with pytest.raises(ValueError, match="timeout_seconds must be finite"):
+        providers.ProviderSettings(
+            timeout_seconds=value,
+            max_attempts=2,
+            retry_backoff_seconds=0,
+        ).validate()
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_provider_retry_backoff_must_be_finite(value: float) -> None:
+    with pytest.raises(ValueError, match="retry_backoff_seconds must be finite"):
+        providers.ProviderSettings(
+            timeout_seconds=1,
+            max_attempts=2,
+            retry_backoff_seconds=value,
+        ).validate()
+
+
+@pytest.mark.parametrize("value", ["nan", "inf", "-inf"])
+def test_provider_rejects_non_finite_worker_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+    value: str,
+) -> None:
+    monkeypatch.setenv("WORKER_TASK_TIMEOUT_SECONDS", value)
+
+    with pytest.raises(
+        ValueError,
+        match="WORKER_TASK_TIMEOUT_SECONDS must be finite",
+    ):
+        providers.ProviderSettings(
+            timeout_seconds=1,
+            max_attempts=2,
+            retry_backoff_seconds=0,
+        ).validate()
+
+
 def test_provider_clients_disable_sdk_retries(monkeypatch) -> None:
     captured: dict[str, dict] = {}
 
