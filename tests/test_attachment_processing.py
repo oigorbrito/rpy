@@ -7,10 +7,25 @@ from app.attachment_processing import (
     AttachmentProcessingLimits,
     chunk_attachment_text,
     AttachmentOCRConfig,
+    attachment_ocr_config,
     normalize_content_type,
     parse_image_attachment_ocr,
     parse_text_attachment,
 )
+
+
+@pytest.mark.parametrize("value", ["nan", "inf", "-inf"])
+def test_attachment_ocr_config_rejects_non_finite_pdf_scale(
+    monkeypatch: pytest.MonkeyPatch,
+    value: str,
+) -> None:
+    monkeypatch.setenv("ATTACHMENT_PDF_OCR_SCALE", value)
+
+    with pytest.raises(
+        RuntimeError,
+        match="ATTACHMENT_PDF_OCR_SCALE must be a finite number greater than zero",
+    ):
+        attachment_ocr_config()
 
 
 def test_content_type_normalization_strips_parameters():
