@@ -58,6 +58,9 @@ async def reconcile_generation_result(
                ps.prompt_version,
                COALESCE((ps.validation->>'passed')::boolean, false) AS passed,
                p.secrecy_level,
+               p.code,
+               p.class_name,
+               p.header,
                p.updated_at AS source_updated_at
         FROM process_summaries ps
         JOIN processes p
@@ -75,7 +78,7 @@ async def reconcile_generation_result(
     passed = False
     if row is not None and row["passed"] and result_passed:
         if int(row["secrecy_level"] or 0) > 0:
-            passed = is_restricted_local_summary(row)
+            passed = is_restricted_local_summary(row, process=row)
         else:
             claim_evidence = await load_summary_claim_evidence(
                 conn, summary_id=row["summary_id"]
