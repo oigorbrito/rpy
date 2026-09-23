@@ -230,6 +230,19 @@ def test_publication_completeness_requires_exact_declared_refs() -> None:
     assert claim_evidence_is_complete(structured, reversed_refs) is False
 
 
+def test_publication_completeness_rejects_mismatched_persisted_claim_class() -> None:
+    payload = _payload()
+    complete = build_material_claims(
+        payload,
+        evidence_refs=[movement_evidence_ref(STEP_ID)],
+    )
+    structured = _structured_output(payload, complete)
+    persisted = [dict(item) for item in complete]
+    persisted[0] = {**persisted[0], "claim_class": "decision"}
+
+    assert claim_evidence_is_complete(structured, persisted) is False
+
+
 def test_publication_completeness_rejects_legacy_or_duplicate_provenance() -> None:
     payload = _payload()
     refs = [movement_evidence_ref(STEP_ID)]
