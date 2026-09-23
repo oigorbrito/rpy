@@ -129,6 +129,20 @@ async def test_partial_used_source_loss_breaks_declared_claim_completeness() -> 
             process_id,
             version_id,
         )
+        attention_claim_id = await conn.fetchval(
+            """
+            INSERT INTO process_summary_claims (
+                summary_id, process_id, version_id,
+                claim_id, claim_class, claim_text
+            ) VALUES (
+                $1, $2, $3, 'attention:0', 'attention', 'Sem divergência material.'
+            )
+            RETURNING id
+            """,
+            summary_id,
+            process_id,
+            version_id,
+        )
         process_ref = _ref("p", version_id)
         movement_ref = _ref("m", step_id)
         await conn.executemany(
@@ -169,6 +183,16 @@ async def test_partial_used_source_loss_breaks_declared_claim_completeness() -> 
                     None,
                     0,
                 ),
+                (
+                    attention_claim_id,
+                    summary_id,
+                    process_id,
+                    version_id,
+                    process_ref,
+                    "process",
+                    None,
+                    0,
+                ),
             ],
         )
         structured_output = {
@@ -198,6 +222,11 @@ async def test_partial_used_source_loss_breaks_declared_claim_completeness() -> 
                     {
                         "claim_id": "current_status",
                         "text": "Situação.",
+                        "evidence_refs": [process_ref],
+                    },
+                    {
+                        "claim_id": "attention:0",
+                        "text": "Sem divergência material.",
                         "evidence_refs": [process_ref],
                     },
                 ],
