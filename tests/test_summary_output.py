@@ -8,6 +8,7 @@ from app.summary_output import (
     render_structured_summary,
     structured_summary_document,
     structured_summary_document_is_canonical,
+    structured_summary_document_matches_process,
 )
 
 
@@ -140,6 +141,23 @@ def test_json_document_uses_same_validated_payload_and_normalized_identity() -> 
     }
     assert document["summary"] == payload
     assert "internal" not in json.dumps(document, ensure_ascii=False)
+
+
+def test_persisted_document_process_projection_must_match_context() -> None:
+    context = _context()
+    document = structured_summary_document(_payload(), context)
+
+    assert structured_summary_document_matches_process(document, context) is True
+
+    tampered = {
+        **document,
+        "process": {
+            **document["process"],
+            "parties": [{"name": "Outra parte"}],
+        },
+    }
+    assert structured_summary_document_is_canonical(tampered) is True
+    assert structured_summary_document_matches_process(tampered, context) is False
 
 
 def test_persisted_document_validator_rejects_noncanonical_shape() -> None:
