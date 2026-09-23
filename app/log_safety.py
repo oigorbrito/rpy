@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 
@@ -15,6 +16,7 @@ _SECRET_ENV_NAMES = (
     "LANGFUSE_SECRET_KEY",
     "JUDIT_WEBHOOK_TOKEN",
     "RPY_BEARER_TOKENS",
+    "RPY_DEMO_BEARER_TOKEN",
     "RPY_OPS_TOKEN",
     "POSTGRES_PASSWORD",
     "DATABASE_URL",
@@ -28,21 +30,40 @@ _SECRET_ENV_NAMES = (
 # Redact credentials embedded in URLs even when the full URL is not available in
 # environment variables (for example when emitted by a lower-level client).
 _URI_CREDENTIALS_RE = re.compile(r"(?P<scheme>[a-zA-Z][a-zA-Z0-9+.-]*://)(?P<user>[^\s/:@]+):(?P<secret>[^\s/@]+)@")
-_BEARER_RE = re.compile(r"(?i)(authorization\s*[:=]\s*bearer\s+)([^\s,;]+)")
+_AUTHORIZATION_RE = re.compile(
+    r"(?i)(authorization\s*[:=]\s*(?:bearer|apikey|basic|token|digest|negotiate|oauth)\s+)([^\s,;]+)"
+)
 _QUERY_SECRET_RE = re.compile(
     r"(?i)(\b(?:api[_-]?key|token|access[_-]?token|password|secret)\s*[=:]\s*)([^\s,;&]+)"
 )
-# Redact application API keys (sk_live_... / sk_test_...) even when not configured in env
-# or when appearing without authorization headers or query parameter names.
-_API_KEY_TOKEN_RE = re.compile(r"\bsk_(?:live|test)_[a-zA-Z0-9_-]+\b")
+# Redact application/provider API keys even when not configured in env or when
+# appearing without authorization headers or query parameter names.
+_API_KEY_TOKEN_RE = re.compile(r"\b(?:sk_(?:live|test)|sk-ant-api)[a-zA-Z0-9_-]+\b")
+
+
+def _configured_bearer_token_keys(value: str) -> list[str]:
+    try:
+        parsed = json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        return []
+    if not isinstance(parsed, dict):
+        return []
+    return [
+        token
+        for token in parsed
+        if isinstance(token, str) and len(token) >= 4
+    ]
 
 
 def _configured_secret_values() -> list[str]:
     values: list[str] = []
     for name in _SECRET_ENV_NAMES:
         value = os.environ.get(name)
-        if value and len(value) >= 4:
-            values.append(value)
+        if not value or len(value) < 4:
+            continue
+        values.append(value)
+        if name == "RPY_BEARER_TOKENS":
+            values.extend(_configured_bearer_token_keys(value))
     return sorted(set(values), key=len, reverse=True)
 
 
@@ -57,7 +78,9 @@ def sanitize_error_message(value: object, *, max_chars: int = MAX_ERROR_MESSAGE_
         lambda match: f"{match.group('scheme')}{match.group('user')}:{REDACTED}@",
         text,
     )
-    text = _BEARER_RE.sub(lambda match: f"{match.group(1)}{REDACTED}", text)
+    text = _AUTHORIZATION_RE.sub(
+        lambda match: f"{match.group(1)}{REDACTED}", text
+    )
     text = _QUERY_SECRET_RE.sub(lambda match: f"{match.group(1)}{REDACTED}", text)
     text = _API_KEY_TOKEN_RE.sub(REDACTED, text)
 

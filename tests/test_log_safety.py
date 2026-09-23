@@ -1,3 +1,5 @@
+import pytest
+
 from app.log_safety import REDACTED, sanitize_error_message
 
 
@@ -56,3 +58,43 @@ def test_sanitize_error_message_redacts_api_key_tokens() -> None:
     assert "sk_live_abc1234567890abcdef" not in rendered
     assert "sk_test_xyz9876543210fedcba" not in rendered
     assert rendered == f"Failed authentication for {REDACTED} and {REDACTED}"
+
+
+def test_sanitize_error_message_redacts_anthropic_api_key_token() -> None:
+    rendered = sanitize_error_message(
+        "provider failed for sk-ant-api03-abcdef1234567890-xyz"
+    )
+
+    assert "sk-ant-api03-abcdef1234567890-xyz" not in rendered
+    assert REDACTED in rendered
+
+
+def test_sanitize_error_message_redacts_json_bearer_token_key(monkeypatch) -> None:
+    monkeypatch.setenv(
+        "RPY_BEARER_TOKENS",
+        '{"legacy-secret-token-123":"00000000-0000-0000-0000-000000000000"}',
+    )
+
+    rendered = sanitize_error_message("failed using legacy-secret-token-123")
+
+    assert "legacy-secret-token-123" not in rendered
+    assert REDACTED in rendered
+
+
+def test_sanitize_error_message_redacts_demo_bearer_token(monkeypatch) -> None:
+    monkeypatch.setenv("RPY_DEMO_BEARER_TOKEN", "demo-secret-token-456")
+
+    rendered = sanitize_error_message("failed using demo-secret-token-456")
+
+    assert "demo-secret-token-456" not in rendered
+    assert REDACTED in rendered
+
+
+@pytest.mark.parametrize("scheme", ["Bearer", "APIKey", "Basic", "Token", "Digest", "Negotiate", "OAuth"])
+def test_sanitize_error_message_redacts_authorization_schemes(scheme: str) -> None:
+    rendered = sanitize_error_message(
+        f"Authorization: {scheme} opaque-secret-credential"
+    )
+
+    assert "opaque-secret-credential" not in rendered
+    assert f"Authorization: {scheme} {REDACTED}" in rendered
