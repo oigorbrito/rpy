@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from app.claim_evidence import claim_evidence_is_complete, load_summary_claim_evidence
+from app.claim_evidence import claim_evidence_is_publishable, load_summary_claim_evidence
 from app.datajud_client import lookup_datajud_metadata
 from app.datajud_enrichment import merge_datajud_metadata
 from app.datajud_provenance import replace_datajud_field_provenance
@@ -30,7 +30,9 @@ async def _complete_from_current_summary(
                p.secrecy_level,
                p.code,
                p.class_name,
+               p.court,
                p.header,
+               p.parties,
                ps.id AS summary_id,
                ps.structured_output,
                ps.model,
@@ -63,7 +65,11 @@ async def _complete_from_current_summary(
             if current["structured_output"] is not None
             else None
         )
-        if not claim_evidence_is_complete(structured_output, claim_evidence):
+        if not claim_evidence_is_publishable(
+            structured_output,
+            claim_evidence,
+            process=current,
+        ):
             return False
 
     await transition_requests_for_judit_request(
