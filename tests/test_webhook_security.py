@@ -99,8 +99,8 @@ async def test_malformed_webhook_path_redacts_token_without_making_route_valid(
 
 
 _TOKEN_ALPHABET = st.characters(
-    blacklist_characters="/\\x00\\r\\n",
-    blacklist_categories=("Cs",),
+    blacklist_characters="/\\",
+    blacklist_categories=("Cs", "Cc"),
 )
 _TOKEN_STRATEGY = st.text(_TOKEN_ALPHABET, min_size=1, max_size=128)
 
