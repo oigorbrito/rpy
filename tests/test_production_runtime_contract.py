@@ -72,6 +72,13 @@ def test_runtime_confinement_rejects_non_finite_numeric_budgets(
         contract._validate_runtime_confinement(services)
 
 
+def test_runtime_confinement_rejects_boolean_numeric_budget() -> None:
+    services = _runtime_services()
+    services["api"]["cpus"] = True
+    with pytest.raises(SystemExit, match="api cpus must be numeric"):
+        contract._validate_runtime_confinement(services)
+
+
 def test_runtime_confinement_rejects_seccomp_unconfined_and_added_caps() -> None:
     services = _runtime_services()
     services["worker-1"]["security_opt"].append("seccomp=unconfined")
