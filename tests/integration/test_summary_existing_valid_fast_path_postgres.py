@@ -15,7 +15,7 @@ from app.db import create_pool
 from app.migrations import migrate
 from app.rag import _persist_summary, generate_summary
 from app.summary_output import structured_summary_document
-from app.summary_policy import RESTRICTED_PROMPT_VERSION
+from app.summary_policy import RESTRICTED_MODEL, RESTRICTED_PROMPT_VERSION
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(
@@ -321,6 +321,111 @@ Nenhuma divergência objetiva identificada."""
         assert stored["model"] == "claude-sonnet-5"
         assert stored["prompt_version"] == "process-summary-v5"
         assert claim_count == 2
+    finally:
+        await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_approved_summary_replacement_requires_publishable_restricted_document() -> None:
+    assert TEST_DATABASE_URL is not None
+    pool = await create_pool(TEST_DATABASE_URL, min_size=1, max_size=2)
+    try:
+        async with pool.acquire() as conn:
+            process_id, version_id, code = await _fixture(conn)
+            claim_context, payload, claims = _claim_material(code, version_id)
+            assert await _persist_summary(
+                conn,
+                process_id=process_id,
+                version_id=version_id,
+                text="approved public summary",
+                validation={"passed": True, "errors": []},
+                generation_ms=123,
+                structured_output=structured_summary_document(
+                    payload, claim_context
+                ),
+                claims=claims,
+                evidence_sources=evidence_catalog(claim_context),
+            )
+            await conn.execute(
+                "UPDATE processes SET secrecy_level = 1 WHERE id = $1",
+                process_id,
+            )
+
+            restricted_payload = {
+                "synthesis": "Os detalhes processuais foram restringidos por sigilo.",
+                "timeline": [],
+                "current_status": (
+                    "O contexto público disponível está limitado pelos dados permitidos "
+                    "para processo sigiloso."
+                ),
+                "attention": ["Processo com detalhes restringidos por sigilo."],
+                "decisions": [],
+                "deadlines": [],
+                "related_processes": [],
+                "attachments": [],
+            }
+            restricted_context = {
+                "code": code,
+                "class_name": None,
+                "court": None,
+                "header": {},
+                "parties": [],
+            }
+            canonical = structured_summary_document(
+                restricted_payload,
+                restricted_context,
+            )
+            malformed = {**canonical, "debug": "must not replace approved summary"}
+
+            assert await _persist_summary(
+                conn,
+                process_id=process_id,
+                version_id=version_id,
+                text="malformed restricted replacement",
+                validation={"passed": True, "errors": []},
+                generation_ms=1,
+                model=RESTRICTED_MODEL,
+                prompt_version=RESTRICTED_PROMPT_VERSION,
+                structured_output=malformed,
+            ) is False
+
+            unchanged = await conn.fetchrow(
+                """
+                SELECT markdown, model, prompt_version
+                FROM process_summaries
+                WHERE process_id=$1 AND version_id=$2
+                """,
+                process_id,
+                version_id,
+            )
+            assert unchanged["markdown"] == "approved public summary"
+            assert unchanged["model"] == "claude-sonnet-5"
+            assert unchanged["prompt_version"] == "process-summary-v5"
+
+            assert await _persist_summary(
+                conn,
+                process_id=process_id,
+                version_id=version_id,
+                text="canonical restricted replacement",
+                validation={"passed": True, "errors": []},
+                generation_ms=1,
+                model=RESTRICTED_MODEL,
+                prompt_version=RESTRICTED_PROMPT_VERSION,
+                structured_output=canonical,
+            ) is True
+
+            replaced = await conn.fetchrow(
+                """
+                SELECT markdown, model, prompt_version
+                FROM process_summaries
+                WHERE process_id=$1 AND version_id=$2
+                """,
+                process_id,
+                version_id,
+            )
+            assert replaced["markdown"] == "canonical restricted replacement"
+            assert replaced["model"] == RESTRICTED_MODEL
+            assert replaced["prompt_version"] == RESTRICTED_PROMPT_VERSION
     finally:
         await pool.close()
 
