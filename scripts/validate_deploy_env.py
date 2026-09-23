@@ -232,6 +232,30 @@ def _validate_attachment_ocr(values: dict[str, str], errors: list[str]) -> None:
         invalid_message="ATTACHMENT_PDF_OCR_MAX_PAGES must be an integer",
         non_positive_message="ATTACHMENT_PDF_OCR_MAX_PAGES must be greater than zero",
     )
+    _validate_positive_numeric(
+        values,
+        errors,
+        key="ATTACHMENT_PARSER_TIMEOUT_SECONDS",
+        default="45",
+        convert=float,
+        invalid_message="ATTACHMENT_PARSER_TIMEOUT_SECONDS must be numeric",
+        non_positive_message=(
+            "ATTACHMENT_PARSER_TIMEOUT_SECONDS must be a finite number greater than zero"
+        ),
+        require_finite=True,
+    )
+    _validate_positive_numeric(
+        values,
+        errors,
+        key="ATTACHMENT_PARSER_REQUEST_TIMEOUT_SECONDS",
+        default="45",
+        convert=float,
+        invalid_message="ATTACHMENT_PARSER_REQUEST_TIMEOUT_SECONDS must be numeric",
+        non_positive_message=(
+            "ATTACHMENT_PARSER_REQUEST_TIMEOUT_SECONDS must be a finite number greater than zero"
+        ),
+        require_finite=True,
+    )
 
 def _validate_embedding_runtime(values: dict[str, str], errors: list[str]) -> None:
     try:

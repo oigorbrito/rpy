@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import math
 import os
 import struct
 from dataclasses import asdict
@@ -28,8 +29,10 @@ def parser_timeout_seconds() -> float:
         value = float(raw)
     except ValueError as exc:
         raise RuntimeError("ATTACHMENT_PARSER_TIMEOUT_SECONDS must be numeric") from exc
-    if value <= 0:
-        raise RuntimeError("ATTACHMENT_PARSER_TIMEOUT_SECONDS must be greater than zero")
+    if not math.isfinite(value) or value <= 0:
+        raise RuntimeError(
+            "ATTACHMENT_PARSER_TIMEOUT_SECONDS must be a finite number greater than zero"
+        )
     return value
 
 
@@ -44,9 +47,9 @@ def server_request_timeout_seconds() -> float:
         raise RuntimeError(
             "ATTACHMENT_PARSER_REQUEST_TIMEOUT_SECONDS must be numeric"
         ) from exc
-    if value <= 0:
+    if not math.isfinite(value) or value <= 0:
         raise RuntimeError(
-            "ATTACHMENT_PARSER_REQUEST_TIMEOUT_SECONDS must be greater than zero"
+            "ATTACHMENT_PARSER_REQUEST_TIMEOUT_SECONDS must be a finite number greater than zero"
         )
     return value
 

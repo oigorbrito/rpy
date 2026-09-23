@@ -74,6 +74,20 @@ def test_deploy_preflight_rejects_non_finite_attachment_pdf_ocr_scale() -> None:
         )
 
 
+def test_deploy_preflight_rejects_non_finite_attachment_parser_timeouts() -> None:
+    for key in (
+        "ATTACHMENT_PARSER_TIMEOUT_SECONDS",
+        "ATTACHMENT_PARSER_REQUEST_TIMEOUT_SECONDS",
+    ):
+        for value in ("nan", "inf", "-inf"):
+            values = _valid_values()
+            values[key] = value
+            _require_error(
+                values,
+                f"{key} must be a finite number greater than zero",
+            )
+
+
 def test_deploy_preflight_validates_attachment_ocr_integer_controls() -> None:
     values = _valid_values()
     values["ATTACHMENT_OCR_TIMEOUT_SECONDS"] = "0"

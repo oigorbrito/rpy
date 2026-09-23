@@ -8,6 +8,8 @@ from app.attachment_sandbox import (
     _handle_client,
     _parse_request,
     parse_attachment_sandboxed,
+    parser_timeout_seconds,
+    server_request_timeout_seconds,
 )
 
 
@@ -175,3 +177,22 @@ async def test_sandbox_rejects_missing_resource_limits_as_protocol_error(tmp_pat
     finally:
         server.close()
         await server.wait_closed()
+
+
+@pytest.mark.parametrize(
+    ("name", "reader"),
+    [
+        ("ATTACHMENT_PARSER_TIMEOUT_SECONDS", parser_timeout_seconds),
+        ("ATTACHMENT_PARSER_REQUEST_TIMEOUT_SECONDS", server_request_timeout_seconds),
+    ],
+)
+@pytest.mark.parametrize("value", ["nan", "NaN", "inf", "+inf", "-inf"])
+def test_parser_timeout_configuration_rejects_non_finite_values(
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+    reader,
+    value: str,
+) -> None:
+    monkeypatch.setenv(name, value)
+    with pytest.raises(RuntimeError, match="finite number greater than zero"):
+        reader()
