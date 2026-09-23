@@ -14,7 +14,7 @@ _EVIDENCE_REF_RE = re.compile(r"^[pma]-[0-9a-f]{32}$")
 _CNJ_RE = re.compile(r"\b\d{7}-?\d{2}\.?\d{4}\.?\d\.?\d{2}\.?\d{4}\b")
 _DATE_RE = re.compile(
     r"(?<!\d)(?:\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])|"
-    r"(?:0?[1-9]|[12]\d|3[01])/(?:0?[1-9]|1[0-2])/\d{4})(?!\d)"
+    r"(?:0?[1-9]|[12]\d|3[01])/(?:0?[1-9]|1[0-2])/\d{4})(?![T\d])"
 )
 _ISO_DATETIME_RE = re.compile(
     r"(?<!\d)\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}"
@@ -155,8 +155,12 @@ def _known_party_names(context: dict[str, Any]) -> frozenset[str]:
 
 
 def _party_names_in_text(text: str, known: frozenset[str]) -> frozenset[str]:
-    normalized = f" {_normalized_text(text)} "
-    return frozenset(name for name in known if f" {name} " in normalized)
+    normalized = _normalized_text(text)
+    return frozenset(
+        name
+        for name in known
+        if re.search(rf"(?<!\w){re.escape(name)}(?!\w)", normalized)
+    )
 
 
 def _canonical_json(value: Any) -> str:
