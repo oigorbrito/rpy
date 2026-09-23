@@ -409,8 +409,6 @@ def _relation_status(
         return "not_evaluated", "no_deterministic_fact_anchor", 0
 
     if claim_cnjs and not claim_cnjs.issubset(evidence.cnjs):
-        if evidence.kind == "process" and evidence.cnjs:
-            return "contradicted", "process_cnj_mismatch", fact_count
         return "insufficient", "cited_source_missing_cnj", fact_count
 
     if claim_amounts and not claim_amounts.issubset(evidence.amounts):
@@ -528,9 +526,6 @@ def verify_material_claims(
         process_evidence = [
             evidence for evidence in cited_evidence if evidence.kind == "process"
         ]
-        process_cnjs = frozenset(
-            value for evidence in process_evidence for value in evidence.cnjs
-        )
         process_amounts = frozenset(
             value for evidence in process_evidence for value in evidence.amounts
         )
@@ -548,13 +543,6 @@ def verify_material_claims(
         elif fact_count == 0:
             status = "not_evaluated"
             reason = "no_deterministic_fact_anchor"
-        elif (
-            claim_cnjs
-            and not claim_cnjs.issubset(combined_cnjs)
-            and process_cnjs
-        ):
-            status = "contradicted"
-            reason = "process_cnj_mismatch"
         elif (
             canonical_process_amounts
             and not canonical_process_amounts.issubset(combined_amounts)
