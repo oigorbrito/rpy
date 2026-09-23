@@ -13,6 +13,7 @@ from uuid import NAMESPACE_URL, uuid5
 from app.claim_evidence import (
     build_material_claims,
     expected_material_claims,
+    movement_evidence_ref,
     process_evidence_ref,
     validate_claim_evidence,
 )
@@ -97,6 +98,14 @@ def _context(case: dict[str, Any]) -> tuple[dict[str, Any], str | None]:
         "header": {"instance": int(case.get("instance", 1))},
         "step_count": count,
         "steps": _serialize_steps(ranked),
+        "_selected_sources": [
+            {
+                "evidence_ref": movement_evidence_ref(item.step.id),
+                "step_id": item.step.id,
+            }
+            for item in ranked
+        ],
+        "_attachment_sources": [],
         "_process_evidence_ref": process_evidence_ref(
             uuid5(NAMESPACE_URL, f"rpy:generation:{case_id}:version")
         ),
