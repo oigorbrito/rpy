@@ -8,6 +8,7 @@ from uuid import UUID
 import asyncpg
 
 from app.json_utils import decode_json_list
+from app.summary_output import structured_summary_document_is_canonical
 
 _EVIDENCE_REF_RE = re.compile(r"^[pma]-[0-9a-f]{32}$")
 _CLAIM_ID_RE = re.compile(
@@ -228,7 +229,7 @@ def claim_evidence_is_complete(
     structured_output: dict[str, Any] | None,
     claim_evidence: list[dict[str, Any]],
 ) -> bool:
-    if not isinstance(structured_output, dict):
+    if not structured_summary_document_is_canonical(structured_output):
         return False
     summary = structured_output.get("summary")
     if not isinstance(summary, dict):
