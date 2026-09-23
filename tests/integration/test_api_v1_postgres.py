@@ -538,12 +538,14 @@ async def test_v1_idempotency_states_authorization_and_sanitized_sources(monkeyp
             assert incomplete_job.status_code == 200
             assert incomplete_job.json()["iaSummary"] is None
             assert incomplete_job.json()["claim_evidence"] == []
+            assert all("used_for_summary" not in item for item in incomplete_job.json()["sources"])
 
             incomplete_sources = await client.get(
                 f"/v1/processos/{other_code}/fontes", headers=auth_a
             )
             assert incomplete_sources.status_code == 200
             assert incomplete_sources.json()["claim_evidence"] == []
+            assert all("used_for_summary" not in item for item in incomplete_sources.json()["sources"])
 
             incomplete_latest = await client.get(
                 f"/v1/processos/{other_code}/resumo", headers=auth_a
