@@ -27,6 +27,7 @@ _AMOUNT_RE = re.compile(
 _LABELED_AMOUNT_RE = re.compile(
     r"\bvalor(?:\s+da\s+causa)?\s*"
     r"(?::|é(?:\s+de)?|de)?\s*"
+    r"(?:(?:R\$|BRL)\s*)?"
     r"(?P<amount>-?\d{1,3}(?:\.\d{3})*(?:,\d+)?|-?\d+(?:[.,]\d+)?)",
     re.IGNORECASE,
 )
