@@ -16,6 +16,12 @@ from app.db import create_pool
 from app.judit_tasks import _complete_from_current_summary, finalize_judit_request_task
 from app.migrations import migrate
 from app.processes import stage_version
+from app.public_lifecycle import (
+    create_or_get_summary_request,
+    request_fingerprint,
+    transition_summary_request,
+)
+from app.public_lifecycle_worker import reconcile_generation_result
 from app.rag import _persist_summary
 from app.summary_output import structured_summary_document
 from app.summary_policy import RESTRICTED_MODEL, RESTRICTED_PROMPT_VERSION
@@ -305,6 +311,169 @@ async def test_restricted_summary_reuse_fails_after_process_becomes_public() -> 
                 request_id=f"public-{uuid4()}",
                 process_id=process_id,
             ) is False
+    finally:
+        await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_public_lifecycle_completion_uses_publication_gate() -> None:
+    assert TEST_DATABASE_URL is not None
+    await migrate(TEST_DATABASE_URL)
+    pool = await create_pool(TEST_DATABASE_URL, min_size=1, max_size=2)
+    try:
+        tenant_id = uuid4()
+        process_id = uuid4()
+        version_id = uuid4()
+        code = "0000000-00.2026.8.21.0198"
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                TRUNCATE public_summary_requests, jobs, process_summaries,
+                         process_steps, tenant_processes, access_log,
+                         process_versions, processes, tenants
+                RESTART IDENTITY CASCADE
+                """
+            )
+            await conn.execute(
+                "INSERT INTO tenants (id, name) VALUES ($1, 'publication-gate')",
+                tenant_id,
+            )
+            await conn.execute(
+                """
+                INSERT INTO processes (
+                    id, code, secrecy_level, current_version_id
+                ) VALUES ($1, $2, 0, NULL)
+                """,
+                process_id,
+                code,
+            )
+            await conn.execute(
+                """
+                INSERT INTO process_versions (
+                    id, process_id, source_request_id, finalized
+                ) VALUES ($1, $2, $3, TRUE)
+                """,
+                version_id,
+                process_id,
+                f"publication-{version_id}",
+            )
+            await conn.execute(
+                "UPDATE processes SET current_version_id=$2 WHERE id=$1",
+                process_id,
+                version_id,
+            )
+            summary_id = await conn.fetchval(
+                """
+                INSERT INTO process_summaries (
+                    process_id, version_id, markdown, validation, model,
+                    prompt_version, generation_ms
+                ) VALUES ($1, $2, '# incomplete public',
+                          '{"passed": true, "errors": []}'::jsonb,
+                          'fake-offline', 'test-v1', 1)
+                RETURNING id
+                """,
+                process_id,
+                version_id,
+            )
+
+            async def new_request(key: str):
+                request, _ = await create_or_get_summary_request(
+                    conn,
+                    tenant_id=tenant_id,
+                    process_code=code,
+                    idempotency_key=key,
+                    fingerprint=request_fingerprint({"cnj": code, "key": key}),
+                )
+                return await transition_summary_request(
+                    conn,
+                    request_id=request.id,
+                    status="generating",
+                    process_id=process_id,
+                    version_id=version_id,
+                )
+
+            public_request = await new_request("public-incomplete")
+            await reconcile_generation_result(
+                conn,
+                payload={
+                    "process_id": str(process_id),
+                    "version_id": str(version_id),
+                },
+                result={"validation": {"passed": True}, "persisted": True},
+            )
+            public_state = await conn.fetchrow(
+                """
+                SELECT status, summary_id, error_code
+                FROM public_summary_requests
+                WHERE id=$1
+                """,
+                public_request.id,
+            )
+            assert public_state["status"] == "validation_failed"
+            assert public_state["summary_id"] is None
+            assert public_state["error_code"] == "validation_failed"
+
+            await conn.execute(
+                """
+                UPDATE processes SET secrecy_level=1 WHERE id=$1
+                """,
+                process_id,
+            )
+            await conn.execute(
+                """
+                UPDATE process_summaries
+                SET model=$2, prompt_version=$3
+                WHERE id=$1
+                """,
+                summary_id,
+                RESTRICTED_MODEL,
+                RESTRICTED_PROMPT_VERSION,
+            )
+            restricted_request = await new_request("restricted-valid")
+            await reconcile_generation_result(
+                conn,
+                payload={
+                    "process_id": str(process_id),
+                    "version_id": str(version_id),
+                },
+                result={"validation": {"passed": True}, "persisted": True},
+            )
+            restricted_state = await conn.fetchrow(
+                """
+                SELECT status, summary_id, error_code
+                FROM public_summary_requests
+                WHERE id=$1
+                """,
+                restricted_request.id,
+            )
+            assert restricted_state["status"] == "completed"
+            assert restricted_state["summary_id"] == summary_id
+            assert restricted_state["error_code"] is None
+
+            await conn.execute(
+                "UPDATE processes SET secrecy_level=0 WHERE id=$1",
+                process_id,
+            )
+            reopened_request = await new_request("restricted-after-public")
+            await reconcile_generation_result(
+                conn,
+                payload={
+                    "process_id": str(process_id),
+                    "version_id": str(version_id),
+                },
+                result={"validation": {"passed": True}, "reused": True},
+            )
+            reopened_state = await conn.fetchrow(
+                """
+                SELECT status, summary_id, error_code
+                FROM public_summary_requests
+                WHERE id=$1
+                """,
+                reopened_request.id,
+            )
+            assert reopened_state["status"] == "validation_failed"
+            assert reopened_state["summary_id"] is None
+            assert reopened_state["error_code"] == "validation_failed"
     finally:
         await pool.close()
 
