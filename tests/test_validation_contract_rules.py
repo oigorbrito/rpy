@@ -293,7 +293,9 @@ def test_accepts_observed_core_sections_in_contract_order_with_omissions() -> No
     result = validar(
         text=(
             "## Partes\nMaria da Silva\n\n"
-            "## Linha do tempo relevante\n- 13/09/2026: distribuição.\n\n"
+            "## Classe\nProcedimento Comum\n\n"
+            "## Assuntos\nResponsabilidade civil\n\n"
+            "## Movimentações\n- 13/09/2026: distribuição.\n\n"
             "## Pontos de atenção\nNenhuma divergência factual identificada."
         ),
         code=CODE,
@@ -306,8 +308,8 @@ def test_accepts_observed_core_sections_in_contract_order_with_omissions() -> No
 def test_rejects_core_sections_out_of_contract_order() -> None:
     result = validar(
         text=(
-            "## Situação atual\nProcesso em andamento.\n\n"
-            "## Síntese\nResumo factual."
+            "## Movimentações\nProcesso em andamento.\n\n"
+            "## Classe\nProcedimento Comum."
         ),
         code=CODE,
         parties=PARTIES,
@@ -318,30 +320,33 @@ def test_rejects_core_sections_out_of_contract_order() -> None:
 
 def test_rejects_nonexact_core_section_title() -> None:
     result = validar(
-        text="## Sintese\nResumo factual.",
+        text="## Movimentacoes\nResumo factual.",
         code=CODE,
         parties=PARTIES,
     )
     assert result.passed is False
-    assert "core section title must be exactly: Síntese; got: Sintese" in result.errors
+    assert (
+        "core section title must be exactly: Movimentações; got: Movimentacoes"
+        in result.errors
+    )
 
 
 def test_rejects_duplicate_core_section() -> None:
     result = validar(
         text=(
-            "## Síntese\nPrimeira síntese.\n\n"
-            "## Síntese\nSegunda síntese."
+            "## Classe\nPrimeira classe.\n\n"
+            "## Classe\nSegunda classe."
         ),
         code=CODE,
         parties=PARTIES,
     )
     assert result.passed is False
-    assert "duplicate core section: Síntese" in result.errors
+    assert "duplicate core section: Classe" in result.errors
 
 
 def test_accepts_exact_document_title_when_required() -> None:
     result = validar(
-        text="# Resumo do processo\n\n## Síntese\nResumo factual.",
+        text="# Resumo do processo\n\n## Classe\nProcedimento Comum.",
         code=CODE,
         parties=PARTIES,
         require_document_title=True,
