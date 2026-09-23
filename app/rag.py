@@ -461,9 +461,9 @@ def _validate_provider_summary(text: str, context: dict[str, Any]) -> Validation
         allowed_headings=(
             "Resumo do processo",
             "Partes",
-            "Síntese",
-            "Linha do tempo relevante",
-            "Situação atual",
+            "Classe",
+            "Assuntos",
+            "Movimentações",
             "Pontos de atenção",
             "Decisões",
             "Prazos em curso",
