@@ -189,6 +189,41 @@ def validate_claim_evidence(
     return claims, errors
 
 
+def _declared_claim_evidence_refs(
+    summary: dict[str, Any],
+    expected: dict[str, str],
+) -> dict[str, tuple[str, ...]] | None:
+    raw_claims = summary.get("claims")
+    if not isinstance(raw_claims, list):
+        return None
+
+    declared: dict[str, tuple[str, ...]] = {}
+    for item in raw_claims:
+        if not isinstance(item, dict):
+            return None
+        claim_id = str(item.get("claim_id") or "").strip()
+        text = str(item.get("text") or "").strip()
+        refs = item.get("evidence_refs")
+        if (
+            claim_id not in expected
+            or claim_id in declared
+            or text != expected[claim_id]
+            or not isinstance(refs, list)
+            or not refs
+            or any(
+                not isinstance(ref, str) or not _EVIDENCE_REF_RE.fullmatch(ref)
+                for ref in refs
+            )
+            or len(set(refs)) != len(refs)
+        ):
+            return None
+        declared[claim_id] = tuple(refs)
+
+    if set(declared) != set(expected):
+        return None
+    return declared
+
+
 def claim_evidence_is_complete(
     structured_output: dict[str, Any] | None,
     claim_evidence: list[dict[str, Any]],
@@ -201,6 +236,9 @@ def claim_evidence_is_complete(
 
     expected = expected_material_claims(summary)
     if not expected:
+        return False
+    declared = _declared_claim_evidence_refs(summary, expected)
+    if declared is None:
         return False
 
     observed: dict[str, dict[str, Any]] = {}
@@ -216,7 +254,12 @@ def claim_evidence_is_complete(
             or text != expected[claim_id]
             or not isinstance(refs, list)
             or not refs
-            or any(not isinstance(ref, str) or not _EVIDENCE_REF_RE.fullmatch(ref) for ref in refs)
+            or any(
+                not isinstance(ref, str) or not _EVIDENCE_REF_RE.fullmatch(ref)
+                for ref in refs
+            )
+            or len(set(refs)) != len(refs)
+            or tuple(refs) != declared[claim_id]
         ):
             return False
         observed[claim_id] = item
