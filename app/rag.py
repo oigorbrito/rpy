@@ -744,7 +744,9 @@ async def _persist_summary(
                     process={
                         "code": existing["process_code"],
                         "class_name": existing["process_class_name"],
+                        "court": existing["process_court"],
                         "header": existing["process_header"],
+                        "parties": existing["process_parties"],
                     },
                 )
             else:
