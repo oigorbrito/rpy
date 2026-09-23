@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import math
 import os
 import signal
 from contextlib import asynccontextmanager, suppress
@@ -64,6 +65,8 @@ class WorkerSettings:
             "shutdown_grace_seconds": self.shutdown_grace_seconds,
         }
         for name, value in positive.items():
+            if isinstance(value, float) and not math.isfinite(value):
+                raise ValueError(f"{name} must be finite")
             if value <= 0:
                 raise ValueError(f"{name} must be greater than zero")
         if self.stale_after_seconds <= self.heartbeat_interval_seconds:
