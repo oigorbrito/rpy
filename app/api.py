@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Request
 from app.api_key_middleware import ApiKeySecurityMiddleware
 from app.api_v1 import router as api_v1_router
 from app.auth import configured_bearer_tokens, tenant_from_request
-from app.claim_evidence import claim_evidence_is_complete, load_summary_claim_evidence
+from app.claim_evidence import claim_evidence_is_publishable, load_summary_claim_evidence
 from app.db import create_pool
 from app.frontend import router as frontend_router
 from app.http_auth_config import validate_http_auth_config
@@ -219,8 +219,10 @@ async def get_process_summary(code: str, request: Request) -> dict:
                     if summary["structured_output"] is not None
                     else None
                 )
-                if not claim_evidence_is_complete(
-                    structured_output, claim_evidence
+                if not claim_evidence_is_publishable(
+                    structured_output,
+                    claim_evidence,
+                    process=process,
                 ):
                     summary = None
         steps = []
