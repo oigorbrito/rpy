@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 import asyncpg
 import pytest
 
+from app.claim_evidence import load_summary_claim_evidence
 from app.migrations import migrate
 
 
@@ -141,6 +142,29 @@ async def test_claim_source_trigger_binds_ref_and_underlying_movement_scope() ->
             process_id,
             version_id,
             _ref("m", step_id),
+            step_id,
+        )
+
+        loaded = await load_summary_claim_evidence(conn, summary_id=summary_id)
+        assert loaded[0]["evidence_refs"] == [_ref("m", step_id)]
+
+        await conn.execute(
+            "DELETE FROM process_summary_sources WHERE summary_id=$1 AND step_id=$2",
+            summary_id,
+            step_id,
+        )
+        tampered = await load_summary_claim_evidence(conn, summary_id=summary_id)
+        assert tampered[0]["evidence_refs"] == []
+        await conn.execute(
+            """
+            INSERT INTO process_summary_sources (
+                summary_id, process_id, version_id, chunk_type,
+                step_id, step_number, source_order
+            ) VALUES ($1, $2, $3, 'movement', $4, 1, 0)
+            """,
+            summary_id,
+            process_id,
+            version_id,
             step_id,
         )
 
@@ -377,6 +401,33 @@ async def test_attachment_claim_ref_must_match_authorized_chunk_scope() -> None:
             process_id,
             version_id,
             _ref("a", chunk_id),
+            chunk_id,
+        )
+
+        loaded = await load_summary_claim_evidence(conn, summary_id=summary_id)
+        assert loaded[0]["evidence_refs"] == [_ref("a", chunk_id)]
+
+        await conn.execute(
+            """
+            DELETE FROM process_summary_attachment_sources
+            WHERE summary_id=$1 AND attachment_chunk_id=$2
+            """,
+            summary_id,
+            chunk_id,
+        )
+        tampered = await load_summary_claim_evidence(conn, summary_id=summary_id)
+        assert tampered[0]["evidence_refs"] == []
+        await conn.execute(
+            """
+            INSERT INTO process_summary_attachment_sources (
+                summary_id, process_id, version_id, attachment_id,
+                attachment_chunk_id, source_attachment_id, content_sha256, source_order
+            ) VALUES ($1,$2,$3,$4,$5,'doc-main',repeat('a',64),0)
+            """,
+            summary_id,
+            process_id,
+            version_id,
+            attachment_id,
             chunk_id,
         )
 
