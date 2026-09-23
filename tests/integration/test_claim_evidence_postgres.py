@@ -128,7 +128,27 @@ async def test_claim_verification_round_trips_with_persisted_evidence() -> None:
         )
 
         loaded = await load_summary_claim_evidence(conn, summary_id=summary_id)
+        stored_excerpt = await conn.fetchval(
+            """
+            SELECT evidence_excerpt
+            FROM process_summary_claim_evidence_excerpts
+            WHERE claim_row_id = (
+                SELECT id
+                FROM process_summary_claims
+                WHERE summary_id=$1 AND claim_id='current_status'
+            )
+              AND evidence_ref=$2
+            """,
+            summary_id,
+            process_ref,
+        )
 
+        assert stored_excerpt == '{"status":"Situação atual registrada."}'
+        assert all(
+            "evidence_excerpt" not in source
+            for item in loaded
+            for source in item["sources"]
+        )
         assert loaded == [
             {
                 "claim_id": "current_status",
@@ -146,7 +166,6 @@ async def test_claim_verification_round_trips_with_persisted_evidence() -> None:
                         "source_order": 0,
                         "verification_status": "supported",
                         "verification_reason": "exact_text_present",
-                        "evidence_excerpt": '{"status":"Situação atual registrada."}',
                         "evidence_excerpt_sha256": (
                             "7f8f7656b893152e240a6c29197486733570225eb0304866052553fb2588d77c"
                         ),
