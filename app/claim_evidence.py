@@ -324,10 +324,6 @@ async def load_summary_claim_evidence(
                                  AND EXISTS (
                                      SELECT 1
                                      FROM process_summary_sources used
-                                     JOIN process_steps step
-                                       ON step.id = used.step_id
-                                      AND step.process_id = used.process_id
-                                      AND step.version_id = used.version_id
                                      WHERE used.summary_id = s.summary_id
                                        AND used.process_id = s.process_id
                                        AND used.version_id = s.version_id
@@ -345,17 +341,6 @@ async def load_summary_claim_evidence(
                                  AND EXISTS (
                                      SELECT 1
                                      FROM process_summary_attachment_sources used
-                                     JOIN attachment_chunks chunk
-                                       ON chunk.id = used.attachment_chunk_id
-                                      AND chunk.process_id = used.process_id
-                                      AND chunk.version_id = used.version_id
-                                      AND chunk.attachment_id = used.attachment_id
-                                     JOIN process_attachments attachment
-                                       ON attachment.id = used.attachment_id
-                                      AND attachment.process_id = used.process_id
-                                      AND attachment.version_id = used.version_id
-                                      AND attachment.source_attachment_id =
-                                          used.source_attachment_id
                                      WHERE used.summary_id = s.summary_id
                                        AND used.process_id = s.process_id
                                        AND used.version_id = s.version_id
