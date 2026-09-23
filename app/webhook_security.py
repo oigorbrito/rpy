@@ -27,13 +27,17 @@ class JuditWebhookSecretRedactionMiddleware:
 
         path = str(scope.get("path") or "")
         if path.startswith(JUDIT_WEBHOOK_PREFIX):
-            token = path.removeprefix(JUDIT_WEBHOOK_PREFIX)
-            if token and "/" not in token:
-                state = scope.setdefault("state", {})
-                state[JUDIT_WEBHOOK_TOKEN_STATE_KEY] = token
+            suffix = path.removeprefix(JUDIT_WEBHOOK_PREFIX)
+            token, separator, remainder = suffix.partition("/")
+            if token:
                 redacted_path = JUDIT_WEBHOOK_PREFIX + REDACTED_WEBHOOK_TOKEN
+                if separator:
+                    redacted_path += separator + remainder
+                else:
+                    state = scope.setdefault("state", {})
+                    state[JUDIT_WEBHOOK_TOKEN_STATE_KEY] = token
                 scope["path"] = redacted_path
-                scope["raw_path"] = redacted_path.encode("ascii")
+                scope["raw_path"] = redacted_path.encode("utf-8")
 
         await self.app(scope, receive, send)
 
