@@ -140,6 +140,32 @@ def test_attachment_verification_preserves_available_positions_and_excerpt_hash(
     assert len(relation.evidence_excerpt_sha256) == 64
 
 
+def test_any_cited_canonical_contradiction_wins_over_other_support() -> None:
+    context = _context()
+    context["attachments"][0]["text"] = "Valor da causa: R$ 2.000,00."
+    claim = MaterialClaim(
+        claim_id="synthesis",
+        claim_class="synthesis",
+        text="Valor da causa: R$ 2.000,00.",
+        evidence_refs=(
+            process_evidence_ref(VERSION_ID),
+            f"a-{CHUNK_ID.hex}",
+        ),
+    )
+
+    verification = verify_material_claims([claim], context)
+    result = verification["synthesis"]
+
+    assert result.status == "contradicted"
+    assert {relation.status for relation in result.relations} == {
+        "contradicted",
+        "supported",
+    }
+    assert verification_errors(verification) == [
+        "claim contradicted by cited evidence: synthesis"
+    ]
+
+
 def test_multiple_cited_sources_can_support_different_deterministic_facts() -> None:
     claim = MaterialClaim(
         claim_id="decisions:0",
