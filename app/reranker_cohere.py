@@ -12,11 +12,13 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from uuid import UUID
 
+from app.http_safety import ResponseTooLargeError, read_bounded_response
 from app.providers import ProviderSettings, call_with_retries
 from app.retrieval import Step
 
 COHERE_RERANK_URL = "https://api.cohere.com/v2/rerank"
 DEFAULT_COHERE_RERANKER_MODEL = "rerank-v4.0-pro"
+COHERE_RERANK_MAX_RESPONSE_BYTES = 1024 * 1024
 
 
 @dataclass(slots=True)
@@ -80,7 +82,14 @@ def _post_rerank_sync(
     )
     try:
         with urlopen(request, timeout=timeout_seconds) as response:
-            raw = response.read()
+            raw = read_bounded_response(
+                response,
+                max_bytes=COHERE_RERANK_MAX_RESPONSE_BYTES,
+            )
+    except ResponseTooLargeError as exc:
+        raise CohereRerankerError(
+            "Cohere rerank response exceeded safe size"
+        ) from exc
     except HTTPError as exc:
         raise CohereRerankerError(
             f"Cohere rerank request failed with HTTP {exc.code}",
