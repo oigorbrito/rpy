@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import math
 import os
 import struct
 from dataclasses import asdict
@@ -22,33 +23,33 @@ def parser_socket_path() -> str:
     return str(os.getenv("ATTACHMENT_PARSER_SOCKET") or DEFAULT_SOCKET_PATH).strip()
 
 
-def parser_timeout_seconds() -> float:
-    raw = str(os.getenv("ATTACHMENT_PARSER_TIMEOUT_SECONDS") or DEFAULT_TIMEOUT_SECONDS)
+def _positive_timeout(value: float, *, name: str) -> float:
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError(f"{name} must be a finite number greater than zero")
+    return value
+
+
+def _env_timeout(name: str, default: float) -> float:
+    raw = str(os.getenv(name) or default)
     try:
         value = float(raw)
     except ValueError as exc:
-        raise RuntimeError("ATTACHMENT_PARSER_TIMEOUT_SECONDS must be numeric") from exc
-    if value <= 0:
-        raise RuntimeError("ATTACHMENT_PARSER_TIMEOUT_SECONDS must be greater than zero")
-    return value
+        raise RuntimeError(f"{name} must be numeric") from exc
+    try:
+        return _positive_timeout(value, name=name)
+    except ValueError as exc:
+        raise RuntimeError(str(exc)) from exc
+
+
+def parser_timeout_seconds() -> float:
+    return _env_timeout("ATTACHMENT_PARSER_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS)
 
 
 def server_request_timeout_seconds() -> float:
-    raw = str(
-        os.getenv("ATTACHMENT_PARSER_REQUEST_TIMEOUT_SECONDS")
-        or DEFAULT_SERVER_REQUEST_TIMEOUT_SECONDS
+    return _env_timeout(
+        "ATTACHMENT_PARSER_REQUEST_TIMEOUT_SECONDS",
+        DEFAULT_SERVER_REQUEST_TIMEOUT_SECONDS,
     )
-    try:
-        value = float(raw)
-    except ValueError as exc:
-        raise RuntimeError(
-            "ATTACHMENT_PARSER_REQUEST_TIMEOUT_SECONDS must be numeric"
-        ) from exc
-    if value <= 0:
-        raise RuntimeError(
-            "ATTACHMENT_PARSER_REQUEST_TIMEOUT_SECONDS must be greater than zero"
-        )
-    return value
 
 
 def _frame(payload: dict[str, Any]) -> bytes:
@@ -92,7 +93,11 @@ async def parse_attachment_sandboxed(
     from app.attachment_processing import AttachmentProcessingError
 
     path = socket_path or parser_socket_path()
-    timeout = timeout_seconds or parser_timeout_seconds()
+    timeout = (
+        parser_timeout_seconds()
+        if timeout_seconds is None
+        else _positive_timeout(float(timeout_seconds), name="attachment parser timeout_seconds")
+    )
     request = {
         "version": PROTOCOL_VERSION,
         "content_type": content_type,
