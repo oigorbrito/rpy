@@ -464,7 +464,7 @@ async def test_public_summary_is_not_reused_after_process_becomes_secret(monkeyp
             return {
                 "code": code,
                 "court": None,
-                "class_name": "Ação sigilosa",
+                "class_name": None,
                 "subjects": [],
                 "parties": [],
                 "validation_parties": [],
