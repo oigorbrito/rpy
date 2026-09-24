@@ -344,3 +344,23 @@ def test_judit_response_rejects_non_standard_numeric_constants(
     )
     with pytest.raises(judit_client.JuditRequestError, match="invalid response"):
         judit_client._create_request_sync("0000000-00.0000.0.00.0001")
+
+
+def test_delete_tracking_percent_encodes_provider_identifier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = {}
+    monkeypatch.setenv("JUDIT_API_KEY", "tracking-key")
+    monkeypatch.setattr(
+        judit_client.urllib.request,
+        "urlopen",
+        lambda request, timeout: captured.update(request=request, timeout=timeout)
+        or _Response(b"", status=204),
+    )
+
+    judit_client._delete_tracking_sync("track/id ?#")
+
+    request = captured["request"]
+    expected = f"{judit_client.JUDIT_TRACKING_URL}/track%2Fid%20%3F%23"
+    if request.full_url != expected:
+        raise AssertionError(f"unexpected tracking delete URL: {request.full_url!r}")
