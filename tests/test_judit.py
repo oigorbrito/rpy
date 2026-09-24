@@ -13,6 +13,28 @@ def _fixture(name: str) -> dict:
     return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
 
 
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_parse_event_rejects_non_finite_numbers_before_persistence(value: float) -> None:
+    body = {
+        "callback_id": "cb-non-finite",
+        "event_type": "response_created",
+        "reference_type": "request",
+        "reference_id": "req-1",
+        "payload": {
+            "request_id": "req-1",
+            "response_id": "resp-1",
+            "response_type": "lawsuit",
+            "response_data": {
+                "code": "0000000-00.0000.0.00.0000",
+                "steps": [{"metadata": {"score": value}}],
+            },
+        },
+    }
+
+    with pytest.raises(ValueError, match="non-finite number"):
+        parse_event(body)
+
+
 def test_parse_current_lawsuit_response_envelope() -> None:
     event = parse_event(
         {
