@@ -104,6 +104,13 @@ def _retry_backoff_seconds(attempts: int) -> int:
     exponent = min(9, max(1, attempts))
     return min(300, 2 ** exponent)
 
+def _validate_reclaim_timeout(timeout_seconds: int) -> int:
+    if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, int):
+        raise ValueError("reclaim timeout_seconds must be an integer")
+    if timeout_seconds <= 0:
+        raise ValueError("reclaim timeout_seconds must be greater than zero")
+    return timeout_seconds
+
 
 def _validate_max_attempts(max_attempts: int) -> int:
     if isinstance(max_attempts, bool) or not isinstance(max_attempts, int):
@@ -183,6 +190,7 @@ async def fail(
 
 
 async def reclaim_stale(conn: asyncpg.Connection, timeout_seconds: int = 30) -> list[asyncpg.Record]:
+    bounded_timeout = _validate_reclaim_timeout(timeout_seconds)
     return list(
-        await conn.fetch(RECLAIM_SQL, timeout_seconds, MAX_JOB_ERROR_LOG_CHARS)
+        await conn.fetch(RECLAIM_SQL, bounded_timeout, MAX_JOB_ERROR_LOG_CHARS)
     )

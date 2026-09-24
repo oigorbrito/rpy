@@ -5,6 +5,7 @@ from app.queue import (
     MIN_JOB_ATTEMPTS,
     _retry_backoff_seconds,
     _validate_max_attempts,
+    _validate_reclaim_timeout,
 )
 
 
@@ -51,3 +52,19 @@ def test_retry_backoff_is_bounded_without_large_exponentiation(
 def test_retry_backoff_rejects_non_integer_attempts(value) -> None:
     with pytest.raises(ValueError, match="attempts must be an integer"):
         _retry_backoff_seconds(value)
+
+@pytest.mark.parametrize("value", [1, 30, 3600])
+def test_accepts_positive_integer_reclaim_timeout(value: int) -> None:
+    assert _validate_reclaim_timeout(value) == value
+
+
+@pytest.mark.parametrize("value", [0, -1, -30])
+def test_rejects_non_positive_reclaim_timeout(value: int) -> None:
+    with pytest.raises(ValueError, match="greater than zero"):
+        _validate_reclaim_timeout(value)
+
+
+@pytest.mark.parametrize("value", [True, 1.5, "30", None])
+def test_rejects_non_integer_reclaim_timeout(value) -> None:
+    with pytest.raises(ValueError, match="must be an integer"):
+        _validate_reclaim_timeout(value)
