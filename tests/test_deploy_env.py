@@ -64,6 +64,17 @@ def test_valid_deploy_environment_passes() -> None:
     assert preflight.validate(_valid_values()) == []
 
 
+def test_deploy_preflight_validates_inbound_post_body_limit() -> None:
+    for value, expected in (
+        ("not-an-integer", "JUDIT_WEBHOOK_MAX_BODY_BYTES must be an integer"),
+        ("0", "JUDIT_WEBHOOK_MAX_BODY_BYTES must be greater than zero"),
+        ("-1", "JUDIT_WEBHOOK_MAX_BODY_BYTES must be greater than zero"),
+    ):
+        values = _valid_values()
+        values["JUDIT_WEBHOOK_MAX_BODY_BYTES"] = value
+        _require_error(values, expected)
+
+
 def test_deploy_preflight_rejects_non_finite_attachment_pdf_ocr_scale() -> None:
     for value in ("nan", "inf", "-inf"):
         values = _valid_values()
