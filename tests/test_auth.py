@@ -66,6 +66,17 @@ def test_whitespace_in_configured_token_fails_configuration(monkeypatch, token: 
         configured_bearer_tokens()
 
 
+@pytest.mark.parametrize("token", ["sk_live_legacytoken", "sk_test_legacytoken"])
+def test_api_key_prefix_is_rejected_for_legacy_bearer_configuration(
+    monkeypatch,
+    token: str,
+) -> None:
+    monkeypatch.setenv("RPY_BEARER_TOKENS", json.dumps({token: str(uuid4())}))
+
+    with pytest.raises(RuntimeError, match="must not use sk_live_ or sk_test_ prefixes"):
+        configured_bearer_tokens()
+
+
 def test_non_string_tenant_id_fails_configuration(monkeypatch) -> None:
     monkeypatch.setenv("RPY_BEARER_TOKENS", json.dumps({"token-a": 123}))
 
