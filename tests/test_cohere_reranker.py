@@ -115,3 +115,43 @@ def test_cohere_reranker_rejects_oversized_response(monkeypatch) -> None:
             documents=["a", "b"],
             timeout_seconds=1,
         )
+
+
+class _RawRerankResponse:
+    def __init__(self, raw: bytes) -> None:
+        self._raw = raw
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def read(self, amount: int = -1) -> bytes:
+        return self._raw if amount < 0 else self._raw[:amount]
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b'{"results":[],"results":[]}',
+        b'{"results":[{"index":0,"relevance_score":NaN}]}',
+    ],
+)
+def test_cohere_reranker_rejects_ambiguous_provider_json(
+    monkeypatch: pytest.MonkeyPatch,
+    raw: bytes,
+) -> None:
+    monkeypatch.setattr(
+        cohere,
+        "urlopen",
+        lambda request, timeout: _RawRerankResponse(raw),
+    )
+    with pytest.raises(RuntimeError, match="not valid JSON"):
+        cohere._post_rerank_sync(
+            api_key="synthetic-key",
+            model="rerank-v4.0-pro",
+            query="consulta",
+            documents=["documento"],
+            timeout_seconds=1,
+        )
