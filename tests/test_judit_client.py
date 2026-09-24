@@ -364,3 +364,41 @@ def test_delete_tracking_percent_encodes_provider_identifier(
     expected = f"{judit_client.JUDIT_TRACKING_URL}/track%2Fid%20%3F%23"
     if request.full_url != expected:
         raise AssertionError(f"unexpected tracking delete URL: {request.full_url!r}")
+
+
+@pytest.mark.parametrize(
+    ("tracking_id", "expected_suffix"),
+    [
+        ("..", "%2E%2E"),
+        (".", "%2E"),
+        (" track.id ", "track%2Eid"),
+    ],
+)
+def test_delete_tracking_encodes_dot_segments_and_trims_whitespace(
+    monkeypatch: pytest.MonkeyPatch,
+    tracking_id: str,
+    expected_suffix: str,
+) -> None:
+    captured = {}
+    monkeypatch.setenv("JUDIT_API_KEY", "tracking-key")
+    monkeypatch.setattr(
+        judit_client.urllib.request,
+        "urlopen",
+        lambda request, timeout: captured.update(request=request, timeout=timeout)
+        or _Response(b"", status=204),
+    )
+
+    judit_client._delete_tracking_sync(tracking_id)
+
+    request = captured["request"]
+    expected = f"{judit_client.JUDIT_TRACKING_URL}/{expected_suffix}"
+    if request.full_url != expected:
+        raise AssertionError(f"unexpected tracking delete URL: {request.full_url!r}")
+
+
+@pytest.mark.parametrize("tracking_id", ["", " ", "\t\n"])
+def test_delete_tracking_rejects_empty_or_whitespace_identifier(
+    tracking_id: str,
+) -> None:
+    with pytest.raises(ValueError, match="tracking_id is required"):
+        judit_client._delete_tracking_sync(tracking_id)
