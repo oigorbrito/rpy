@@ -396,9 +396,9 @@ def test_delete_tracking_encodes_dot_segments_and_trims_whitespace(
         raise AssertionError(f"unexpected tracking delete URL: {request.full_url!r}")
 
 
-@pytest.mark.parametrize("tracking_id", ["", " ", "\t\n"])
-def test_delete_tracking_rejects_empty_or_whitespace_identifier(
-    tracking_id: str,
+@pytest.mark.parametrize("tracking_id", ["", " ", "\t\n", None, b"track", 123])
+def test_delete_tracking_rejects_empty_or_non_string_identifier(
+    tracking_id,
 ) -> None:
     with pytest.raises(ValueError, match="tracking_id is required"):
         judit_client._delete_tracking_sync(tracking_id)
