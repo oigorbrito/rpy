@@ -5,6 +5,10 @@ import unicodedata
 
 from app.unicode_security import (
     UNICODE_MODEL_VIEW_VERSION,
+    _combining,
+    _is_default_ignorable,
+    _script,
+    _visible_codepoint,
     model_view_text,
     model_view_value,
 )
@@ -63,3 +67,21 @@ def test_recursive_model_view_collects_only_flag_names_not_content() -> None:
     assert flags == ("zero_width", "default_ignorable", "mixed_script")
     assert "\u200b" not in rendered["header"]["title"]
     assert "\u0430" not in rendered["parties"][0]["name"]
+
+
+def test_character_property_helpers_are_bounded_and_cache_repeated_lookups() -> None:
+    helpers_and_values = (
+        (_is_default_ignorable, "\u200b"),
+        (_script, "a"),
+        (_combining, "\u0301"),
+        (_visible_codepoint, "\u0430"),
+    )
+    for helper, value in helpers_and_values:
+        helper.cache_clear()
+        first = helper(value)
+        second = helper(value)
+        assert first == second
+        info = helper.cache_info()
+        assert info.maxsize == 1024
+        assert info.misses == 1
+        assert info.hits == 1
