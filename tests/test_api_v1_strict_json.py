@@ -76,3 +76,25 @@ async def test_v1_summary_request_rejects_non_standard_numeric_constants_before_
         )
     if response.json().get("detail") != "request body must contain strict JSON":
         raise AssertionError(f"unexpected non-standard JSON response: {response.json()!r}")
+
+
+@pytest.mark.asyncio
+async def test_v1_summary_request_rejects_duplicate_idempotency_keys_before_auth() -> None:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/v1/resumos",
+            headers=[
+                ("Content-Type", "application/json"),
+                ("Idempotency-Key", "first-key"),
+                ("Idempotency-Key", "second-key"),
+            ],
+            content='{"cnj":"0000000-00.2026.8.21.0001","format":"json"}',
+        )
+
+    if response.status_code != 400:
+        raise AssertionError(
+            f"expected duplicate Idempotency-Key to return 400, got {response.status_code}"
+        )
+    if response.json().get("detail") != "Idempotency-Key must appear exactly once":
+        raise AssertionError(f"unexpected duplicate idempotency response: {response.json()!r}")
