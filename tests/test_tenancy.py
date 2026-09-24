@@ -52,3 +52,17 @@ def test_parse_carteira_seed_rejects_bad_values(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setenv("RPY_TENANT_PROCESSES", f'{{"{tenant}": "not-a-list"}}')
     with pytest.raises(RuntimeError, match="lists of CNJ"):
         parse_carteira_seed()
+
+def test_parse_carteira_seed_rejects_duplicate_tenant_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tenant = str(uuid4())
+    monkeypatch.setenv(
+        "RPY_TENANT_PROCESSES",
+        (
+            f'{{"{tenant}":["0000000-00.0000.0.00.0001"],'
+            f'"{tenant}":["0000000-00.0000.0.00.0002"]}}'
+        ),
+    )
+    with pytest.raises(RuntimeError, match="must be valid JSON"):
+        parse_carteira_seed()
