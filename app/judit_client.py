@@ -10,6 +10,8 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
+from app.json_utils import loads_strict_json
+
 JUDIT_REQUESTS_URL = "https://requests.production.judit.io/requests/"
 JUDIT_TRACKING_URL = "https://tracking.production.judit.io/tracking"
 JUDIT_LAWSUITS_URL = "https://lawsuits.production.judit.io/lawsuits"
@@ -135,8 +137,8 @@ def _provider_request(
     if not raw:
         return None
     try:
-        body: Any = json.loads(raw)
-    except (json.JSONDecodeError, UnicodeDecodeError):
+        body: Any = loads_strict_json(raw)
+    except ValueError:
         raise JuditRequestError("Judit returned an invalid response") from None
     if not isinstance(body, dict):
         raise JuditRequestError("Judit returned an invalid response")

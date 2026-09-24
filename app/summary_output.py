@@ -4,6 +4,8 @@ import json
 import re
 from typing import Any
 
+from app.json_utils import loads_strict_json
+
 from app.summary_contract import CONDITIONAL_SUMMARY_FIELDS
 
 SUMMARY_OUTPUT_SCHEMA: dict[str, Any] = {
@@ -166,8 +168,8 @@ def _claims(value: Any) -> list[dict[str, Any]]:
 
 def parse_structured_summary(raw: str) -> dict[str, Any]:
     try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError as exc:
+        payload = loads_strict_json(raw)
+    except ValueError as exc:
         raise ValueError("provider structured summary is not valid JSON") from exc
     if not isinstance(payload, dict):
         raise ValueError("provider structured summary must be a JSON object")

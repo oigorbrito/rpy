@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-import json
 import os
 from uuid import UUID
+
+from app.json_utils import loads_strict_json
 
 VALIDATE_CARTEIRA_ENV = "RPY_TENANT_PROCESSES"
 
@@ -37,8 +38,8 @@ def parse_carteira_seed() -> dict[UUID, list[str]]:
     if not raw:
         return {}
     try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError as exc:
+        parsed = loads_strict_json(raw)
+    except ValueError as exc:
         raise RuntimeError(f"{VALIDATE_CARTEIRA_ENV} must be valid JSON") from exc
     if not isinstance(parsed, dict):
         raise RuntimeError(f"{VALIDATE_CARTEIRA_ENV} must map tenant UUIDs to CNJ lists")
