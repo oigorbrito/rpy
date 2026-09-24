@@ -26,8 +26,8 @@ class _RequestBodyTooLarge(Exception):
     pass
 
 
-class JuditWebhookBodyLimitMiddleware:
-    """Bound Judit webhook bodies even when Content-Length is absent or forged."""
+class InboundPostBodyLimitMiddleware:
+    """Bound inbound POST bodies even when Content-Length is absent or forged."""
 
     def __init__(self, app: Callable[..., Awaitable[Any]]) -> None:
         self.app = app
@@ -36,7 +36,6 @@ class JuditWebhookBodyLimitMiddleware:
         if (
             scope.get("type") != "http"
             or str(scope.get("method") or "").upper() != "POST"
-            or not str(scope.get("path") or "").startswith("/webhooks/judit/")
         ):
             await self.app(scope, receive, send)
             return
@@ -76,3 +75,8 @@ class JuditWebhookBodyLimitMiddleware:
                 status_code=413,
             )
             await response(scope, receive, send)
+
+
+# Backward-compatible name retained for tests/importers while the middleware now
+# protects every inbound POST at the same application-level byte boundary.
+JuditWebhookBodyLimitMiddleware = InboundPostBodyLimitMiddleware
