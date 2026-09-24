@@ -6,11 +6,13 @@ from typing import Any
 import asyncpg
 from pgvector.asyncpg import register_vector
 
+from app.json_utils import loads_strict_json
+
 
 def _encode_json(value: Any) -> str:
     if isinstance(value, str):
         try:
-            json.loads(value)
+            loads_strict_json(value)
         except (TypeError, ValueError, json.JSONDecodeError):
             return json.dumps(value)
         return value
