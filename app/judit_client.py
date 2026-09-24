@@ -135,8 +135,8 @@ def _provider_request(
     if not raw:
         return None
     try:
-        body: Any = json.loads(raw)
-    except (json.JSONDecodeError, UnicodeDecodeError):
+        body: Any = loads_strict_json(raw)
+    except ValueError:
         raise JuditRequestError("Judit returned an invalid response") from None
     if not isinstance(body, dict):
         raise JuditRequestError("Judit returned an invalid response")
