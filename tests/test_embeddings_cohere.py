@@ -112,3 +112,44 @@ def test_cohere_embed_rejects_oversized_response(monkeypatch) -> None:
             dimensions=1024,
             timeout_seconds=1,
         )
+
+
+class _RawEmbedResponse:
+    def __init__(self, raw: bytes) -> None:
+        self._raw = raw
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def read(self, amount: int = -1) -> bytes:
+        return self._raw if amount < 0 else self._raw[:amount]
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b'{"embeddings":{"float":[]},"embeddings":{"float":[]}}',
+        b'{"embeddings":{"float":[[NaN]]}}',
+    ],
+)
+def test_cohere_embed_rejects_ambiguous_provider_json(
+    monkeypatch: pytest.MonkeyPatch,
+    raw: bytes,
+) -> None:
+    monkeypatch.setattr(
+        embeddings_cohere,
+        "urlopen",
+        lambda request, timeout: _RawEmbedResponse(raw),
+    )
+    with pytest.raises(RuntimeError, match="not valid JSON"):
+        embeddings_cohere._post_embed_sync(
+            api_key="synthetic-key",
+            texts=["texto"],
+            model="embed-v4.0",
+            input_type="search_document",
+            dimensions=1024,
+            timeout_seconds=1,
+        )
