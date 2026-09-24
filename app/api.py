@@ -16,7 +16,7 @@ from app.claim_evidence import claim_evidence_is_publishable, load_summary_claim
 from app.db import create_pool
 from app.frontend import router as frontend_router
 from app.http_auth_config import validate_http_auth_config
-from app.http_limits import JuditWebhookBodyLimitMiddleware, judit_webhook_max_body_bytes
+from app.http_limits import InboundPostBodyLimitMiddleware, judit_webhook_max_body_bytes
 from app.json_utils import decode_json_object
 from app.judit import normalize_cnj, parse_event
 from app.judit_client import JuditRequestError
@@ -57,7 +57,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Rpy", lifespan=lifespan)
 app.add_middleware(ApiKeySecurityMiddleware)
-app.add_middleware(JuditWebhookBodyLimitMiddleware)
+app.add_middleware(InboundPostBodyLimitMiddleware)
 app.add_middleware(JuditWebhookSecretRedactionMiddleware)
 app.add_middleware(SecurityResponseHeadersMiddleware)
 app.include_router(api_v1_router)

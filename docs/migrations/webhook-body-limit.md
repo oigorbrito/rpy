@@ -8,7 +8,7 @@ Bound inbound Judit webhook payloads before JSON parsing or database work.
 
 `JUDIT_WEBHOOK_MAX_BODY_BYTES` defaults to 5 MiB (`5242880`). Invalid or non-positive configuration fails application startup.
 
-The middleware applies only to `POST /webhooks/judit/*` and enforces the limit in two layers:
+The application middleware applies the same byte ceiling to every inbound `POST`, including `POST /webhooks/judit/*`, `/v1/resumos`, and tracking batch requests. This preserves the webhook limit as the deployment-wide POST ceiling and enforces it in two layers:
 
 - rejects an oversized declared `Content-Length` before the route runs
 - counts streamed ASGI request chunks so requests without `Content-Length` or with a forged header cannot bypass the limit

@@ -8,19 +8,25 @@ from hypothesis import given, settings, strategies as st
 
 from app.http_limits import (
     DEFAULT_JUDIT_WEBHOOK_MAX_BODY_BYTES,
+    InboundPostBodyLimitMiddleware,
     JuditWebhookBodyLimitMiddleware,
     judit_webhook_max_body_bytes,
 )
 
 
-def _scope(*, content_length: int | None = None) -> dict:
+def _scope(
+    *,
+    content_length: int | None = None,
+    method: str = "POST",
+    path: str = "/webhooks/judit/token",
+) -> dict:
     headers = []
     if content_length is not None:
         headers.append((b"content-length", str(content_length).encode()))
     return {
         "type": "http",
-        "method": "POST",
-        "path": "/webhooks/judit/token",
+        "method": method,
+        "path": path,
         "headers": headers,
         "http_version": "1.1",
         "scheme": "http",
@@ -176,3 +182,78 @@ def test_streamed_webhook_limit_is_invariant_to_chunk_boundaries(
     starts = [message for message in sent if message["type"] == "http.response.start"]
     assert len(starts) == 1  # nosec B101
     assert starts[0]["status"] == (413 if total > limit else 204)  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_public_summary_post_is_rejected_before_route_parsing(monkeypatch) -> None:
+    monkeypatch.setenv("JUDIT_WEBHOOK_MAX_BODY_BYTES", "10")
+    called = False
+
+    async def app(scope, receive, send):
+        nonlocal called
+        called = True
+
+    middleware = InboundPostBodyLimitMiddleware(app)
+    sent = await _run(
+        middleware,
+        _scope(content_length=11, path="/v1/resumos"),
+        [{"type": "http.request", "body": b"", "more_body": False}],
+    )
+
+    if called:
+        raise AssertionError("oversized public POST reached the route")
+    starts = [message for message in sent if message["type"] == "http.response.start"]
+    if len(starts) != 1 or starts[0]["status"] != 413:
+        raise AssertionError(f"expected one 413 response, got {starts!r}")
+
+
+@pytest.mark.asyncio
+async def test_public_tracking_post_rejects_underdeclared_stream(monkeypatch) -> None:
+    monkeypatch.setenv("JUDIT_WEBHOOK_MAX_BODY_BYTES", "10")
+
+    async def app(scope, receive, send):
+        while True:
+            message = await receive()
+            if message["type"] != "http.request" or not message.get("more_body", False):
+                break
+        await send({"type": "http.response.start", "status": 204, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    middleware = InboundPostBodyLimitMiddleware(app)
+    sent = await _run(
+        middleware,
+        _scope(content_length=5, path="/v1/trackings"),
+        [
+            {"type": "http.request", "body": b"123456", "more_body": True},
+            {"type": "http.request", "body": b"78901", "more_body": False},
+        ],
+    )
+
+    starts = [message for message in sent if message["type"] == "http.response.start"]
+    if len(starts) != 1 or starts[0]["status"] != 413:
+        raise AssertionError(f"expected streamed 413 response, got {starts!r}")
+
+
+@pytest.mark.asyncio
+async def test_non_post_request_bypasses_body_limiter(monkeypatch) -> None:
+    monkeypatch.setenv("JUDIT_WEBHOOK_MAX_BODY_BYTES", "1")
+    called = False
+
+    async def app(scope, receive, send):
+        nonlocal called
+        called = True
+        await send({"type": "http.response.start", "status": 204, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    middleware = InboundPostBodyLimitMiddleware(app)
+    sent = await _run(
+        middleware,
+        _scope(content_length=100, method="GET", path="/health"),
+        [{"type": "http.request", "body": b"x" * 100, "more_body": False}],
+    )
+
+    if not called:
+        raise AssertionError("non-POST request should bypass the body limiter")
+    starts = [message for message in sent if message["type"] == "http.response.start"]
+    if len(starts) != 1 or starts[0]["status"] != 204:
+        raise AssertionError(f"expected passthrough 204 response, got {starts!r}")
