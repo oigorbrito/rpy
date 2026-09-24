@@ -14,7 +14,7 @@ Rpy does **not** claim full UTS #39 identifier-profile or confusable-skeleton co
 - detect tokens that mix letters from the explicitly supported Latin, Greek, Cyrillic, Armenian, Hebrew and Arabic script ranges, and visibly expand the cross-script characters;
 - leave ordinary Portuguese accents and single-script prose unchanged.
 
-The model view is versioned as `unicode-model-view-v1`.
+The model view is versioned as `unicode-model-view-v2`.
 
 ## Provenance and privacy
 
