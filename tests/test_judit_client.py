@@ -327,3 +327,20 @@ def test_judit_response_rejects_duplicate_json_keys(
     )
     with pytest.raises(judit_client.JuditRequestError, match="invalid response"):
         judit_client._create_request_sync("0000000-00.0000.0.00.0001")
+
+
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+def test_judit_response_rejects_non_standard_numeric_constants(
+    monkeypatch: pytest.MonkeyPatch,
+    constant: str,
+) -> None:
+    monkeypatch.setenv("JUDIT_API_KEY", uuid4().hex)
+    monkeypatch.setattr(
+        judit_client.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: _Response(
+            f'{{"request_id":"req-1","score":{constant}}}'.encode("utf-8")
+        ),
+    )
+    with pytest.raises(judit_client.JuditRequestError, match="invalid response"):
+        judit_client._create_request_sync("0000000-00.0000.0.00.0001")
