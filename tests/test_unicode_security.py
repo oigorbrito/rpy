@@ -134,5 +134,9 @@ def test_supported_single_script_or_separate_multilingual_tokens_are_preserved(
     source: str,
 ) -> None:
     view = model_view_text(source)
-    assert view.text == source
-    assert view.flags == ()
+    if view.text != source:
+        raise AssertionError(
+            f"expected supported text to remain unchanged: {view.text!r}"
+        )
+    if view.flags != ():
+        raise AssertionError(f"unexpected Unicode flags: {view.flags!r}")
