@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import unicodedata
 
+import pytest
+
 from app.unicode_security import (
     UNICODE_MODEL_VIEW_VERSION,
     _combining,
@@ -20,10 +22,17 @@ def test_portuguese_legal_text_preserves_diacritics_and_canonical_equivalence() 
 
     view = model_view_text(decomposed)
 
-    assert view.text == source
-    assert view.flags == ()
+    if view.text != source:
+        raise AssertionError(
+            f"expected single-script/multilingual text to remain unchanged: {view.text!r}"
+        )
+    if view.flags != ():
+        raise AssertionError(f"unexpected Unicode flags: {view.flags!r}")
     assert view.normalized_sha256 == hashlib.sha256(source.encode("utf-8")).hexdigest()
-    assert UNICODE_MODEL_VIEW_VERSION == "unicode-model-view-v1"
+    if UNICODE_MODEL_VIEW_VERSION != "unicode-model-view-v2":
+        raise AssertionError(
+            f"unexpected Unicode model-view version: {UNICODE_MODEL_VIEW_VERSION}"
+        )
 
 
 def test_bidi_and_zero_width_controls_are_made_explicit() -> None:
@@ -89,3 +98,45 @@ def test_character_property_helpers_are_bounded_and_cache_repeated_lookups() -> 
             raise AssertionError(f"expected one Unicode cache miss, got {info.misses}")
         if info.hits != 1:
             raise AssertionError(f"expected one Unicode cache hit, got {info.hits}")
+
+
+@pytest.mark.parametrize(
+    ("source", "expected_marker"),
+    [
+        ("p\u0561ypal", "U+0561 ARMENIAN SMALL LETTER AYB"),
+        ("pa\u05d0pal", "U+05D0 HEBREW LETTER ALEF"),
+        ("pa\u0627pal", "U+0627 ARABIC LETTER ALEF"),
+    ],
+)
+def test_extended_cross_script_tokens_are_exposed(
+    source: str,
+    expected_marker: str,
+) -> None:
+    view = model_view_text(source)
+    if expected_marker not in view.text:
+        raise AssertionError(
+            f"expected marker {expected_marker!r} in rendered model view {view.text!r}"
+        )
+    if view.flags != ("mixed_script",):
+        raise AssertionError(f"unexpected Unicode flags: {view.flags!r}")
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "Հայաստանի դատարան",
+        "בית משפט",
+        "قرار المحكمة",
+        "Tribunal Հայաստանի בית قرار",
+    ],
+)
+def test_supported_single_script_or_separate_multilingual_tokens_are_preserved(
+    source: str,
+) -> None:
+    view = model_view_text(source)
+    if view.text != source:
+        raise AssertionError(
+            f"expected supported text to remain unchanged: {view.text!r}"
+        )
+    if view.flags != ():
+        raise AssertionError(f"unexpected Unicode flags: {view.flags!r}")

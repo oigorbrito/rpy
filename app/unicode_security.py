@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
 
-UNICODE_MODEL_VIEW_VERSION = "unicode-model-view-v1"
+UNICODE_MODEL_VIEW_VERSION = "unicode-model-view-v2"
 
 _BIDI_CONTROL_CODEPOINTS = {
     0x061C,
@@ -49,17 +49,32 @@ def _is_default_ignorable(character: str) -> bool:
     return any(start <= codepoint <= end for start, end in _EXTRA_DEFAULT_IGNORABLE_RANGES)
 
 
+_SCRIPT_RANGES = (
+    ("Latin", ((0x0041, 0x024F), (0x1E00, 0x1EFF))),
+    ("Greek", ((0x0370, 0x03FF), (0x1F00, 0x1FFF))),
+    ("Cyrillic", ((0x0400, 0x052F), (0x2DE0, 0x2DFF), (0xA640, 0xA69F))),
+    ("Armenian", ((0x0530, 0x058F),)),
+    ("Hebrew", ((0x0590, 0x05FF),)),
+    (
+        "Arabic",
+        (
+            (0x0600, 0x06FF),
+            (0x0750, 0x077F),
+            (0x08A0, 0x08FF),
+            (0xFB50, 0xFDFF),
+            (0xFE70, 0xFEFF),
+        ),
+    ),
+)
+
+
 @lru_cache(maxsize=1024)
 def _script(character: str) -> str | None:
     if not character.isalpha():
         return None
-    name = unicodedata.name(character, "")
-    for prefix, script in (
-        ("LATIN ", "Latin"),
-        ("GREEK ", "Greek"),
-        ("CYRILLIC ", "Cyrillic"),
-    ):
-        if name.startswith(prefix):
+    codepoint = ord(character)
+    for script, ranges in _SCRIPT_RANGES:
+        if any(start <= codepoint <= end for start, end in ranges):
             return script
     return None
 
