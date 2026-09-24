@@ -56,7 +56,12 @@ def server_request_timeout_seconds() -> float:
 
 
 def _frame(payload: dict[str, Any]) -> bytes:
-    body = json.dumps(payload, ensure_ascii=True, separators=(",", ":")).encode("utf-8")
+    body = json.dumps(
+        payload,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
     if len(body) > MAX_FRAME_BYTES:
         raise ValueError("attachment parser request exceeds frame limit")
     return struct.pack("!I", len(body)) + body
