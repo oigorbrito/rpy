@@ -216,6 +216,19 @@ def test_judit_api_key_is_required() -> None:
     assert "JUDIT_API_KEY is required" in preflight.validate(values)
 
 
+def test_deploy_preflight_rejects_ambiguous_legacy_bearer_prefixes() -> None:
+    tenant_id = "00000000-0000-0000-0000-000000000001"
+    for prefix in ("sk_live_", "sk_test_"):
+        token = prefix + "legacytoken"
+        values = _valid_values()
+        values["RPY_BEARER_TOKENS"] = f'{{"{token}":"{tenant_id}"}}'
+        _require_error(
+            values,
+            "RPY_BEARER_TOKENS is invalid: "
+            "legacy bearer tokens must not use sk_live_ or sk_test_ prefixes",
+        )
+
+
 def test_bearer_mapping_requires_tenant_uuid() -> None:
     values = _valid_values()
     values["RPY_BEARER_TOKENS"] = '{"tenant-token":"not-a-uuid"}'
