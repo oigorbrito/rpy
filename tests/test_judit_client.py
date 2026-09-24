@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import urllib.error
+from uuid import uuid4
 
 import pytest
 
@@ -311,3 +312,18 @@ def test_create_request_enables_attachments_only_after_explicit_opt_in(
 
     assert result.request_id == "req-att"
     assert json.loads(captured["request"].data)["with_attachments"] is True
+
+
+def test_judit_response_rejects_duplicate_json_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("JUDIT_API_KEY", uuid4().hex)
+    monkeypatch.setattr(
+        judit_client.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: _Response(
+            b'{"request_id":"first","request_id":"second"}'
+        ),
+    )
+    with pytest.raises(judit_client.JuditRequestError, match="invalid response"):
+        judit_client._create_request_sync("0000000-00.0000.0.00.0001")
