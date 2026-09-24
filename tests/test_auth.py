@@ -78,6 +78,16 @@ def test_whitespace_in_configured_token_fails_configuration(monkeypatch, token: 
         configured_bearer_tokens()
 
 
+def test_comma_in_configured_token_fails_configuration(monkeypatch) -> None:
+    monkeypatch.setenv(
+        "RPY_BEARER_TOKENS",
+        json.dumps({"token,other": str(uuid4())}),
+    )
+
+    with pytest.raises(RuntimeError, match="must not contain commas"):
+        configured_bearer_tokens()
+
+
 @pytest.mark.parametrize("environment", ["live", "test"])
 def test_api_key_prefix_is_rejected_for_legacy_bearer_configuration(
     monkeypatch, environment: str
