@@ -441,10 +441,7 @@ def validate(values: dict[str, str]) -> list[str]:
 
     for key in ("JUDIT_WEBHOOK_TOKEN", "RPY_OPS_TOKEN"):
         raw_token = str(values.get(key) or "")
-        if raw_token and (
-            raw_token != raw_token.strip()
-            or any(character.isspace() for character in raw_token)
-        ):
+        if any(character.isspace() for character in raw_token):
             errors.append(f"{key} must not contain whitespace")
 
     _validate_positive_numeric(
