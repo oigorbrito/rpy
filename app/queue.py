@@ -98,6 +98,13 @@ RETURNING j.id, j.status, j.task_name, j.payload;
 """
 
 
+def _strict_json_dumps(value: Any, *, label: str) -> str:
+    try:
+        return json.dumps(value, allow_nan=False)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label} must be strict JSON") from exc
+
+
 def _retry_backoff_seconds(attempts: int) -> int:
     if isinstance(attempts, bool) or not isinstance(attempts, int):
         raise ValueError("attempts must be an integer")
@@ -136,7 +143,7 @@ async def enqueue(
     return await conn.fetchrow(
         ENQUEUE_SQL,
         task_name,
-        json.dumps(payload),
+        _strict_json_dumps(payload, label="job payload"),
         priority,
         run_at,
         bounded_attempts,
@@ -162,7 +169,7 @@ async def complete(
         COMPLETE_SQL,
         job_id,
         worker_id,
-        json.dumps(result or {}),
+        _strict_json_dumps(result or {}, label="job result"),
     ) is not None
 
 
