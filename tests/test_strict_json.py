@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.json_utils import loads_strict_json
+from app.json_utils import decode_json_value, loads_strict_json
 
 
 def test_strict_json_accepts_nested_standard_json() -> None:
@@ -32,3 +32,15 @@ def test_strict_json_rejects_duplicate_object_keys(payload: bytes) -> None:
 def test_strict_json_rejects_non_standard_numeric_constants(constant: str) -> None:
     with pytest.raises(ValueError, match="non-standard numeric constant"):
         loads_strict_json(f'{{"value":{constant}}}')
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        '{"field":"first","field":"second"}',
+        '{"value":NaN}',
+    ],
+)
+def test_shared_json_decoder_uses_strict_semantics(payload: str) -> None:
+    with pytest.raises(ValueError):
+        decode_json_value(payload)
