@@ -17,3 +17,30 @@ def test_encode_json_preserves_already_serialized_json() -> None:
 
 def test_encode_json_serializes_plain_strings() -> None:
     assert _encode_json("not-json") == '"not-json"'
+
+
+def test_encode_json_wraps_ambiguous_pre_serialized_json_as_plain_string() -> None:
+    for raw in (
+        '{"a":1,"a":2}',
+        '{"value":NaN}',
+        '{"value":Infinity}',
+    ):
+        encoded = _encode_json(raw)
+        decoded = json.loads(encoded)
+        if decoded != raw:
+            raise AssertionError(
+                f"expected ambiguous JSON to be preserved as a string, got {decoded!r}"
+            )
+
+
+def test_encode_json_rejects_non_finite_native_values() -> None:
+    for value in (
+        {"value": float("nan")},
+        {"value": float("inf")},
+        {"value": float("-inf")},
+    ):
+        try:
+            _encode_json(value)
+        except ValueError:
+            continue
+        raise AssertionError(f"expected non-finite native value to be rejected: {value!r}")
