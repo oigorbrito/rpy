@@ -456,6 +456,19 @@ async def _latest_summary_payload(
 
 @router.post("/v1/resumos", status_code=202)
 async def create_summary_job(request: Request):
+    idempotency_values = request.headers.getlist("Idempotency-Key")
+    if not idempotency_values:
+        raise HTTPException(status_code=400, detail="Idempotency-Key is required")
+    if len(idempotency_values) != 1:
+        raise HTTPException(status_code=400, detail="Idempotency-Key must appear exactly once")
+    idempotency_key = idempotency_values[0].strip()
+    if not idempotency_key:
+        raise HTTPException(status_code=400, detail="Idempotency-Key is required")
+    if "," in idempotency_key:
+        raise HTTPException(status_code=400, detail="Idempotency-Key must appear exactly once")
+    if len(idempotency_key) > 255:
+        raise HTTPException(status_code=400, detail="Idempotency-Key is too long")
+
     try:
         body = loads_strict_json(await request.body())
     except (json.JSONDecodeError, UnicodeDecodeError):
@@ -476,16 +489,6 @@ async def create_summary_job(request: Request):
         raise HTTPException(status_code=400, detail="invalid process code") from None
     response_format = _summary_format(body.get("format"))
 
-    idempotency_values = request.headers.getlist("Idempotency-Key")
-    if not idempotency_values:
-        raise HTTPException(status_code=400, detail="Idempotency-Key is required")
-    if len(idempotency_values) != 1:
-        raise HTTPException(status_code=400, detail="Idempotency-Key must appear exactly once")
-    idempotency_key = idempotency_values[0].strip()
-    if not idempotency_key:
-        raise HTTPException(status_code=400, detail="Idempotency-Key is required")
-    if len(idempotency_key) > 255:
-        raise HTTPException(status_code=400, detail="Idempotency-Key is too long")
 
     principal = await principal_from_request(request, process_code=code)
     normalized_body = dict(body)
