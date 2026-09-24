@@ -257,3 +257,67 @@ async def test_non_post_request_bypasses_body_limiter(monkeypatch) -> None:
     starts = [message for message in sent if message["type"] == "http.response.start"]
     if len(starts) != 1 or starts[0]["status"] != 204:
         raise AssertionError(f"expected passthrough 204 response, got {starts!r}")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "headers",
+    [
+        [(b"content-length", b"5"), (b"content-length", b"5")],
+        [(b"content-length", b"5"), (b"content-length", b"6")],
+        [(b"content-length", b"5, 5")],
+        [(b"content-length", b"-1")],
+        [(b"content-length", b"not-a-number")],
+        [(b"content-length", b"5"), (b"transfer-encoding", b"chunked")],
+    ],
+)
+async def test_post_rejects_ambiguous_or_invalid_request_framing(
+    monkeypatch: pytest.MonkeyPatch,
+    headers: list[tuple[bytes, bytes]],
+) -> None:
+    monkeypatch.setenv("JUDIT_WEBHOOK_MAX_BODY_BYTES", "10")
+    called = False
+
+    async def app(scope, receive, send):
+        nonlocal called
+        called = True
+
+    scope = _scope()
+    scope["headers"] = headers
+    middleware = InboundPostBodyLimitMiddleware(app)
+    sent = await _run(
+        middleware,
+        scope,
+        [{"type": "http.request", "body": b"12345", "more_body": False}],
+    )
+
+    if called:
+        raise AssertionError("ambiguous request framing reached the application")
+    starts = [message for message in sent if message["type"] == "http.response.start"]
+    if len(starts) != 1 or starts[0]["status"] != 400:
+        raise AssertionError(f"expected one 400 response, got {starts!r}")
+
+
+@pytest.mark.asyncio
+async def test_single_decimal_content_length_remains_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("JUDIT_WEBHOOK_MAX_BODY_BYTES", "10")
+
+    async def app(scope, receive, send):
+        message = await receive()
+        if message.get("body") != b"12345":
+            raise AssertionError(f"unexpected request body: {message!r}")
+        await send({"type": "http.response.start", "status": 204, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    middleware = InboundPostBodyLimitMiddleware(app)
+    sent = await _run(
+        middleware,
+        _scope(content_length=5),
+        [{"type": "http.request", "body": b"12345", "more_body": False}],
+    )
+
+    starts = [message for message in sent if message["type"] == "http.response.start"]
+    if len(starts) != 1 or starts[0]["status"] != 204:
+        raise AssertionError(f"expected passthrough 204 response, got {starts!r}")
