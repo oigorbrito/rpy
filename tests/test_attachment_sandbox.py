@@ -5,6 +5,7 @@ import pytest
 
 from app.attachment_processing import AttachmentProcessingError, AttachmentProcessingLimits
 from app.attachment_sandbox import (
+    _frame,
     _handle_client,
     _parse_request,
     parse_attachment_sandboxed,
@@ -168,8 +169,10 @@ async def test_sandbox_rejects_missing_resource_limits_as_protocol_error(tmp_pat
         ).encode("utf-8")
         writer.write(struct.pack("!I", len(body)) + body)
         await writer.drain()
-        size = struct.unpack("!I", await reader.readexactly(4))[0]
-        response = json.loads((await reader.readexactly(size)).decode("utf-8"))
+        header = await asyncio.wait_for(reader.readexactly(4), timeout=5)
+        size = struct.unpack("!I", header)[0]
+        body = await asyncio.wait_for(reader.readexactly(size), timeout=5)
+        response = json.loads(body.decode("utf-8"))
         assert response["ok"] is False
         assert response["error_code"] == "parser_protocol_error"
         writer.close()
@@ -196,3 +199,47 @@ def test_parser_timeout_configuration_rejects_non_finite_values(
     monkeypatch.setenv(name, value)
     with pytest.raises(RuntimeError, match="finite number greater than zero"):
         reader()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b'{"version":1,"version":1,"content_type":"application/pdf"}',
+        b'{"version":1,"max_bytes":NaN,"chunk_chars":256,"data_b64":""}',
+        b'{"version":1,"max_bytes":Infinity,"chunk_chars":256,"data_b64":""}',
+    ],
+)
+async def test_sandbox_rejects_ambiguous_json_frames_as_protocol_error(
+    tmp_path,
+    raw: bytes,
+) -> None:
+    import json
+    import struct
+
+    socket_path = tmp_path / "parser.sock"
+    server = await asyncio.start_unix_server(_handle_client, path=str(socket_path))
+    try:
+        reader, writer = await asyncio.open_unix_connection(str(socket_path))
+        writer.write(struct.pack("!I", len(raw)) + raw)
+        await writer.drain()
+
+        header = await asyncio.wait_for(reader.readexactly(4), timeout=5)
+        size = struct.unpack("!I", header)[0]
+        body = await asyncio.wait_for(reader.readexactly(size), timeout=5)
+        response = json.loads(body.decode("utf-8"))
+        if response.get("ok") is not False:
+            raise AssertionError(f"unexpected sandbox response: {response!r}")
+        if response.get("error_code") != "parser_protocol_error":
+            raise AssertionError(f"unexpected sandbox error: {response!r}")
+        writer.close()
+        await writer.wait_closed()
+    finally:
+        server.close()
+        await server.wait_closed()
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_sandbox_outbound_frame_rejects_non_standard_numbers(value: float) -> None:
+    with pytest.raises(ValueError):
+        _frame({"version": 1, "value": value})
