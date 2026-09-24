@@ -15,6 +15,7 @@ from app.summary_output import (
 )
 
 _EVIDENCE_REF_RE = re.compile(r"^[pma]-[0-9a-f]{32}$")
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _CLAIM_ID_RE = re.compile(
     r"^(?:synthesis|current_status|"
     r"(?:timeline|attention|decisions|deadlines|related_processes|attachments):[0-9]+)$"
@@ -311,11 +312,20 @@ def claim_evidence_is_publishable(
             return False
         if status == "contradicted":
             return False
+        verification_reason = item.get("verification_reason")
+        if status is not None and status != "not_evaluated":
+            if not isinstance(verification_reason, str) or not verification_reason.strip():
+                return False
+
         sources = item.get("sources")
         if sources is None:
+            if status is not None and status != "not_evaluated":
+                return False
             continue
         if not isinstance(sources, list):
             return False
+
+        evaluated_relation_seen = False
         for source in sources:
             if not isinstance(source, dict):
                 return False
@@ -327,6 +337,29 @@ def claim_evidence_is_publishable(
                 return False
             if relation_status == "contradicted":
                 return False
+
+            relation_reason = source.get("verification_reason")
+            excerpt_sha256 = source.get("evidence_excerpt_sha256")
+            if excerpt_sha256 is not None and (
+                not isinstance(excerpt_sha256, str)
+                or not _SHA256_RE.fullmatch(excerpt_sha256)
+            ):
+                return False
+            if relation_status is not None and relation_status != "not_evaluated":
+                evaluated_relation_seen = True
+                if not isinstance(relation_reason, str) or not relation_reason.strip():
+                    return False
+                if not isinstance(excerpt_sha256, str) or not _SHA256_RE.fullmatch(
+                    excerpt_sha256
+                ):
+                    return False
+
+        if (
+            status is not None
+            and status != "not_evaluated"
+            and not evaluated_relation_seen
+        ):
+            return False
     return True
 
 
