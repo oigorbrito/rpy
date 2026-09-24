@@ -26,30 +26,35 @@ class _RequestBodyTooLarge(Exception):
     pass
 
 
-class JuditWebhookBodyLimitMiddleware:
-    """Bound Judit webhook bodies even when Content-Length is absent or forged."""
+class InboundPostBodyLimitMiddleware:
+    """Bound inbound POST bodies even when Content-Length is absent or forged."""
 
     def __init__(self, app: Callable[..., Awaitable[Any]]) -> None:
         self.app = app
+        self.limit = judit_webhook_max_body_bytes()
 
     async def __call__(self, scope: dict[str, Any], receive, send) -> None:
         if (
             scope.get("type") != "http"
             or str(scope.get("method") or "").upper() != "POST"
-            or not str(scope.get("path") or "").startswith("/webhooks/judit/")
         ):
             await self.app(scope, receive, send)
             return
 
-        limit = judit_webhook_max_body_bytes()
-        headers = {key.lower(): value for key, value in scope.get("headers", [])}
-        raw_content_length = headers.get(b"content-length")
+        raw_content_length = next(
+            (
+                value
+                for key, value in scope.get("headers", [])
+                if key.lower() == b"content-length"
+            ),
+            None,
+        )
         if raw_content_length is not None:
             try:
                 content_length = int(raw_content_length)
             except (TypeError, ValueError):
                 content_length = None
-            if content_length is not None and content_length > limit:
+            if content_length is not None and content_length > self.limit:
                 response = JSONResponse(
                     {"detail": "request body too large"},
                     status_code=413,
@@ -64,7 +69,7 @@ class JuditWebhookBodyLimitMiddleware:
             message = await receive()
             if message.get("type") == "http.request":
                 received += len(message.get("body", b""))
-                if received > limit:
+                if received > self.limit:
                     raise _RequestBodyTooLarge
             return message
 
@@ -76,3 +81,8 @@ class JuditWebhookBodyLimitMiddleware:
                 status_code=413,
             )
             await response(scope, receive, send)
+
+
+# Backward-compatible name retained for tests/importers while the middleware now
+# protects every inbound POST at the same application-level byte boundary.
+JuditWebhookBodyLimitMiddleware = InboundPostBodyLimitMiddleware

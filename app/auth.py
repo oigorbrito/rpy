@@ -35,6 +35,10 @@ def configured_bearer_tokens() -> dict[str, UUID]:
             raise RuntimeError(
                 "RPY_BEARER_TOKENS bearer tokens must not contain whitespace"
             )
+        if api_key_environment(token) is not None:
+            raise RuntimeError(
+                "RPY_BEARER_TOKENS legacy tokens must not use sk_live_ or sk_test_ prefixes"
+            )
         if not isinstance(tenant_id, str):
             raise RuntimeError("RPY_BEARER_TOKENS tenant ids must be UUID strings")
         try:
