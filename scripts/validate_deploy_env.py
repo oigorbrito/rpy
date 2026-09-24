@@ -526,6 +526,8 @@ def validate(values: dict[str, str]) -> list[str]:
                     raise ValueError("bearer token keys must be non-empty strings")
                 if token != token.strip() or any(char.isspace() for char in token):
                     raise ValueError("legacy bearer tokens must not contain whitespace")
+                if "," in token:
+                    raise ValueError("legacy bearer tokens must not contain commas")
                 if token.startswith(("sk_live_", "sk_test_")):
                     raise ValueError(
                         "legacy bearer tokens must not use sk_live_ or sk_test_ prefixes"
