@@ -280,6 +280,54 @@ def claim_evidence_is_complete(
     return set(observed) == set(expected)
 
 
+def _is_evaluated_status(status: Any) -> bool:
+    return status is not None and status != "not_evaluated"
+
+
+def _valid_verification_reason(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _valid_excerpt_sha256(value: Any) -> bool:
+    return isinstance(value, str) and bool(_SHA256_RE.fullmatch(value))
+
+
+def _claim_verification_metadata(
+    item: dict[str, Any],
+) -> tuple[bool, bool]:
+    status = item.get("verification_status")
+    if status is not None and status not in VERIFICATION_STATUSES:
+        return False, False
+    if status == "contradicted":
+        return False, False
+    evaluated = _is_evaluated_status(status)
+    if evaluated and not _valid_verification_reason(item.get("verification_reason")):
+        return False, False
+    return True, evaluated
+
+
+def _source_verification_metadata(
+    source: dict[str, Any],
+) -> tuple[bool, bool]:
+    status = source.get("verification_status")
+    if status is not None and status not in VERIFICATION_STATUSES:
+        return False, False
+    if status == "contradicted":
+        return False, False
+
+    digest = source.get("evidence_excerpt_sha256")
+    if digest is not None and not _valid_excerpt_sha256(digest):
+        return False, False
+
+    evaluated = _is_evaluated_status(status)
+    if evaluated:
+        if not _valid_verification_reason(source.get("verification_reason")):
+            return False, False
+        if not _valid_excerpt_sha256(digest):
+            return False, False
+    return True, evaluated
+
+
 def claim_evidence_is_publishable(
     structured_output: dict[str, Any] | None,
     claim_evidence: list[dict[str, Any]],
@@ -306,20 +354,15 @@ def claim_evidence_is_publishable(
         return False
     if not structured_summary_document_matches_process(structured_output, context):
         return False
+
     for item in claim_evidence:
-        status = item.get("verification_status")
-        if status is not None and status not in VERIFICATION_STATUSES:
+        valid_claim_metadata, evaluated_claim = _claim_verification_metadata(item)
+        if not valid_claim_metadata:
             return False
-        if status == "contradicted":
-            return False
-        verification_reason = item.get("verification_reason")
-        if status is not None and status != "not_evaluated":
-            if not isinstance(verification_reason, str) or not verification_reason.strip():
-                return False
 
         sources = item.get("sources")
         if sources is None:
-            if status is not None and status != "not_evaluated":
+            if evaluated_claim:
                 return False
             continue
         if not isinstance(sources, list):
@@ -329,36 +372,14 @@ def claim_evidence_is_publishable(
         for source in sources:
             if not isinstance(source, dict):
                 return False
-            relation_status = source.get("verification_status")
-            if (
-                relation_status is not None
-                and relation_status not in VERIFICATION_STATUSES
-            ):
+            valid_source_metadata, evaluated_source = _source_verification_metadata(
+                source
+            )
+            if not valid_source_metadata:
                 return False
-            if relation_status == "contradicted":
-                return False
+            evaluated_relation_seen = evaluated_relation_seen or evaluated_source
 
-            relation_reason = source.get("verification_reason")
-            excerpt_sha256 = source.get("evidence_excerpt_sha256")
-            if excerpt_sha256 is not None and (
-                not isinstance(excerpt_sha256, str)
-                or not _SHA256_RE.fullmatch(excerpt_sha256)
-            ):
-                return False
-            if relation_status is not None and relation_status != "not_evaluated":
-                evaluated_relation_seen = True
-                if not isinstance(relation_reason, str) or not relation_reason.strip():
-                    return False
-                if not isinstance(excerpt_sha256, str) or not _SHA256_RE.fullmatch(
-                    excerpt_sha256
-                ):
-                    return False
-
-        if (
-            status is not None
-            and status != "not_evaluated"
-            and not evaluated_relation_seen
-        ):
+        if evaluated_claim and not evaluated_relation_seen:
             return False
     return True
 
