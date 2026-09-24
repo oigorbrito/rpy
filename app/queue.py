@@ -98,6 +98,13 @@ RETURNING j.id, j.status, j.task_name, j.payload;
 """
 
 
+def _retry_backoff_seconds(attempts: int) -> int:
+    if isinstance(attempts, bool) or not isinstance(attempts, int):
+        raise ValueError("attempts must be an integer")
+    exponent = min(9, max(1, attempts))
+    return min(300, 2 ** exponent)
+
+
 def _validate_max_attempts(max_attempts: int) -> int:
     if isinstance(max_attempts, bool) or not isinstance(max_attempts, int):
         raise ValueError("max_attempts must be an integer")
@@ -161,7 +168,7 @@ async def fail(
     error: str,
     permanent: bool = False,
 ) -> str | None:
-    backoff_seconds = min(300, 2 ** max(1, attempts))
+    backoff_seconds = _retry_backoff_seconds(attempts)
     retry_at = datetime.now(UTC) + timedelta(seconds=backoff_seconds)
     row = await conn.fetchrow(
         FAIL_SQL,
