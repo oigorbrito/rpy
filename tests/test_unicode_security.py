@@ -25,7 +25,7 @@ def test_portuguese_legal_text_preserves_diacritics_and_canonical_equivalence() 
     assert view.text == source
     assert view.flags == ()
     assert view.normalized_sha256 == hashlib.sha256(source.encode("utf-8")).hexdigest()
-    assert UNICODE_MODEL_VIEW_VERSION == "unicode-model-view-v1"
+    assert UNICODE_MODEL_VIEW_VERSION == "unicode-model-view-v2"
 
 
 def test_bidi_and_zero_width_controls_are_made_explicit() -> None:
