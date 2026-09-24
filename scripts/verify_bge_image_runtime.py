@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
-import json
 import os
 from pathlib import Path
+
+from app.json_utils import loads_strict_json
 
 REQUIRED_OFFLINE_ENV = (
     "PIP_NO_INDEX",
@@ -29,15 +30,18 @@ def validate(*, model_dir: Path, environ: dict[str, str] | None = None) -> list[
             errors.append(f"BGE model artifact is missing config.json: {model_dir}")
         else:
             try:
-                payload = json.loads(config.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError) as exc:
+                payload = loads_strict_json(config.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
                 errors.append(f"BGE model config.json is invalid: {exc}")
             else:
-                hidden_size = payload.get("hidden_size")
-                if hidden_size not in {None, 1024}:
-                    errors.append(
-                        f"BGE model hidden_size must be 1024 when declared, got {hidden_size!r}"
-                    )
+                if not isinstance(payload, dict):
+                    errors.append("BGE model config.json must contain an object")
+                else:
+                    hidden_size = payload.get("hidden_size")
+                    if hidden_size not in {None, 1024}:
+                        errors.append(
+                            f"BGE model hidden_size must be 1024 when declared, got {hidden_size!r}"
+                        )
 
     for key in REQUIRED_OFFLINE_ENV:
         value = str(env.get(key) or "").strip().casefold()

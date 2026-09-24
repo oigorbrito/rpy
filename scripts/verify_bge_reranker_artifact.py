@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
-import json
 import os
 from pathlib import Path
+
+from app.json_utils import loads_strict_json
 
 REQUIRED_OFFLINE_ENV = (
     "PIP_NO_INDEX",
@@ -29,8 +30,8 @@ def validate(*, model_dir: Path, environ: dict[str, str] | None = None) -> list[
             errors.append(f"BGE reranker artifact is missing config.json: {model_dir}")
         else:
             try:
-                payload = json.loads(config.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError) as exc:
+                payload = loads_strict_json(config.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
                 errors.append(f"BGE reranker config.json is invalid: {exc}")
             else:
                 if not isinstance(payload, dict):
