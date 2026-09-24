@@ -31,6 +31,7 @@ class InboundPostBodyLimitMiddleware:
 
     def __init__(self, app: Callable[..., Awaitable[Any]]) -> None:
         self.app = app
+        self.limit = judit_webhook_max_body_bytes()
 
     async def __call__(self, scope: dict[str, Any], receive, send) -> None:
         if (
@@ -40,15 +41,20 @@ class InboundPostBodyLimitMiddleware:
             await self.app(scope, receive, send)
             return
 
-        limit = judit_webhook_max_body_bytes()
-        headers = {key.lower(): value for key, value in scope.get("headers", [])}
-        raw_content_length = headers.get(b"content-length")
+        raw_content_length = next(
+            (
+                value
+                for key, value in scope.get("headers", [])
+                if key.lower() == b"content-length"
+            ),
+            None,
+        )
         if raw_content_length is not None:
             try:
                 content_length = int(raw_content_length)
             except (TypeError, ValueError):
                 content_length = None
-            if content_length is not None and content_length > limit:
+            if content_length is not None and content_length > self.limit:
                 response = JSONResponse(
                     {"detail": "request body too large"},
                     status_code=413,
@@ -63,7 +69,7 @@ class InboundPostBodyLimitMiddleware:
             message = await receive()
             if message.get("type") == "http.request":
                 received += len(message.get("body", b""))
-                if received > limit:
+                if received > self.limit:
                     raise _RequestBodyTooLarge
             return message
 
