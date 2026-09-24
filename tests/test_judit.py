@@ -13,6 +13,48 @@ def _fixture(name: str) -> dict:
     return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
 
 
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_parse_event_rejects_non_finite_numbers_before_persistence(value: float) -> None:
+    body = {
+        "callback_id": "cb-non-finite",
+        "event_type": "response_created",
+        "reference_type": "request",
+        "reference_id": "req-1",
+        "payload": {
+            "request_id": "req-1",
+            "response_id": "resp-1",
+            "response_type": "lawsuit",
+            "response_data": {
+                "code": "0000000-00.0000.0.00.0000",
+                "steps": [{"metadata": {"score": value}}],
+            },
+        },
+    }
+
+    with pytest.raises(ValueError, match="non-finite number"):
+        parse_event(body)
+
+
+def test_parse_event_handles_deep_nesting_without_recursion_error() -> None:
+    nested: dict[str, object] = {"value": 1.0}
+    for _ in range(1500):
+        nested = {"nested": nested}
+
+    event = parse_event(
+        {
+            "callback_id": "cb-deep",
+            "event_type": "request_completed",
+            "reference_type": "request",
+            "reference_id": "req-deep",
+            "payload": {"status": "completed"},
+            "unused": nested,
+        }
+    )
+
+    if event.request_id != "req-deep" or event.request_completed is not True:
+        raise AssertionError("deep finite webhook payload was not parsed correctly")
+
+
 def test_parse_current_lawsuit_response_envelope() -> None:
     event = parse_event(
         {
