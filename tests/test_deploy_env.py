@@ -251,6 +251,16 @@ def test_deploy_preflight_rejects_duplicate_bearer_token_keys() -> None:
         raise AssertionError(f"missing duplicate bearer token validation error: {errors!r}")
 
 
+def test_deploy_preflight_rejects_comma_bearing_legacy_token() -> None:
+    values = _valid_values()
+    values["RPY_BEARER_TOKENS"] = (
+        '{"tenant,other":"00000000-0000-0000-0000-000000000001"}'
+    )
+    errors = preflight.validate(values)
+    if not any("legacy bearer tokens must not contain commas" in error for error in errors):
+        raise AssertionError(f"missing comma-bearing token validation error: {errors!r}")
+
+
 def test_bearer_mapping_requires_tenant_uuid() -> None:
     values = _valid_values()
     values["RPY_BEARER_TOKENS"] = '{"tenant-token":"not-a-uuid"}'
