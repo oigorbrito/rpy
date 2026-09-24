@@ -14,9 +14,9 @@ def _encode_json(value: Any) -> str:
         try:
             loads_strict_json(value)
         except (TypeError, ValueError, json.JSONDecodeError):
-            return json.dumps(value)
+            return json.dumps(value, allow_nan=False)
         return value
-    return json.dumps(value)
+    return json.dumps(value, allow_nan=False)
 
 
 async def _init_connection(conn: asyncpg.Connection) -> None:
