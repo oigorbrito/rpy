@@ -321,3 +321,60 @@ async def test_single_decimal_content_length_remains_accepted(
     starts = [message for message in sent if message["type"] == "http.response.start"]
     if len(starts) != 1 or starts[0]["status"] != 204:
         raise AssertionError(f"expected passthrough 204 response, got {starts!r}")
+
+
+@pytest.mark.asyncio
+async def test_extremely_long_content_length_fails_closed_without_integer_conversion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("JUDIT_WEBHOOK_MAX_BODY_BYTES", "10")
+    called = False
+
+    async def app(scope, receive, send):
+        nonlocal called
+        called = True
+
+    scope = _scope()
+    scope["headers"] = [(b"content-length", b"9" * 5000)]
+    middleware = InboundPostBodyLimitMiddleware(app)
+    sent = await _run(
+        middleware,
+        scope,
+        [{"type": "http.request", "body": b"", "more_body": False}],
+    )
+
+    if called:
+        raise AssertionError("pathological Content-Length reached the application")
+    starts = [message for message in sent if message["type"] == "http.response.start"]
+    if len(starts) != 1 or starts[0]["status"] != 413:
+        raise AssertionError(f"expected one 413 response, got {starts!r}")
+
+
+@pytest.mark.asyncio
+async def test_non_post_requests_still_reject_ambiguous_framing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("JUDIT_WEBHOOK_MAX_BODY_BYTES", "10")
+    called = False
+
+    async def app(scope, receive, send):
+        nonlocal called
+        called = True
+
+    scope = _scope(method="GET", path="/health")
+    scope["headers"] = [
+        (b"content-length", b"0"),
+        (b"transfer-encoding", b"chunked"),
+    ]
+    middleware = InboundPostBodyLimitMiddleware(app)
+    sent = await _run(
+        middleware,
+        scope,
+        [{"type": "http.request", "body": b"", "more_body": False}],
+    )
+
+    if called:
+        raise AssertionError("ambiguous GET framing reached the application")
+    starts = [message for message in sent if message["type"] == "http.response.start"]
+    if len(starts) != 1 or starts[0]["status"] != 400:
+        raise AssertionError(f"expected one 400 response, got {starts!r}")

@@ -34,13 +34,11 @@ class InboundPostBodyLimitMiddleware:
         self.limit = judit_webhook_max_body_bytes()
 
     async def __call__(self, scope: dict[str, Any], receive, send) -> None:
-        if (
-            scope.get("type") != "http"
-            or str(scope.get("method") or "").upper() != "POST"
-        ):
+        if scope.get("type") != "http":
             await self.app(scope, receive, send)
             return
 
+        method = str(scope.get("method") or "").upper()
         headers = list(scope.get("headers", []))
         content_length_values = [
             value for key, value in headers if key.lower() == b"content-length"
@@ -68,14 +66,26 @@ class InboundPostBodyLimitMiddleware:
                 )
                 await response(scope, receive, send)
                 return
-            content_length = int(raw_content_length)
-            if content_length > self.limit:
-                response = JSONResponse(
-                    {"detail": "request body too large"},
-                    status_code=413,
-                )
-                await response(scope, receive, send)
-                return
+            if method == "POST":
+                normalized_length = raw_content_length.lstrip(b"0") or b"0"
+                limit_bytes = str(self.limit).encode("ascii")
+                if (
+                    len(normalized_length) > len(limit_bytes)
+                    or (
+                        len(normalized_length) == len(limit_bytes)
+                        and normalized_length > limit_bytes
+                    )
+                ):
+                    response = JSONResponse(
+                        {"detail": "request body too large"},
+                        status_code=413,
+                    )
+                    await response(scope, receive, send)
+                    return
+
+        if method != "POST":
+            await self.app(scope, receive, send)
+            return
 
         received = 0
 
