@@ -10,6 +10,8 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
+from app.json_utils import loads_strict_json
+
 JUDIT_REQUESTS_URL = "https://requests.production.judit.io/requests/"
 JUDIT_TRACKING_URL = "https://tracking.production.judit.io/tracking"
 JUDIT_LAWSUITS_URL = "https://lawsuits.production.judit.io/lawsuits"
