@@ -80,8 +80,12 @@ def test_character_property_helpers_are_bounded_and_cache_repeated_lookups() -> 
         helper.cache_clear()
         first = helper(value)
         second = helper(value)
-        assert first == second
+        if first != second:
+            raise AssertionError("cached Unicode helper changed its result")
         info = helper.cache_info()
-        assert info.maxsize == 1024
-        assert info.misses == 1
-        assert info.hits == 1
+        if info.maxsize != 1024:
+            raise AssertionError(f"unexpected Unicode cache bound: {info.maxsize}")
+        if info.misses != 1:
+            raise AssertionError(f"expected one Unicode cache miss, got {info.misses}")
+        if info.hits != 1:
+            raise AssertionError(f"expected one Unicode cache hit, got {info.hits}")
