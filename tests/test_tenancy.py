@@ -66,3 +66,17 @@ def test_parse_carteira_seed_rejects_duplicate_tenant_keys(
     )
     with pytest.raises(RuntimeError, match="must be valid JSON"):
         parse_carteira_seed()
+
+
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+def test_parse_carteira_seed_rejects_non_standard_numeric_constants(
+    monkeypatch: pytest.MonkeyPatch,
+    constant: str,
+) -> None:
+    tenant = str(uuid4())
+    monkeypatch.setenv(
+        "RPY_TENANT_PROCESSES",
+        f'{{"{tenant}":["0000000-00.0000.0.00.0001"],"weight":{constant}}}',
+    )
+    with pytest.raises(RuntimeError, match="must be valid JSON"):
+        parse_carteira_seed()
