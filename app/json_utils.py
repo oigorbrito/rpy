@@ -6,7 +6,7 @@ from typing import Any
 
 def decode_json_value(value: Any) -> Any:
     if isinstance(value, str):
-        return json.loads(value)
+        return loads_strict_json(value)
     return value
 
 
