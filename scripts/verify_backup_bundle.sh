@@ -29,7 +29,22 @@ if [ "$sidecar_lines" != "1" ]; then
 fi
 
 expected_sha256=$(awk 'NR == 1 { print $1 }' "$checksum")
-if ! printf '%s\n' "$expected_sha256" | grep -Eq '^[0-9a-fA-F]{64}; then
+if ! printf '%s\n' "$expected_sha256" | grep -Eq '^[[:xdigit:]]{64}
+  echo "checksum sidecar contains an invalid SHA-256 digest: $checksum" >&2
+  exit 2
+fi
+
+actual_sha256=$(sha256sum "$backup" | awk '{ print $1 }')
+if [ "$actual_sha256" != "$expected_sha256" ]; then
+  echo "checksum mismatch for backup: $backup" >&2
+  exit 1
+fi
+
+pg_restore --list "$backup" >/dev/null
+
+backup_name=$(basename "$backup")
+echo "backup bundle verified: $backup_name"
+; then
   echo "checksum sidecar contains an invalid SHA-256 digest: $checksum" >&2
   exit 2
 fi
