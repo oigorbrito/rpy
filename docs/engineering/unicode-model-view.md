@@ -26,7 +26,7 @@ No Unicode flag contains source text, code-point positions, party names, prompt 
 
 Mixed-script detection is deliberately narrow and policy-driven. The supported script policy is Latin, Greek, Cyrillic, Armenian, Hebrew and Arabic. Classification uses explicit Unicode code-point ranges in `app/unicode_security.py`; it does not infer arbitrary scripts from Unicode character names and does not claim complete Unicode Script-property coverage. Common/inherited characters are ignored unless they are alphabetic characters inside one of the listed ranges.
 
-Single-script prose in any supported script is not rewritten, and multilingual prose is not marked merely because adjacent tokens use different supported scripts. Only one token containing letters from multiple supported scripts receives the `mixed_script` signal. A legitimate mixed-script legal identifier or party name may therefore be marked; the original evidence remains unchanged and auditable, while the model receives an explicit code-point marker.
+Single-script prose in any supported script is not rewritten, and multilingual prose is not marked merely because adjacent tokens use different supported scripts. Any token containing letters from multiple supported scripts receives the `mixed_script` signal. A legitimate mixed-script legal identifier or party name may therefore be marked; the original evidence remains unchanged and auditable, while the model receives an explicit code-point marker.
 
 Default-ignorable handling is intentionally conservative for model input. If a future legal corpus demonstrates a legitimate need for a currently exposed character, change the model-view profile with a regression fixture rather than mutating stored evidence.
 
