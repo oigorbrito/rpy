@@ -108,7 +108,7 @@ These claims are supported by repository tests/CI and should remain falsifiable:
 - Production application images and base images are immutable by digest, while Python dependency resolution is version-locked. Version locking improves reproducibility but is not equivalent to artifact hash verification or vulnerability freedom.
 - Deterministic monetary parsing is shared by publication validation and claim-evidence verification, with property-based checks across equivalent Brazilian numeric/currency representations and explicit malformed-format rejection. This demonstrates parser consistency for the tested formats, not correctness for arbitrary OCR corruption.
 - Application error sanitization is property-tested against quoted/unquoted structured credential forms and modern standalone `sk-...` token families. This supports the application/durable-error logging boundary; upstream proxy/CDN/ingress logging remains separate.
-- Judit webhook body limiting is property-tested across generated chunk partitions and underdeclared `Content-Length` values. This demonstrates aggregate-byte enforcement in the ASGI middleware, not an upstream transport/proxy body limit.
+- Inbound POST body limiting is property-tested across generated chunk partitions and underdeclared `Content-Length` values, with explicit coverage for public summary/tracking routes. This demonstrates aggregate-byte enforcement in the ASGI middleware, not an upstream transport/proxy body limit.
 - Judit webhook path redaction covers valid, malformed, trailing-slash and Unicode-suffix paths while tests verify that malformed paths do not gain authentication state. This supports the application path-logging boundary, not provider callback or ingress behavior.
 
 ## How to add a new rule
