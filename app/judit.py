@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -108,9 +109,24 @@ def normalize_cnj(value: str) -> str:
     )
 
 
+def _reject_non_finite_numbers(value: Any) -> None:
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError("webhook payload contains non-finite number")
+        return
+    if isinstance(value, dict):
+        for nested in value.values():
+            _reject_non_finite_numbers(nested)
+        return
+    if isinstance(value, list):
+        for nested in value:
+            _reject_non_finite_numbers(nested)
+
+
 def parse_event(body: dict[str, Any]) -> JuditEvent:
     if not isinstance(body, dict):
         raise ValueError("invalid webhook envelope")
+    _reject_non_finite_numbers(body)
 
     event_type = str(body.get("event_type") or "").strip().lower()
     reference_type = str(body.get("reference_type") or "").strip().lower()
