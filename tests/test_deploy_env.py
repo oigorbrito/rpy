@@ -257,6 +257,33 @@ def test_bearer_mapping_requires_tenant_uuid() -> None:
     assert any(error.startswith("RPY_BEARER_TOKENS is invalid:") for error in preflight.validate(values))
 
 
+def test_env_file_parser_rejects_duplicate_keys(tmp_path: Path) -> None:
+    env_file = tmp_path / "production.env"
+    env_file.write_text(
+        "RPY_OPS_TOKEN=first\nRPY_OPS_TOKEN=second\n",
+        encoding="utf-8",
+    )
+    try:
+        preflight._load_env_file(env_file)
+    except ValueError as exc:
+        if str(exc) != "duplicate environment variable: RPY_OPS_TOKEN":
+            raise AssertionError(f"unexpected duplicate env error: {exc}") from exc
+    else:
+        raise AssertionError("duplicate environment variables must be rejected")
+
+
+def test_env_file_parser_rejects_empty_variable_name(tmp_path: Path) -> None:
+    env_file = tmp_path / "production.env"
+    env_file.write_text("=value\n", encoding="utf-8")
+    try:
+        preflight._load_env_file(env_file)
+    except ValueError as exc:
+        if str(exc) != "environment variable name must not be empty":
+            raise AssertionError(f"unexpected empty-name error: {exc}") from exc
+    else:
+        raise AssertionError("empty environment variable names must be rejected")
+
+
 def test_env_file_parser_accepts_export_and_quotes(tmp_path: Path) -> None:
     env_file = tmp_path / "production.env"
     env_file.write_text(

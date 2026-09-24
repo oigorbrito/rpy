@@ -65,6 +65,10 @@ def _load_env_file(path: Path) -> dict[str, str]:
             raise ValueError(f"invalid environment line: {raw_line!r}")
         key, value = line.split("=", 1)
         key = key.strip()
+        if not key:
+            raise ValueError("environment variable name must not be empty")
+        if key in values:
+            raise ValueError(f"duplicate environment variable: {key}")
         value = value.strip()
         if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
             value = value[1:-1]
