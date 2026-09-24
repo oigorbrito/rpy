@@ -50,11 +50,14 @@ def authorization_header(request: Request) -> str | None:
     getlist = getattr(headers, "getlist", None)
     if callable(getlist):
         values = getlist("authorization")
-        if len(values) != 1:
+        if len(values) != 1 or "," in values[0]:
             return None
         return values[0]
     value = headers.get("authorization")
-    return str(value) if value is not None else None
+    if value is None:
+        return None
+    rendered = str(value)
+    return None if "," in rendered else rendered
 
 
 def bearer_credential(request: Request) -> str:
