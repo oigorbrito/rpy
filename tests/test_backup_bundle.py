@@ -13,7 +13,7 @@ VERIFY_SCRIPT = ROOT / "scripts" / "verify_backup_bundle.sh"
 def _fake_pg_restore(bin_dir: Path) -> None:
     script = bin_dir / "pg_restore"
     script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    script.chmod(0o755)
+    script.chmod(0o700)
 
 
 def _run_verifier(tmp_path: Path, backup: Path) -> subprocess.CompletedProcess[str]:
@@ -22,8 +22,8 @@ def _run_verifier(tmp_path: Path, backup: Path) -> subprocess.CompletedProcess[s
     _fake_pg_restore(bin_dir)
     env = dict(os.environ)
     env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
-    return subprocess.run(
-        ["sh", str(VERIFY_SCRIPT), str(backup)],
+    return subprocess.run(  # nosec B603 - fixed local argv, shell=False
+        ["/bin/sh", str(VERIFY_SCRIPT), str(backup)],
         cwd=ROOT,
         env=env,
         text=True,
