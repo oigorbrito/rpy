@@ -226,3 +226,49 @@ async def test_datajud_rejects_oversized_response_before_decode(monkeypatch) -> 
         raise AssertionError(f"unexpected status: {result.status}")
     if result.error_code != "response_too_large":
         raise AssertionError(f"unexpected error code: {result.error_code}")
+
+
+class _RawDataJudResponse:
+    def __init__(self, raw: bytes) -> None:
+        self._raw = raw
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        return None
+
+    def read(self, amount: int = -1) -> bytes:
+        return self._raw if amount < 0 else self._raw[:amount]
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b'{"hits":{"hits":[]},"hits":{"hits":[]}}',
+        b'{"hits":{"hits":[{"_source":{"classe":{"codigo":NaN}}}]}}',
+    ],
+)
+@pytest.mark.asyncio
+async def test_datajud_rejects_ambiguous_provider_json(
+    monkeypatch: pytest.MonkeyPatch,
+    raw: bytes,
+) -> None:
+    monkeypatch.setattr(
+        client,
+        "urlopen",
+        lambda request, timeout: _RawDataJudResponse(raw),
+    )
+    result = await lookup_datajud_metadata(
+        code="0000000-00.2026.8.21.0001",
+        secrecy_level=0,
+        config=DataJudConfig(
+            enabled=True,
+            authorized_use=True,
+            api_key="synthetic-key",
+        ),
+    )
+    if result.status != "unavailable":
+        raise AssertionError(f"unexpected DataJud status: {result.status}")
+    if result.error_code != "invalid_json":
+        raise AssertionError(f"unexpected DataJud error code: {result.error_code}")

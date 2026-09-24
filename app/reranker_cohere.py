@@ -13,6 +13,7 @@ from urllib.request import Request, urlopen
 from uuid import UUID
 
 from app.http_safety import ResponseTooLargeError, read_bounded_response
+from app.json_utils import loads_strict_json
 from app.providers import ProviderSettings, call_with_retries
 from app.retrieval import Step
 
@@ -99,8 +100,8 @@ def _post_rerank_sync(
         raise
 
     try:
-        decoded = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        decoded = loads_strict_json(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as exc:
         raise RuntimeError("Cohere rerank response is not valid JSON") from exc
     if not isinstance(decoded, dict):
         raise RuntimeError("Cohere rerank response must be an object")

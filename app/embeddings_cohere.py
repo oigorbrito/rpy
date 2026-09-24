@@ -12,6 +12,7 @@ from urllib.request import Request, urlopen
 
 from app.embedding_spaces import COHERE_MODEL, COHERE_PROVIDER, EmbeddingSpace, assert_embedding_dimensions
 from app.http_safety import ResponseTooLargeError, read_bounded_response
+from app.json_utils import loads_strict_json
 from app.providers import call_with_retries, embedding_settings
 
 COHERE_EMBED_URL = "https://api.cohere.com/v2/embed"
@@ -118,8 +119,8 @@ def _post_embed_sync(
         raise
 
     try:
-        decoded = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        decoded = loads_strict_json(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as exc:
         raise RuntimeError("Cohere embed response is not valid JSON") from exc
     if not isinstance(decoded, dict):
         raise RuntimeError("Cohere embed response must be an object")

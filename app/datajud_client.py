@@ -12,6 +12,7 @@ from urllib.request import Request, urlopen
 from app.datajud_enrichment import DataJudMetadata
 from app.http_safety import ResponseTooLargeError, read_bounded_response
 from app.judit import normalize_cnj
+from app.json_utils import loads_strict_json
 
 DEFAULT_DATAJUD_BASE_URL = "https://api-publica.datajud.cnj.jus.br"
 DEFAULT_DATAJUD_TIMEOUT_SECONDS = 20.0
@@ -247,8 +248,8 @@ def _perform_lookup(
         return DataJudLookupResult(status="unavailable", error_code="transport_error")
 
     try:
-        payload = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
+        payload = loads_strict_json(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
         return DataJudLookupResult(status="unavailable", error_code="invalid_json")
 
     hits = payload.get("hits") if isinstance(payload, dict) else None
