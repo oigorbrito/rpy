@@ -467,3 +467,178 @@ def test_publication_completeness_rejects_malformed_ref() -> None:
         _structured_output(payload, complete),
         malformed,
     ) is False
+
+
+def test_publication_gate_requires_audit_metadata_for_evaluated_relations() -> None:
+    payload = _payload()
+    ref = movement_evidence_ref(STEP_ID)
+    complete = build_material_claims(payload, evidence_refs=[ref])
+    structured = _structured_output(payload, complete)
+    process = {
+        "code": "0000000-00.2026.8.21.0001",
+        "class_name": None,
+        "court": None,
+        "header": {},
+        "parties": [],
+    }
+    valid_hash = "a" * 64
+    evaluated = [dict(item) for item in complete]
+    evaluated[0] = {
+        **evaluated[0],
+        "verification_status": "supported",
+        "verification_reason": "deterministic_facts_present",
+        "sources": [
+            {
+                "evidence_ref": ref,
+                "verification_status": "supported",
+                "verification_reason": "deterministic_facts_present",
+                "evidence_excerpt_sha256": valid_hash,
+            }
+        ],
+    }
+
+    if not claim_evidence_is_publishable(
+        structured,
+        evaluated,
+        process=process,
+    ):
+        raise AssertionError("well-formed evaluated evidence should remain publishable")
+
+    missing_hash = [dict(item) for item in evaluated]
+    missing_hash[0] = {
+        **evaluated[0],
+        "sources": [
+            {
+                **evaluated[0]["sources"][0],
+                "evidence_excerpt_sha256": None,
+            }
+        ],
+    }
+    if claim_evidence_is_publishable(
+        structured,
+        missing_hash,
+        process=process,
+    ):
+        raise AssertionError("evaluated evidence without excerpt hash must fail closed")
+
+    malformed_hash = [dict(item) for item in evaluated]
+    malformed_hash[0] = {
+        **evaluated[0],
+        "sources": [
+            {
+                **evaluated[0]["sources"][0],
+                "evidence_excerpt_sha256": "not-a-sha256",
+            }
+        ],
+    }
+    if claim_evidence_is_publishable(
+        structured,
+        malformed_hash,
+        process=process,
+    ):
+        raise AssertionError("malformed evaluated evidence hash must fail closed")
+
+    aggregate_only = [dict(item) for item in evaluated]
+    aggregate_only[0] = {
+        **evaluated[0],
+        "sources": [
+            {
+                "evidence_ref": ref,
+                "verification_status": "not_evaluated",
+                "verification_reason": "semantic_verifier_not_run",
+                "evidence_excerpt_sha256": None,
+            }
+        ],
+    }
+    if claim_evidence_is_publishable(
+        structured,
+        aggregate_only,
+        process=process,
+    ):
+        raise AssertionError(
+            "evaluated aggregate status without an evaluated relation must fail closed"
+        )
+
+
+def test_publication_gate_rejects_missing_reasons_and_malformed_legacy_hash() -> None:
+    payload = _payload()
+    ref = movement_evidence_ref(STEP_ID)
+    complete = build_material_claims(payload, evidence_refs=[ref])
+    structured = _structured_output(payload, complete)
+    process = {
+        "code": "0000000-00.2026.8.21.0001",
+        "class_name": None,
+        "court": None,
+        "header": {},
+        "parties": [],
+    }
+    valid_hash = "b" * 64
+    base = [dict(item) for item in complete]
+    base[0] = {
+        **base[0],
+        "verification_status": "supported",
+        "verification_reason": "deterministic_facts_present",
+        "sources": [
+            {
+                "evidence_ref": ref,
+                "verification_status": "supported",
+                "verification_reason": "deterministic_facts_present",
+                "evidence_excerpt_sha256": valid_hash,
+            }
+        ],
+    }
+
+    for bad_reason in (None, "", "   "):
+        missing_claim_reason = [dict(item) for item in base]
+        missing_claim_reason[0] = {
+            **base[0],
+            "verification_reason": bad_reason,
+        }
+        if claim_evidence_is_publishable(
+            structured,
+            missing_claim_reason,
+            process=process,
+        ):
+            raise AssertionError(
+                f"evaluated claim reason {bad_reason!r} must fail closed"
+            )
+
+        missing_source_reason = [dict(item) for item in base]
+        missing_source_reason[0] = {
+            **base[0],
+            "sources": [
+                {
+                    **base[0]["sources"][0],
+                    "verification_reason": bad_reason,
+                }
+            ],
+        }
+        if claim_evidence_is_publishable(
+            structured,
+            missing_source_reason,
+            process=process,
+        ):
+            raise AssertionError(
+                f"evaluated source reason {bad_reason!r} must fail closed"
+            )
+
+    malformed_legacy_hash = [dict(item) for item in complete]
+    malformed_legacy_hash[0] = {
+        **malformed_legacy_hash[0],
+        "verification_status": "not_evaluated",
+        "verification_reason": "semantic_verifier_not_run",
+        "sources": [
+            {
+                "evidence_ref": ref,
+                "verification_status": "not_evaluated",
+                "verification_reason": "semantic_verifier_not_run",
+                "evidence_excerpt_sha256": "xyz",
+            }
+        ],
+    }
+    if claim_evidence_is_publishable(
+        structured,
+        malformed_legacy_hash,
+        process=process,
+    ):
+        raise AssertionError("malformed non-null legacy hash must fail closed")

@@ -15,6 +15,7 @@ from app.summary_output import (
 )
 
 _EVIDENCE_REF_RE = re.compile(r"^[pma]-[0-9a-f]{32}$")
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _CLAIM_ID_RE = re.compile(
     r"^(?:synthesis|current_status|"
     r"(?:timeline|attention|decisions|deadlines|related_processes|attachments):[0-9]+)$"
@@ -279,6 +280,54 @@ def claim_evidence_is_complete(
     return set(observed) == set(expected)
 
 
+def _is_evaluated_status(status: Any) -> bool:
+    return status is not None and status != "not_evaluated"
+
+
+def _valid_verification_reason(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _valid_excerpt_sha256(value: Any) -> bool:
+    return isinstance(value, str) and bool(_SHA256_RE.fullmatch(value))
+
+
+def _claim_verification_metadata(
+    item: dict[str, Any],
+) -> tuple[bool, bool]:
+    status = item.get("verification_status")
+    if status is not None and status not in VERIFICATION_STATUSES:
+        return False, False
+    if status == "contradicted":
+        return False, False
+    evaluated = _is_evaluated_status(status)
+    if evaluated and not _valid_verification_reason(item.get("verification_reason")):
+        return False, False
+    return True, evaluated
+
+
+def _source_verification_metadata(
+    source: dict[str, Any],
+) -> tuple[bool, bool]:
+    status = source.get("verification_status")
+    if status is not None and status not in VERIFICATION_STATUSES:
+        return False, False
+    if status == "contradicted":
+        return False, False
+
+    digest = source.get("evidence_excerpt_sha256")
+    if digest is not None and not _valid_excerpt_sha256(digest):
+        return False, False
+
+    evaluated = _is_evaluated_status(status)
+    if evaluated:
+        if not _valid_verification_reason(source.get("verification_reason")):
+            return False, False
+        if not _valid_excerpt_sha256(digest):
+            return False, False
+    return True, evaluated
+
+
 def claim_evidence_is_publishable(
     structured_output: dict[str, Any] | None,
     claim_evidence: list[dict[str, Any]],
@@ -305,28 +354,33 @@ def claim_evidence_is_publishable(
         return False
     if not structured_summary_document_matches_process(structured_output, context):
         return False
+
     for item in claim_evidence:
-        status = item.get("verification_status")
-        if status is not None and status not in VERIFICATION_STATUSES:
+        valid_claim_metadata, evaluated_claim = _claim_verification_metadata(item)
+        if not valid_claim_metadata:
             return False
-        if status == "contradicted":
-            return False
+
         sources = item.get("sources")
         if sources is None:
+            if evaluated_claim:
+                return False
             continue
         if not isinstance(sources, list):
             return False
+
+        evaluated_relation_seen = False
         for source in sources:
             if not isinstance(source, dict):
                 return False
-            relation_status = source.get("verification_status")
-            if (
-                relation_status is not None
-                and relation_status not in VERIFICATION_STATUSES
-            ):
+            valid_source_metadata, evaluated_source = _source_verification_metadata(
+                source
+            )
+            if not valid_source_metadata:
                 return False
-            if relation_status == "contradicted":
-                return False
+            evaluated_relation_seen = evaluated_relation_seen or evaluated_source
+
+        if evaluated_claim and not evaluated_relation_seen:
+            return False
     return True
 
 
