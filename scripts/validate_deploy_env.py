@@ -439,6 +439,14 @@ def validate(values: dict[str, str]) -> list[str]:
         if any(marker in value.lower() for marker in PLACEHOLDER_MARKERS):
             errors.append(f"{key} still contains a placeholder value")
 
+    for key in ("JUDIT_WEBHOOK_TOKEN", "RPY_OPS_TOKEN"):
+        raw_token = str(values.get(key) or "")
+        if raw_token and (
+            raw_token != raw_token.strip()
+            or any(character.isspace() for character in raw_token)
+        ):
+            errors.append(f"{key} must not contain whitespace")
+
     _validate_attachment_ocr(values, errors)
     _validate_embedding_runtime(values, errors)
     _validate_reranker(values, errors)
