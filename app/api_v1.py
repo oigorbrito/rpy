@@ -19,7 +19,7 @@ from app.attachment_signals import attachment_status_flags
 from app.auth import principal_from_request, principal_from_request_unscoped, tenant_from_request
 from app.claim_evidence import claim_evidence_is_publishable, load_summary_claim_evidence
 from app.judit import normalize_cnj
-from app.json_utils import decode_json_object
+from app.json_utils import decode_json_object, loads_strict_json
 from app.process_requests import request_process
 from app.processes import get_authorized_process, log_access
 from app.provenance import load_used_summary_sources
@@ -457,9 +457,14 @@ async def _latest_summary_payload(
 @router.post("/v1/resumos", status_code=202)
 async def create_summary_job(request: Request):
     try:
-        body = await request.json()
-    except (ValueError, TypeError):
+        body = loads_strict_json(await request.body())
+    except (json.JSONDecodeError, UnicodeDecodeError):
         raise HTTPException(status_code=400, detail="invalid JSON payload") from None
+    except (ValueError, TypeError):
+        raise HTTPException(
+            status_code=400,
+            detail="request body must contain strict JSON",
+        ) from None
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="request body must be an object")
     raw_code = body.get("cnj")
