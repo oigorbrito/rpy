@@ -247,7 +247,7 @@ def _delete_tracking_sync(tracking_id: str) -> None:
     identifier = str(tracking_id).strip()
     if not identifier:
         raise ValueError("tracking_id is required")
-    encoded_identifier = urllib.parse.quote(identifier, safe="")
+    encoded_identifier = urllib.parse.quote(identifier, safe="").replace(".", "%2E")
     _provider_request(
         f"{JUDIT_TRACKING_URL}/{encoded_identifier}",
         method="DELETE",
