@@ -19,7 +19,7 @@ def test_strict_json_accepts_nested_standard_json() -> None:
 @pytest.mark.parametrize(
     "payload",
     [
-        b'{"token":"first","token":"second"}',
+        b'{"field":"first","field":"second"}',
         b'{"outer":{"id":1,"id":2}}',
     ],
 )
