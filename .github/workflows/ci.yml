@@ -64,6 +64,7 @@ jobs:
           JUDIT_API_KEY: ci-judit-api-key
           JUDIT_WEBHOOK_TOKEN: ci-judit-token
           RPY_BEARER_TOKENS: '{"ci-bearer-token":"00000000-0000-0000-0000-000000000001"}'
+          RPY_API_KEY_ENVIRONMENT: live
           RPY_OPS_TOKEN: ci-ops-token
           EGRESS_PROXY_ALLOWED_HOSTS: api.anthropic.com,api.openai.com,requests.production.judit.io,tracking.production.judit.io
         run: |
