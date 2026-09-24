@@ -481,7 +481,10 @@ async def create_summary_job(request: Request):
     normalized_body = dict(body)
     normalized_body["cnj"] = code
     normalized_body["format"] = response_format
-    fingerprint = request_fingerprint(normalized_body)
+    try:
+        fingerprint = request_fingerprint(normalized_body)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="request body must contain strict JSON") from None
     pool: asyncpg.Pool = request.app.state.pool
 
     try:
