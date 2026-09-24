@@ -22,10 +22,17 @@ def test_portuguese_legal_text_preserves_diacritics_and_canonical_equivalence() 
 
     view = model_view_text(decomposed)
 
-    assert view.text == source
-    assert view.flags == ()
+    if view.text != source:
+        raise AssertionError(
+            f"expected single-script/multilingual text to remain unchanged: {view.text!r}"
+        )
+    if view.flags != ():
+        raise AssertionError(f"unexpected Unicode flags: {view.flags!r}")
     assert view.normalized_sha256 == hashlib.sha256(source.encode("utf-8")).hexdigest()
-    assert UNICODE_MODEL_VIEW_VERSION == "unicode-model-view-v2"
+    if UNICODE_MODEL_VIEW_VERSION != "unicode-model-view-v2":
+        raise AssertionError(
+            f"unexpected Unicode model-view version: {UNICODE_MODEL_VIEW_VERSION}"
+        )
 
 
 def test_bidi_and_zero_width_controls_are_made_explicit() -> None:
@@ -106,8 +113,12 @@ def test_extended_cross_script_tokens_are_exposed(
     expected_marker: str,
 ) -> None:
     view = model_view_text(source)
-    assert expected_marker in view.text
-    assert view.flags == ("mixed_script",)
+    if expected_marker not in view.text:
+        raise AssertionError(
+            f"expected marker {expected_marker!r} in rendered model view {view.text!r}"
+        )
+    if view.flags != ("mixed_script",):
+        raise AssertionError(f"unexpected Unicode flags: {view.flags!r}")
 
 
 @pytest.mark.parametrize(
