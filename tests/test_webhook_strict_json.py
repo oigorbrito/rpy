@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import httpx
 import pytest
+from uuid import uuid4
 
 from app.api import app
 
@@ -10,7 +11,7 @@ from app.api import app
 async def test_judit_webhook_rejects_duplicate_json_keys_before_database(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    token = "strict-json-webhook-token"
+    token = uuid4().hex
     monkeypatch.setenv("JUDIT_WEBHOOK_TOKEN", token)
 
     transport = httpx.ASGITransport(app=app)
