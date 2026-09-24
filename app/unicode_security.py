@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
 
-UNICODE_MODEL_VIEW_VERSION = "unicode-model-view-v1"
+UNICODE_MODEL_VIEW_VERSION = "unicode-model-view-v2"
 
 _BIDI_CONTROL_CODEPOINTS = {
     0x061C,
