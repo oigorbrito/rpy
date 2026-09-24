@@ -237,6 +237,20 @@ def test_deploy_preflight_rejects_ambiguous_legacy_bearer_prefixes() -> None:
         )
 
 
+def test_deploy_preflight_rejects_duplicate_bearer_token_keys() -> None:
+    values = _valid_values()
+    values["RPY_BEARER_TOKENS"] = (
+        '{"tenant-token":"00000000-0000-0000-0000-000000000001",'
+        '"tenant-token":"00000000-0000-0000-0000-000000000002"}'
+    )
+    errors = preflight.validate(values)
+    if not any(
+        error.startswith("RPY_BEARER_TOKENS is invalid: duplicate JSON object key")
+        for error in errors
+    ):
+        raise AssertionError(f"missing duplicate bearer token validation error: {errors!r}")
+
+
 def test_bearer_mapping_requires_tenant_uuid() -> None:
     values = _valid_values()
     values["RPY_BEARER_TOKENS"] = '{"tenant-token":"not-a-uuid"}'

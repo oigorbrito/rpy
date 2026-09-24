@@ -16,12 +16,23 @@ from app.api_key_auth import (
 )
 
 
+def _reject_duplicate_json_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    parsed: dict[str, object] = {}
+    for key, value in pairs:
+        if key in parsed:
+            raise ValueError("duplicate JSON object key")
+        parsed[key] = value
+    return parsed
+
+
 def configured_bearer_tokens() -> dict[str, UUID]:
     raw = os.environ.get("RPY_BEARER_TOKENS", "{}")
     try:
-        parsed = json.loads(raw)
+        parsed = json.loads(raw, object_pairs_hook=_reject_duplicate_json_keys)
     except json.JSONDecodeError as exc:
         raise RuntimeError("RPY_BEARER_TOKENS must be valid JSON") from exc
+    except ValueError as exc:
+        raise RuntimeError("RPY_BEARER_TOKENS must not contain duplicate token keys") from exc
     if not isinstance(parsed, dict):
         raise RuntimeError("RPY_BEARER_TOKENS must be a JSON object mapping token to tenant UUID")
     if not parsed:
