@@ -44,3 +44,9 @@ def test_strict_json_rejects_non_standard_numeric_constants(constant: str) -> No
 def test_shared_json_decoder_uses_strict_semantics(payload: str) -> None:
     with pytest.raises(ValueError):
         decode_json_value(payload)
+
+
+def test_strict_json_rejects_pathological_nesting_as_value_error() -> None:
+    payload = "[" * 2000 + "0" + "]" * 2000
+    with pytest.raises(ValueError, match="nesting exceeds safe parser depth"):
+        loads_strict_json(payload)
