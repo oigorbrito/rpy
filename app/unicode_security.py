@@ -64,6 +64,11 @@ def _script(character: str) -> str | None:
     return None
 
 
+@lru_cache(maxsize=1024)
+def _combining(character: str) -> int:
+    return unicodedata.combining(character)
+
+
 def _mixed_script_positions(text: str) -> set[int]:
     suspicious: set[int] = set()
     token: list[int] = []
@@ -84,7 +89,7 @@ def _mixed_script_positions(text: str) -> set[int]:
         token.clear()
 
     for index, character in enumerate(text):
-        if character.isalpha() or unicodedata.combining(character):
+        if character.isalpha() or _combining(character):
             token.append(index)
         else:
             flush()
