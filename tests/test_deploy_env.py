@@ -193,6 +193,14 @@ def test_database_urls_must_target_same_database() -> None:
     assert "all database URLs must target the same PostgreSQL database" in preflight.validate(values)
 
 
+def test_deploy_preflight_rejects_whitespace_in_http_tokens() -> None:
+    for key in ("JUDIT_WEBHOOK_TOKEN", "RPY_OPS_TOKEN"):
+        for value in (" token", "token ", "token value", "token\tvalue", "token\nvalue"):
+            values = _valid_values()
+            values[key] = value
+            _require_error(values, f"{key} must not contain whitespace")
+
+
 def test_placeholder_values_are_rejected() -> None:
     values = _valid_values()
     values["ANTHROPIC_API_KEY"] = "replace-with-anthropic-key"
