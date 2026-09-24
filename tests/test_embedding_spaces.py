@@ -62,7 +62,7 @@ def test_embedding_dimensions_are_space_bound() -> None:
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
 def test_embedding_space_rejects_non_finite_vector_components(value: float) -> None:
     space = EmbeddingSpace(provider="bge", model=BGE_MODEL)
-    vector = [0.0] * 1024
+    vector = [0.0] * space.dimensions
     vector[17] = value
     with pytest.raises(RuntimeError, match="non-finite values"):
         assert_embedding_dimensions(vector, space=space)
