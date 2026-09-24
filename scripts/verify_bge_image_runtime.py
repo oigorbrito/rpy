@@ -34,11 +34,14 @@ def validate(*, model_dir: Path, environ: dict[str, str] | None = None) -> list[
             except (OSError, ValueError) as exc:
                 errors.append(f"BGE model config.json is invalid: {exc}")
             else:
-                hidden_size = payload.get("hidden_size")
-                if hidden_size not in {None, 1024}:
-                    errors.append(
-                        f"BGE model hidden_size must be 1024 when declared, got {hidden_size!r}"
-                    )
+                if not isinstance(payload, dict):
+                    errors.append("BGE model config.json must contain an object")
+                else:
+                    hidden_size = payload.get("hidden_size")
+                    if hidden_size not in {None, 1024}:
+                        errors.append(
+                            f"BGE model hidden_size must be 1024 when declared, got {hidden_size!r}"
+                        )
 
     for key in REQUIRED_OFFLINE_ENV:
         value = str(env.get(key) or "").strip().casefold()
