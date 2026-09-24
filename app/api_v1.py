@@ -476,7 +476,12 @@ async def create_summary_job(request: Request):
         raise HTTPException(status_code=400, detail="invalid process code") from None
     response_format = _summary_format(body.get("format"))
 
-    idempotency_key = request.headers.get("Idempotency-Key", "").strip()
+    idempotency_values = request.headers.getlist("Idempotency-Key")
+    if not idempotency_values:
+        raise HTTPException(status_code=400, detail="Idempotency-Key is required")
+    if len(idempotency_values) != 1:
+        raise HTTPException(status_code=400, detail="Idempotency-Key must appear exactly once")
+    idempotency_key = idempotency_values[0].strip()
     if not idempotency_key:
         raise HTTPException(status_code=400, detail="Idempotency-Key is required")
     if len(idempotency_key) > 255:
