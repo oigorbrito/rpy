@@ -10,6 +10,7 @@ import asyncpg
 from fastapi import FastAPI, HTTPException, Request
 
 from app.api_key_middleware import ApiKeySecurityMiddleware
+from app.api_key_auth import authorization_header
 from app.api_v1 import router as api_v1_router
 from app.auth import configured_bearer_tokens, tenant_from_request
 from app.claim_evidence import claim_evidence_is_publishable, load_summary_claim_evidence
@@ -71,7 +72,7 @@ def _valid_webhook_token(token: str) -> bool:
 
 def _valid_ops_request(request: Request) -> bool:
     expected = os.environ.get("RPY_OPS_TOKEN", "")
-    authorization = request.headers.get("authorization", "")
+    authorization = authorization_header(request) or ""
     if not expected or not authorization.startswith("Bearer "):
         return False
     supplied = authorization.removeprefix("Bearer ").strip()
