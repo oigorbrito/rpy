@@ -45,8 +45,15 @@ def api_key_deployment_environment() -> str:
     return environment
 
 
+def authorization_header(request: Request) -> str | None:
+    values = request.headers.getlist("authorization")
+    if len(values) != 1:
+        return None
+    return values[0]
+
+
 def bearer_credential(request: Request) -> str:
-    authorization = request.headers.get("authorization", "")
+    authorization = authorization_header(request) or ""
     scheme, _, supplied = authorization.partition(" ")
     supplied = supplied.strip()
     if scheme.casefold() != "bearer" or not supplied:
