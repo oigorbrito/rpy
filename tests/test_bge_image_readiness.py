@@ -100,3 +100,19 @@ def test_bge_image_readiness_rejects_ambiguous_config_json(
     errors = verifier.validate(model_dir=model_dir, environ=_offline_env(model_dir))
     if not any("config.json is invalid" in error for error in errors):
         raise AssertionError(f"expected invalid config error, got {errors!r}")
+
+
+@pytest.mark.parametrize("raw", ["[]", '"model"'])
+def test_bge_image_readiness_rejects_non_object_config_json(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    raw: str,
+) -> None:
+    model_dir = tmp_path / "bge-m3"
+    model_dir.mkdir()
+    (model_dir / "config.json").write_text(raw, encoding="utf-8")
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: object())
+
+    errors = verifier.validate(model_dir=model_dir, environ=_offline_env(model_dir))
+    if "BGE model config.json must contain an object" not in errors:
+        raise AssertionError(f"expected object-root error, got {errors!r}")
