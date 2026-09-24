@@ -439,6 +439,11 @@ def validate(values: dict[str, str]) -> list[str]:
         if any(marker in value.lower() for marker in PLACEHOLDER_MARKERS):
             errors.append(f"{key} still contains a placeholder value")
 
+    for key in ("JUDIT_WEBHOOK_TOKEN", "RPY_OPS_TOKEN"):
+        raw_token = str(values.get(key) or "")
+        if any(character.isspace() for character in raw_token):
+            errors.append(f"{key} must not contain whitespace")
+
     _validate_positive_numeric(
         values,
         errors,
