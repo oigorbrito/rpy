@@ -80,3 +80,25 @@ def test_reranker_artifact_rejects_online_or_wrong_path(
 
     assert "HF_HUB_OFFLINE must force offline mode for the BGE reranker" in errors
     assert any("BGE_RERANKER_PATH must equal" in error for error in errors)
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        '{"model_type":"xlm-roberta","model_type":"bert"}',
+        '{"hidden_size":NaN}',
+    ],
+)
+def test_reranker_artifact_rejects_ambiguous_config_json(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    raw: str,
+) -> None:
+    model_dir = tmp_path / "bge-reranker-v2-m3"
+    model_dir.mkdir()
+    (model_dir / "config.json").write_text(raw, encoding="utf-8")
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: object())
+
+    errors = verifier.validate(model_dir=model_dir, environ=_offline_env(model_dir))
+    if not any("config.json is invalid" in error for error in errors):
+        raise AssertionError(f"expected invalid config error, got {errors!r}")
