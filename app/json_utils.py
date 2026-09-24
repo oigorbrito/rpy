@@ -49,8 +49,11 @@ def _reject_non_standard_json_constant(value: str) -> None:
 
 
 def loads_strict_json(value: str | bytes | bytearray) -> Any:
-    return json.loads(
-        value,
-        object_pairs_hook=_reject_duplicate_json_object_pairs,
-        parse_constant=_reject_non_standard_json_constant,
-    )
+    try:
+        return json.loads(
+            value,
+            object_pairs_hook=_reject_duplicate_json_object_pairs,
+            parse_constant=_reject_non_standard_json_constant,
+        )
+    except RecursionError as exc:
+        raise ValueError("JSON nesting exceeds safe parser depth") from exc
