@@ -21,6 +21,8 @@ def test_sanitize_error_message_redacts_all_provider_api_keys(monkeypatch) -> No
         "DATAJUD_API_KEY": "datajud-provider-secret",
         "COHERE_API_KEY": "cohere-provider-secret",
         "LANGFUSE_SECRET_KEY": "langfuse-observability-secret",
+        "LANGFUSE_PUBLIC_KEY": "langfuse-public-key-value",
+        "LANGFUSE_HOST": "https://langfuse.internal.domain",
     }
     for name, value in secrets.items():
         monkeypatch.setenv(name, value)
