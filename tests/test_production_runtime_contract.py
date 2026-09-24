@@ -60,6 +60,25 @@ def test_runtime_confinement_rejects_removed_controls(
         contract._validate_runtime_confinement(services)
 
 
+@pytest.mark.parametrize("field", ["cpus", "pids_limit"])
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_runtime_confinement_rejects_non_finite_numeric_budgets(
+    field: str,
+    value: float,
+) -> None:
+    services = _runtime_services()
+    services["api"][field] = value
+    with pytest.raises(SystemExit, match=f"api {field} must be finite"):
+        contract._validate_runtime_confinement(services)
+
+
+def test_runtime_confinement_rejects_boolean_numeric_budget() -> None:
+    services = _runtime_services()
+    services["api"]["cpus"] = True
+    with pytest.raises(SystemExit, match="api cpus must be numeric"):
+        contract._validate_runtime_confinement(services)
+
+
 def test_runtime_confinement_rejects_seccomp_unconfined_and_added_caps() -> None:
     services = _runtime_services()
     services["worker-1"]["security_opt"].append("seccomp=unconfined")
@@ -112,6 +131,42 @@ def test_egress_topology_has_single_external_gateway() -> None:
             "egress": {},
         },
     )
+
+
+@pytest.mark.parametrize("value", ["nan", "inf", "-inf"])
+def test_egress_topology_rejects_non_finite_proxy_timeout(value: str) -> None:
+    services = _networked_services()
+    services["egress-proxy"]["environment"][
+        "EGRESS_PROXY_CONNECT_TIMEOUT_SECONDS"
+    ] = value
+    with pytest.raises(
+        SystemExit,
+        match="EGRESS_PROXY_CONNECT_TIMEOUT_SECONDS must be finite",
+    ):
+        contract._validate_egress_topology(
+            services,
+            {
+                "backend": {"internal": True},
+                "provider-gateway": {"internal": True},
+                "egress": {},
+            },
+        )
+
+
+def test_egress_topology_rejects_proxy_timeout_over_runtime_bound() -> None:
+    services = _networked_services()
+    services["egress-proxy"]["environment"][
+        "EGRESS_PROXY_CONNECT_TIMEOUT_SECONDS"
+    ] = "61"
+    with pytest.raises(SystemExit, match="must not exceed 60"):
+        contract._validate_egress_topology(
+            services,
+            {
+                "backend": {"internal": True},
+                "provider-gateway": {"internal": True},
+                "egress": {},
+            },
+        )
 
 
 def test_worker_direct_egress_route_is_rejected() -> None:
@@ -243,4 +298,29 @@ def test_attachment_parser_contract_rejects_nonpositive_request_timeout() -> Non
         "ATTACHMENT_PARSER_REQUEST_TIMEOUT_SECONDS"
     ] = "0"
     with pytest.raises(SystemExit, match="request timeout must be positive"):
+        contract._validate_attachment_parser_contract(services, _parser_volume())
+
+
+@pytest.mark.parametrize("value", ["nan", "inf", "-inf"])
+def test_attachment_parser_contract_rejects_non_finite_request_timeout(
+    value: str,
+) -> None:
+    services = _parser_contract_services()
+    services["attachment-parser"]["environment"][
+        "ATTACHMENT_PARSER_REQUEST_TIMEOUT_SECONDS"
+    ] = value
+    with pytest.raises(SystemExit, match="request timeout must be finite"):
+        contract._validate_attachment_parser_contract(services, _parser_volume())
+
+
+@pytest.mark.parametrize("value", ["nan", "inf", "-inf"])
+def test_attachment_parser_contract_rejects_non_finite_worker_timeout(
+    value: str,
+) -> None:
+    services = _parser_contract_services()
+    services["worker-1"]["environment"]["ATTACHMENT_PARSER_TIMEOUT_SECONDS"] = value
+    with pytest.raises(
+        SystemExit,
+        match="worker-1 ATTACHMENT_PARSER_TIMEOUT_SECONDS must be finite",
+    ):
         contract._validate_attachment_parser_contract(services, _parser_volume())
