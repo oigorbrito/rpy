@@ -46,10 +46,15 @@ def api_key_deployment_environment() -> str:
 
 
 def authorization_header(request: Request) -> str | None:
-    values = request.headers.getlist("authorization")
-    if len(values) != 1:
-        return None
-    return values[0]
+    headers = request.headers
+    getlist = getattr(headers, "getlist", None)
+    if callable(getlist):
+        values = getlist("authorization")
+        if len(values) != 1:
+            return None
+        return values[0]
+    value = headers.get("authorization")
+    return str(value) if value is not None else None
 
 
 def bearer_credential(request: Request) -> str:
