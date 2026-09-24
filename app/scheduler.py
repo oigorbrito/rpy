@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import os
 from contextlib import suppress
 from datetime import timedelta
@@ -16,6 +17,8 @@ LOCK_NAME = "rpy_scheduler"
 
 
 def _positive(value: int | float, *, name: str) -> int | float:
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError(f"{name} must be finite")
     if value <= 0:
         raise ValueError(f"{name} must be greater than zero")
     return value
