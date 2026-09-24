@@ -37,6 +37,18 @@ def test_invalid_json_fails_configuration(monkeypatch) -> None:
         configured_bearer_tokens()
 
 
+def test_duplicate_bearer_token_key_fails_configuration(monkeypatch) -> None:
+    tenant_a = uuid4()
+    tenant_b = uuid4()
+    monkeypatch.setenv(
+        "RPY_BEARER_TOKENS",
+        f'{{"token-a":"{tenant_a}","token-a":"{tenant_b}"}}',
+    )
+
+    with pytest.raises(RuntimeError, match="duplicate token keys"):
+        configured_bearer_tokens()
+
+
 def test_invalid_tenant_uuid_fails_configuration(monkeypatch) -> None:
     monkeypatch.setenv("RPY_BEARER_TOKENS", json.dumps({"token-a": "not-a-uuid"}))
 
