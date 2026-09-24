@@ -42,7 +42,9 @@ def test_retry_backoff_is_bounded_without_large_exponentiation(
     attempts: int,
     expected: int,
 ) -> None:
-    assert _retry_backoff_seconds(attempts) == expected
+    actual = _retry_backoff_seconds(attempts)
+    if actual != expected:
+        raise AssertionError(f"expected backoff {expected}, got {actual}")
 
 
 @pytest.mark.parametrize("value", [True, 1.5, "3", None])
