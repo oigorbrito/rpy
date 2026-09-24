@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass
 
@@ -71,3 +72,5 @@ def assert_embedding_dimensions(vector: list[float], *, space: EmbeddingSpace) -
             f"embedding dimension mismatch for {space.key}: "
             f"expected {space.dimensions}, got {len(vector)}"
         )
+    if any(not math.isfinite(value) for value in vector):
+        raise RuntimeError(f"embedding vector contains non-finite values for {space.key}")
