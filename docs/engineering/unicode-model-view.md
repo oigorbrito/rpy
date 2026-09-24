@@ -11,7 +11,7 @@ Rpy does **not** claim full UTS #39 identifier-profile or confusable-skeleton co
 - normalize model input to NFC for canonical equivalence;
 - flag and visibly expand Unicode format/default-ignorable characters;
 - separately flag bidi controls and common zero-width controls;
-- detect tokens that mix Latin, Greek and Cyrillic letters, and visibly expand the cross-script characters;
+- detect tokens that mix letters from the explicitly supported Latin, Greek, Cyrillic, Armenian, Hebrew and Arabic script ranges, and visibly expand the cross-script characters;
 - leave ordinary Portuguese accents and single-script prose unchanged.
 
 The model view is versioned as `unicode-model-view-v1`.
@@ -24,7 +24,9 @@ No Unicode flag contains source text, code-point positions, party names, prompt 
 
 ## False positives
 
-Mixed-script detection is deliberately narrow: it only considers Latin, Greek and Cyrillic letters inside the same token. Legitimate single-script Greek/Cyrillic prose is not rewritten. A legitimate mixed-script legal identifier or party name may be marked; the original evidence remains unchanged and auditable, while the model receives an explicit code-point marker.
+Mixed-script detection is deliberately narrow and policy-driven. The supported script policy is Latin, Greek, Cyrillic, Armenian, Hebrew and Arabic. Classification uses explicit Unicode code-point ranges in `app/unicode_security.py`; it does not infer arbitrary scripts from Unicode character names and does not claim complete Unicode Script-property coverage. Common/inherited characters are ignored unless they are alphabetic characters inside one of the listed ranges.
+
+Single-script prose in any supported script is not rewritten, and multilingual prose is not marked merely because adjacent tokens use different supported scripts. Only one token containing letters from multiple supported scripts receives the `mixed_script` signal. A legitimate mixed-script legal identifier or party name may therefore be marked; the original evidence remains unchanged and auditable, while the model receives an explicit code-point marker.
 
 Default-ignorable handling is intentionally conservative for model input. If a future legal corpus demonstrates a legitimate need for a currently exposed character, change the model-view profile with a regression fixture rather than mutating stored evidence.
 
