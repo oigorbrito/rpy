@@ -17,7 +17,7 @@ from app.db import create_pool
 from app.frontend import router as frontend_router
 from app.http_auth_config import validate_http_auth_config
 from app.http_limits import InboundPostBodyLimitMiddleware, judit_webhook_max_body_bytes
-from app.json_utils import decode_json_object
+from app.json_utils import decode_json_object, loads_strict_json
 from app.judit import normalize_cnj, parse_event
 from app.judit_client import JuditRequestError
 from app.observability import (
@@ -348,7 +348,7 @@ async def judit_webhook(token: str, request: Request) -> dict[str, bool]:
         raise HTTPException(status_code=404, detail="not found")
 
     try:
-        body = await request.json()
+        body = loads_strict_json(await request.body())
         event = parse_event(body)
     except (ValueError, TypeError):
         raise HTTPException(status_code=400, detail="invalid payload") from None
