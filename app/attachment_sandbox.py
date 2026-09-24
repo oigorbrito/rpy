@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from app.attachments import AttachmentChunkInput
+from app.json_utils import loads_strict_json
 
 DEFAULT_SOCKET_PATH = "/run/rpy-parser/parser.sock"
 DEFAULT_TIMEOUT_SECONDS = 45.0
@@ -67,7 +68,7 @@ async def _read_frame(reader: asyncio.StreamReader) -> dict[str, Any]:
     if size <= 0 or size > MAX_FRAME_BYTES:
         raise ValueError("invalid attachment parser frame size")
     body = await reader.readexactly(size)
-    payload = json.loads(body.decode("utf-8"))
+    payload = loads_strict_json(body.decode("utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("attachment parser frame must contain an object")
     return payload
