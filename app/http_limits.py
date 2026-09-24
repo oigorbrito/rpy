@@ -41,20 +41,35 @@ class InboundPostBodyLimitMiddleware:
             await self.app(scope, receive, send)
             return
 
-        raw_content_length = next(
-            (
-                value
-                for key, value in scope.get("headers", [])
-                if key.lower() == b"content-length"
-            ),
-            None,
+        headers = list(scope.get("headers", []))
+        content_length_values = [
+            value for key, value in headers if key.lower() == b"content-length"
+        ]
+        transfer_encoding_present = any(
+            key.lower() == b"transfer-encoding" for key, _ in headers
         )
-        if raw_content_length is not None:
-            try:
-                content_length = int(raw_content_length)
-            except (TypeError, ValueError):
-                content_length = None
-            if content_length is not None and content_length > self.limit:
+        if (
+            len(content_length_values) > 1
+            or (content_length_values and transfer_encoding_present)
+        ):
+            response = JSONResponse(
+                {"detail": "ambiguous request framing"},
+                status_code=400,
+            )
+            await response(scope, receive, send)
+            return
+
+        if content_length_values:
+            raw_content_length = content_length_values[0]
+            if not isinstance(raw_content_length, bytes) or not raw_content_length.isdigit():
+                response = JSONResponse(
+                    {"detail": "invalid content-length"},
+                    status_code=400,
+                )
+                await response(scope, receive, send)
+                return
+            content_length = int(raw_content_length)
+            if content_length > self.limit:
                 response = JSONResponse(
                     {"detail": "request body too large"},
                     status_code=413,
