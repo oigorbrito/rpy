@@ -244,9 +244,9 @@ def _create_tracking_sync(code: str, recurrence_days: int) -> JuditTrackingResul
 
 
 def _delete_tracking_sync(tracking_id: str) -> None:
-    identifier = str(tracking_id).strip()
-    if not identifier:
+    if not isinstance(tracking_id, str) or not tracking_id.strip():
         raise ValueError("tracking_id is required")
+    identifier = tracking_id.strip()
     encoded_identifier = urllib.parse.quote(identifier, safe="").replace(".", "%2E")
     _provider_request(
         f"{JUDIT_TRACKING_URL}/{encoded_identifier}",
