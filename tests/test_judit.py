@@ -35,6 +35,26 @@ def test_parse_event_rejects_non_finite_numbers_before_persistence(value: float)
         parse_event(body)
 
 
+def test_parse_event_handles_deep_nesting_without_recursion_error() -> None:
+    nested: dict[str, object] = {"value": 1.0}
+    for _ in range(1500):
+        nested = {"nested": nested}
+
+    event = parse_event(
+        {
+            "callback_id": "cb-deep",
+            "event_type": "request_completed",
+            "reference_type": "request",
+            "reference_id": "req-deep",
+            "payload": {"status": "completed"},
+            "unused": nested,
+        }
+    )
+
+    if event.request_id != "req-deep" or event.request_completed is not True:
+        raise AssertionError("deep finite webhook payload was not parsed correctly")
+
+
 def test_parse_current_lawsuit_response_envelope() -> None:
     event = parse_event(
         {
