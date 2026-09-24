@@ -494,6 +494,12 @@ def validate(values: dict[str, str]) -> list[str]:
             for token, tenant_id in bearer_tokens.items():
                 if not isinstance(token, str) or not token:
                     raise ValueError("bearer token keys must be non-empty strings")
+                if token != token.strip() or any(char.isspace() for char in token):
+                    raise ValueError("legacy bearer tokens must not contain whitespace")
+                if token.startswith(("sk_live_", "sk_test_")):
+                    raise ValueError(
+                        "legacy bearer tokens must not use sk_live_ or sk_test_ prefixes"
+                    )
                 UUID(str(tenant_id))
         except (json.JSONDecodeError, TypeError, ValueError) as exc:
             errors.append(f"RPY_BEARER_TOKENS is invalid: {exc}")
