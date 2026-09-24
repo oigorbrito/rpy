@@ -64,3 +64,17 @@ def test_ops_rejects_duplicate_authorization_even_with_correct_token(
     )
     if _valid_ops_request(request):
         raise AssertionError("ops endpoint accepted duplicate Authorization headers")
+
+
+def test_comma_merged_authorization_header_is_rejected() -> None:
+    first = uuid4().hex
+    second = uuid4().hex
+    request = _request(f"Bearer {first}, Bearer {second}")
+    if authorization_header(request) is not None:
+        raise AssertionError("comma-merged Authorization header must be rejected")
+    with pytest.raises(HTTPException) as exc_info:
+        bearer_credential(request)
+    if exc_info.value.status_code != 401:
+        raise AssertionError(
+            f"expected merged Authorization to return 401, got {exc_info.value.status_code}"
+        )
