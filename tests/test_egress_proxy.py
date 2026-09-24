@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import socket
 
 import pytest
 from hypothesis import given, settings, strategies as st
@@ -54,6 +55,59 @@ def test_egress_connect_timeout_rejects_non_finite_values(
     monkeypatch.setenv("EGRESS_PROXY_CONNECT_TIMEOUT_SECONDS", value)
     with pytest.raises(RuntimeError, match="finite number between 0 and 60"):
         egress_proxy._connect_timeout()
+
+
+@settings(max_examples=96, deadline=None)
+@given(address=st.ip_addresses().filter(lambda value: not value.is_global))
+def test_resolved_endpoints_property_rejects_non_global_addresses(address) -> None:
+    family = socket.AF_INET if address.version == 4 else socket.AF_INET6
+    sockaddr = (str(address), 443) if address.version == 4 else (str(address), 443, 0, 0)
+    with pytest.raises(egress_proxy.UnsafeEgressResolutionError, match="non-global"):
+        egress_proxy._public_endpoints_from_addrinfo(
+            [(family, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", sockaddr)]
+        )
+
+
+def test_resolved_endpoints_accept_public_addresses_and_deduplicate() -> None:
+    records = [
+        (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("8.8.8.8", 443)),
+        (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("8.8.8.8", 443)),
+        (
+            socket.AF_INET6,
+            socket.SOCK_STREAM,
+            socket.IPPROTO_TCP,
+            "",
+            ("2606:4700:4700::1111", 443, 0, 0),
+        ),
+    ]
+    assert egress_proxy._public_endpoints_from_addrinfo(records) == (  # nosec B101
+        (socket.AF_INET, "8.8.8.8"),
+        (socket.AF_INET6, "2606:4700:4700::1111"),
+    )
+
+
+@pytest.mark.asyncio
+async def test_public_connection_uses_resolved_numeric_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: list[tuple[str, int, int, int]] = []
+
+    async def fake_resolve(host: str):
+        assert host == "api.anthropic.com"  # nosec B101
+        return ((socket.AF_INET, "8.8.8.8"),)
+
+    async def fake_connect(host: str, port: int, *, family: int, flags: int):
+        observed.append((host, port, family, flags))
+        return asyncio.StreamReader(), _Writer()  # type: ignore[return-value]
+
+    monkeypatch.setattr(egress_proxy, "_resolve_public_endpoints", fake_resolve)
+    monkeypatch.setattr(asyncio, "open_connection", fake_connect)
+
+    await egress_proxy._open_public_connection("api.anthropic.com")
+
+    assert observed == [  # nosec B101
+        ("8.8.8.8", 443, socket.AF_INET, socket.AI_NUMERICHOST)
+    ]
 
 
 @pytest.mark.parametrize(
@@ -183,7 +237,7 @@ async def test_upstream_socket_uses_authorized_allowlist_value(
     reader.feed_data(request)
     reader.feed_eof()
     writer = _Writer()
-    observed: list[tuple[str, int]] = []
+    observed: list[str] = []
 
     class _UpstreamWriter(_Writer):
         def write_eof(self) -> None:
@@ -193,11 +247,11 @@ async def test_upstream_socket_uses_authorized_allowlist_value(
     upstream_reader.feed_eof()
     upstream_writer = _UpstreamWriter()
 
-    async def fake_connect(host: str, port: int):
-        observed.append((host, port))
+    async def fake_connect(host: str):
+        observed.append(host)
         return upstream_reader, upstream_writer
 
-    monkeypatch.setattr(asyncio, "open_connection", fake_connect)
+    monkeypatch.setattr(egress_proxy, "_open_public_connection", fake_connect)
     await egress_proxy._handle_client(
         reader,
         writer,  # type: ignore[arg-type]
@@ -205,5 +259,33 @@ async def test_upstream_socket_uses_authorized_allowlist_value(
         timeout_seconds=1.0,
     )
 
-    assert observed == [("api.anthropic.com", 443)]  # nosec B101
+    assert observed == ["api.anthropic.com"]  # nosec B101
     assert b"200 Connection Established" in bytes(writer.data)  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_allowlisted_hostname_resolving_private_is_forbidden(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = (
+        b"CONNECT api.anthropic.com:443 HTTP/1.1\r\n"
+        b"Host: api.anthropic.com:443\r\n\r\n"
+    )
+    reader = asyncio.StreamReader()
+    reader.feed_data(request)
+    reader.feed_eof()
+    writer = _Writer()
+
+    async def unsafe_resolution(host: str):
+        raise egress_proxy.UnsafeEgressResolutionError("non-global")
+
+    monkeypatch.setattr(egress_proxy, "_open_public_connection", unsafe_resolution)
+    await egress_proxy._handle_client(
+        reader,
+        writer,  # type: ignore[arg-type]
+        allowed_hosts=frozenset({"api.anthropic.com"}),
+        timeout_seconds=1.0,
+    )
+
+    assert b"403 Forbidden" in bytes(writer.data)  # nosec B101
+    assert writer.closed is True  # nosec B101
