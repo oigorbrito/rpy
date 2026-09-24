@@ -248,3 +248,15 @@ def test_parser_rejects_auxiliary_claim_metadata() -> None:
 
     with pytest.raises(ValueError, match="claim keys do not match"):
         parse_structured_summary(json.dumps(payload))
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        '{"synthesis":"first","synthesis":"second"}',
+        '{"value":NaN}',
+    ],
+)
+def test_structured_summary_rejects_ambiguous_json(raw: str) -> None:
+    with pytest.raises(ValueError, match="provider structured summary is not valid JSON"):
+        parse_structured_summary(raw)
