@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
-import subprocess
+import subprocess  # nosec B404 - fixed local verifier test harness
 from pathlib import Path
 
 
