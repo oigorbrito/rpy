@@ -224,8 +224,10 @@ async def test_sandbox_rejects_ambiguous_json_frames_as_protocol_error(
         writer.write(struct.pack("!I", len(raw)) + raw)
         await writer.drain()
 
-        size = struct.unpack("!I", await reader.readexactly(4))[0]
-        response = json.loads((await reader.readexactly(size)).decode("utf-8"))
+        header = await asyncio.wait_for(reader.readexactly(4), timeout=5)
+        size = struct.unpack("!I", header)[0]
+        body = await asyncio.wait_for(reader.readexactly(size), timeout=5)
+        response = json.loads(body.decode("utf-8"))
         if response.get("ok") is not False:
             raise AssertionError(f"unexpected sandbox response: {response!r}")
         if response.get("error_code") != "parser_protocol_error":
