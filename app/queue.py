@@ -98,6 +98,14 @@ RETURNING j.id, j.status, j.task_name, j.payload;
 """
 
 
+def _validate_reclaim_timeout(timeout_seconds: int) -> int:
+    if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, int):
+        raise ValueError("reclaim timeout_seconds must be an integer")
+    if timeout_seconds <= 0:
+        raise ValueError("reclaim timeout_seconds must be greater than zero")
+    return timeout_seconds
+
+
 def _validate_max_attempts(max_attempts: int) -> int:
     if isinstance(max_attempts, bool) or not isinstance(max_attempts, int):
         raise ValueError("max_attempts must be an integer")
@@ -176,6 +184,7 @@ async def fail(
 
 
 async def reclaim_stale(conn: asyncpg.Connection, timeout_seconds: int = 30) -> list[asyncpg.Record]:
+    bounded_timeout = _validate_reclaim_timeout(timeout_seconds)
     return list(
-        await conn.fetch(RECLAIM_SQL, timeout_seconds, MAX_JOB_ERROR_LOG_CHARS)
+        await conn.fetch(RECLAIM_SQL, bounded_timeout, MAX_JOB_ERROR_LOG_CHARS)
     )
