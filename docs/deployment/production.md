@@ -111,6 +111,7 @@ Production has no fallback values for:
 - `JUDIT_API_KEY`;
 - `JUDIT_WEBHOOK_TOKEN`;
 - `RPY_BEARER_TOKENS`;
+- `RPY_API_KEY_ENVIRONMENT` (`live` or `test`; production should normally use `live`);
 - `RPY_OPS_TOKEN`.
 
 `OPENAI_API_KEY` is conditional: it is required only while `EMBEDDING_SPACE_RUNTIME_ENABLED=false`, which preserves the historical OpenAI `vector(1536)` retrieval path. With the isolated runtime enabled, BGE is the default self-hosted provider. Cohere is accepted only when the deployment explicitly selects `EMBEDDING_PROVIDER=cohere`, sets `ALLOW_EXTERNAL_EMBEDDINGS=true`, pins `COHERE_EMBEDDING_MODEL=embed-v4.0`, and supplies `COHERE_API_KEY`. Cohere is never an automatic fallback.
