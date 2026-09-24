@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 import asyncpg
 from fastapi import FastAPI, HTTPException, Request
 
+from app.api_key_auth import api_key_deployment_environment
 from app.api_key_middleware import ApiKeySecurityMiddleware
 from app.api_v1 import router as api_v1_router
 from app.auth import configured_bearer_tokens, tenant_from_request
@@ -45,6 +46,7 @@ async def lifespan(app: FastAPI):
     judit_webhook_max_body_bytes()
     operational_thresholds()
     validate_http_auth_config()
+    api_key_deployment_environment()
     app.state.bearer_tokens = configured_bearer_tokens()
     app.state.webhook_tenant_id = configured_webhook_tenant()
     validate_carteira_seed()
