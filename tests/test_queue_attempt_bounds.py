@@ -1,6 +1,11 @@
 import pytest
 
-from app.queue import MAX_JOB_ATTEMPTS, MIN_JOB_ATTEMPTS, _validate_max_attempts
+from app.queue import (
+    MAX_JOB_ATTEMPTS,
+    MIN_JOB_ATTEMPTS,
+    _retry_backoff_seconds,
+    _validate_max_attempts,
+)
 
 
 def test_accepts_supported_attempt_bounds() -> None:
@@ -19,3 +24,28 @@ def test_rejects_attempt_count_outside_supported_range(value: int) -> None:
 def test_rejects_non_integer_attempt_count(value) -> None:
     with pytest.raises(ValueError, match="must be an integer"):
         _validate_max_attempts(value)
+
+
+@pytest.mark.parametrize(
+    ("attempts", "expected"),
+    [
+        (0, 2),
+        (1, 2),
+        (2, 4),
+        (8, 256),
+        (9, 300),
+        (100, 300),
+        (10**6, 300),
+    ],
+)
+def test_retry_backoff_is_bounded_without_large_exponentiation(
+    attempts: int,
+    expected: int,
+) -> None:
+    assert _retry_backoff_seconds(attempts) == expected
+
+
+@pytest.mark.parametrize("value", [True, 1.5, "3", None])
+def test_retry_backoff_rejects_non_integer_attempts(value) -> None:
+    with pytest.raises(ValueError, match="attempts must be an integer"):
+        _retry_backoff_seconds(value)
