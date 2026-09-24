@@ -439,6 +439,15 @@ def validate(values: dict[str, str]) -> list[str]:
         if any(marker in value.lower() for marker in PLACEHOLDER_MARKERS):
             errors.append(f"{key} still contains a placeholder value")
 
+    _validate_positive_numeric(
+        values,
+        errors,
+        key="JUDIT_WEBHOOK_MAX_BODY_BYTES",
+        default="5242880",
+        convert=int,
+        invalid_message="JUDIT_WEBHOOK_MAX_BODY_BYTES must be an integer",
+        non_positive_message="JUDIT_WEBHOOK_MAX_BODY_BYTES must be greater than zero",
+    )
     _validate_attachment_ocr(values, errors)
     _validate_embedding_runtime(values, errors)
     _validate_reranker(values, errors)
