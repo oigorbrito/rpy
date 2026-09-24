@@ -66,6 +66,52 @@ async def _reset(pool) -> None:
 
 
 @pytest.mark.asyncio
+async def test_v1_create_summary_rejects_non_standard_json_number(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert TEST_DATABASE_URL is not None
+    monkeypatch.setenv("RPY_API_KEY_ENVIRONMENT", "test")
+    await migrate(TEST_DATABASE_URL)
+    pool = await create_pool(TEST_DATABASE_URL, min_size=1, max_size=4)
+    app.state.pool = pool
+    app.state.bearer_tokens = {}
+
+    code = "0000000-00.2026.8.21.0399"
+    token = "sk_test_strict_json_00000001"
+    try:
+        await _reset(pool)
+        async with pool.acquire() as conn:
+            tenant_id = await conn.fetchval(
+                "INSERT INTO tenants (name) VALUES ('Strict JSON tenant') RETURNING id"
+            )
+            await _insert_key(conn, tenant_id=tenant_id, token=token, scopes=(code,))
+
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.post(
+                "/v1/resumos",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Idempotency-Key": "idem-non-standard-json",
+                    "Content-Type": "application/json",
+                },
+                content=(
+                    '{"cnj":"0000000-00.2026.8.21.0399",'
+                    '"format":"json","unused":{"score":NaN}}'
+                ),
+            )
+
+        if response.status_code != 400:
+            raise AssertionError(
+                f"expected strict JSON rejection with 400, got {response.status_code}"
+            )
+        if response.json().get("detail") != "request body must contain strict JSON":
+            raise AssertionError(f"unexpected strict JSON error: {response.json()!r}")
+    finally:
+        await pool.close()
+
+
+@pytest.mark.asyncio
 async def test_v1_idempotency_states_authorization_and_sanitized_sources(monkeypatch) -> None:
     assert TEST_DATABASE_URL is not None
     monkeypatch.setenv("RPY_API_KEY_ENVIRONMENT", "test")
