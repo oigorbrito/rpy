@@ -51,7 +51,7 @@ from app.provenance import (
 )
 from app.reranker_provider import configured_reranker_scorer
 from app.reranking import RERANK_CANDIDATE_LIMIT, select_context_steps
-from app.retrieval import load_steps, vector_search
+from app.retrieval import Step, load_steps, vector_search
 from app.summary_output import (
     SUMMARY_OUTPUT_SCHEMA,
     parse_structured_summary,
@@ -201,7 +201,7 @@ def _serialize_steps(ranked: list[Any]) -> list[dict[str, Any]]:
 def _passive_party_attention_warnings(
     parties: list[dict[str, Any]],
     representatives: list[dict[str, Any]],
-    steps: list[Any],
+    steps: list[Step],
 ) -> list[str]:
     has_passive_party = any(
         str(party.get("side") or "").strip().casefold() == "passive"
@@ -212,10 +212,7 @@ def _passive_party_attention_warnings(
         return []
 
     for step in steps:
-        rendered = " ".join(
-            str(value or "").casefold()
-            for value in (getattr(step, "title", None), getattr(step, "text", None))
-        )
+        rendered = f"{step.title or ''} {step.text}".casefold()
         if "citação" in rendered or "citacao" in rendered:
             return []
 
