@@ -31,12 +31,14 @@ class JuditRequestError(RuntimeError):
         error_code: str = "provider_error",
         http_status: int | None = None,
         provider_error_code: str | None = None,
+        provider_validation: list[dict[str, str]] | None = None,
     ) -> None:
         super().__init__(message)
         self.retry_safe = retry_safe
         self.error_code = error_code
         self.http_status = http_status
         self.provider_error_code = provider_error_code
+        self.provider_validation = provider_validation or []
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,40 +106,61 @@ def _api_key() -> str:
 _SAFE_PROVIDER_CODE_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,80}$")
 
 
-def _safe_http_error_code(exc: urllib.error.HTTPError) -> str | None:
-    """Extract only a short allowlisted machine code from an HTTP error body."""
+def _safe_http_error_metadata(
+    exc: urllib.error.HTTPError,
+) -> tuple[str | None, list[dict[str, str]]]:
+    """Extract only short allowlisted machine metadata from an HTTP error body."""
     fp = getattr(exc, "fp", None)
     if fp is None:
-        return None
+        return None, []
     try:
         raw = fp.read(8193)
     except (AttributeError, OSError):
-        return None
+        return None, []
     if not raw or len(raw) > 8192:
-        return None
+        return None, []
     try:
         body: Any = loads_strict_json(raw)
     except (TypeError, ValueError):
-        return None
+        return None, []
     if not isinstance(body, dict):
-        return None
+        return None, []
 
     candidates: list[Any] = [
         body.get("code"),
         body.get("error_code"),
     ]
+    validation: list[dict[str, str]] = []
     error = body.get("error")
     if isinstance(error, dict):
-        candidates.extend([error.get("code"), error.get("name"), error.get("data")])
+        candidates.extend([error.get("code"), error.get("name")])
+        data = error.get("data")
+        if isinstance(data, str):
+            candidates.append(data)
+        elif isinstance(data, list):
+            for item in data[:10]:
+                if not isinstance(item, dict):
+                    continue
+                safe_item: dict[str, str] = {}
+                for key in ("field", "rule"):
+                    value = item.get(key)
+                    if isinstance(value, str):
+                        normalized = value.strip()
+                        if _SAFE_PROVIDER_CODE_RE.fullmatch(normalized):
+                            safe_item[key] = normalized
+                if safe_item:
+                    validation.append(safe_item)
     elif isinstance(error, str):
         candidates.append(error)
 
+    provider_code = None
     for candidate in candidates:
         if isinstance(candidate, str):
             value = candidate.strip()
             if _SAFE_PROVIDER_CODE_RE.fullmatch(value):
-                return value
-    return None
+                provider_code = value
+                break
+    return provider_code, validation
 
 
 def _provider_request(
@@ -185,12 +208,14 @@ def _provider_request(
         # A normal 4xx response is an explicit rejection and can be retried only
         # after an operator/user changes or explicitly repeats the request. 5xx,
         # 408, 429 and transport failures remain ambiguous.
+        provider_error_code, provider_validation = _safe_http_error_metadata(exc)
         raise JuditRequestError(
             f"Judit request failed with HTTP {exc.code}",
             retry_safe=400 <= exc.code < 500 and exc.code not in {408, 429},
             error_code=f"http_{exc.code}",
             http_status=int(exc.code),
-            provider_error_code=_safe_http_error_code(exc),
+            provider_error_code=provider_error_code,
+            provider_validation=provider_validation,
         ) from None
     except (urllib.error.URLError, TimeoutError, OSError):
         raise JuditRequestError(
