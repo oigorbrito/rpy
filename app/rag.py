@@ -212,8 +212,11 @@ def _passive_party_attention_warnings(
         return []
 
     for step in steps:
-        rendered = f"{step.title or ''} {step.text}".casefold()
-        if "citação" in rendered or "citacao" in rendered:
+        title = (step.title or "").casefold()
+        if "citação" in title or "citacao" in title:
+            return []
+        text = step.text.casefold()
+        if "citação" in text or "citacao" in text:
             return []
 
     return [PASSIVE_PARTY_NO_REPRESENTATIVE_OR_CITATION_WARNING]
@@ -332,8 +335,8 @@ async def _load_context(
     )
     source_warnings.extend(
         _passive_party_attention_warnings(
-            base.get("parties", []),
-            base.get("representatives", []),
+            base.get("parties") or [],
+            base.get("representatives") or [],
             steps,
         )
     )
