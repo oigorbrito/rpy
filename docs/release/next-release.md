@@ -1,6 +1,6 @@
 # Next release readiness
 
-**Release version: TBD**
+**Release version: 0.1.1**
 
 This document tracks the current `main` after the historical `v0.1.0` release. It is intentionally separate from `docs/release/v0.1.0.md`, which records the immutable first release.
 
@@ -44,22 +44,21 @@ A **release blocker** prevents creation of a new software release artifact. An *
 
 At present, the repository has no known code/CI blocker for producing another **offline-qualified software artifact**, and the default branch now has an active repository ruleset enforcing pull requests and required checks. The private/secrecy retrieval hard-filter follow-up (#265) is closed with PostgreSQL integration evidence across load, lexical, vector and embedding paths. The unresolved open issues are primarily activation/acceptance/domain-governance or additional hardening work, except that product may choose to require #113/#114 completion as a release criterion.
 
-Before a formal new tag, two release-owner decisions remain explicit:
+Before a formal new tag, the release owner has selected `0.1.1`. One release-scope decision remains explicit: decide whether the unresolved document-contract work (#113/#114) is required for `0.1.1` or remains a documented post-release product acceptance item.
 
-1. select the next version identifier; and
-2. decide whether the unresolved document-contract work (#113/#114) is required for that release or remains a documented post-release product acceptance item.
-
-Engineering must not silently resolve either decision.
+Engineering must not silently resolve that remaining scope decision.
 
 ## Current repository-qualified candidate
 
-The latest fully observed `main` candidate before this documentation-only branch is `88061c67b1e55361b6fecfcec1ca0b3574594515`.
+The latest fully observed `main` candidate before this release-preparation branch is `1017883cf98c1bd207931c01686e1ea22ae677e4`.
 
 Exact-commit GitHub evidence:
 
-- CI run #3320 / id `36187131003`: success, including production Compose contract validation, project harness, provider-readiness gate, static quality, unit tests, synthetic RAG eval, offline pipeline eval, offline generation eval, frontend behavior/browser smoke, container image smoke, PostgreSQL backup/restore drill, PostgreSQL integration and offline release smoke.
-- vulnerability-scan run #131 / id `36187130986`: success.
-- CodeQL "Push on main" run #903 / id `36187130981`: success.
+- CI run #3324 / id `36195400558`: success, including production Compose contract validation, project harness, provider-readiness gate, static quality, unit tests, synthetic RAG eval, offline pipeline eval, offline generation eval, frontend behavior/browser smoke, container image smoke, PostgreSQL backup/restore drill, PostgreSQL integration and offline release smoke.
+- vulnerability-scan run #132 / id `36195400615`: success.
+- CodeQL "Push on main" run #905 / id `36195400305`: success.
+- image run #3 / id `36195868927`: success for tests, image publication, digest smoke, Trivy gates, SBOM/provenance and GitHub artifact attestation.
+- immutable image evidence: `ghcr.io/oigorbrito/rpy@sha256:d6420e9110d94e725b834a08368ce04acdeaa0092f49bfd5d403898b0636d5db`.
 - Repository ruleset `Protect main` is active for the default branch, requires pull requests and required status checks, blocks deletion and non-fast-forward updates, and has no bypass actors.
 - provider-live-smoke run #9 / id `36188280364` failed in the Judit diagnostic path and is not qualifying evidence for provider acceptance; the DataJud-only step was skipped in that run.
 
