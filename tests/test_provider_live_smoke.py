@@ -251,6 +251,16 @@ def test_both_live_path_runs_judit_and_datajud_in_same_acceptance(
         observed.append(f"datajud:{kwargs['code']}")
         return SimpleNamespace(status="ok", metadata=object(), error_code=None)
 
+    async def fake_diagnostic():
+        return {
+            "provider": "judit",
+            "executed": True,
+            "network_calls_performed": True,
+            "network_call_type": "non_creating_connectivity_check",
+            "status": "ok",
+            "latency_ms": 1.0,
+        }
+
     monkeypatch.setenv("PROVIDER_ACCEPTANCE_AUTHORIZED", "true")
     monkeypatch.setenv("JUDIT_ATTACHMENTS_ENABLED", "false")
     monkeypatch.setenv("DATAJUD_ENABLED", "true")
@@ -259,6 +269,7 @@ def test_both_live_path_runs_judit_and_datajud_in_same_acceptance(
     monkeypatch.setenv("DATAJUD_API_KEY", "test-key")
     monkeypatch.setattr(smoke, "create_lawsuit_request", fake_create)
     monkeypatch.setattr(smoke, "lookup_datajud_metadata", fake_lookup)
+    monkeypatch.setattr(smoke, "diagnose_judit", fake_diagnostic)
 
     report = asyncio.run(smoke.run_smoke("both", "0000000-00.2026.8.21.0001"))
 
@@ -383,3 +394,70 @@ def test_main_replay_does_not_require_provider_credentials(
         raise AssertionError(f"replay should succeed without provider credentials, got {exit_code}")
     if report["replayed"] is not True or report["network_calls_performed"] is not False:
         raise AssertionError(f"unexpected replay report: {report!r}")
+
+
+def test_judit_diagnostic_reports_safe_http_error_without_paid_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fail():
+        raise smoke.JuditRequestError(
+            "safe message",
+            error_code="http_403",
+            http_status=403,
+            retry_safe=True,
+        )
+
+    monkeypatch.setenv("JUDIT_API_KEY", "test-key")
+    monkeypatch.setattr(smoke, "check_judit_connectivity", fail)
+
+    report = asyncio.run(smoke.diagnose_judit())
+
+    assert report["status"] == "error"
+    assert report["error_code"] == "http_403"
+    assert report["http_status"] == 403
+    assert report["network_call_type"] == "non_creating_connectivity_check"
+
+
+def test_both_blocks_paid_calls_when_judit_diagnostic_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    judit_called = False
+    datajud_called = False
+
+    async def diagnostic():
+        return {
+            "provider": "judit",
+            "executed": True,
+            "network_calls_performed": True,
+            "network_call_type": "non_creating_connectivity_check",
+            "status": "error",
+            "error_code": "http_401",
+            "http_status": 401,
+        }
+
+    async def fake_judit(code: str):
+        nonlocal judit_called
+        judit_called = True
+        return {}
+
+    async def fake_datajud(code: str):
+        nonlocal datajud_called
+        datajud_called = True
+        return {}
+
+    monkeypatch.setenv("PROVIDER_ACCEPTANCE_AUTHORIZED", "true")
+    monkeypatch.setenv("JUDIT_ATTACHMENTS_ENABLED", "false")
+    monkeypatch.setenv("DATAJUD_ENABLED", "true")
+    monkeypatch.setenv("DATAJUD_AUTHORIZED_USE", "true")
+    monkeypatch.setenv("JUDIT_API_KEY", "test-key")
+    monkeypatch.setenv("DATAJUD_API_KEY", "test-key")
+    monkeypatch.setattr(smoke, "diagnose_judit", diagnostic)
+    monkeypatch.setattr(smoke, "_smoke_judit", fake_judit)
+    monkeypatch.setattr(smoke, "_smoke_datajud", fake_datajud)
+
+    report = asyncio.run(smoke.run_smoke("both", "0000000-00.2026.8.21.0001"))
+
+    assert report["status"] == "blocked_judit_diagnostic"
+    assert report["network_calls_performed"] is False
+    assert judit_called is False
+    assert datajud_called is False

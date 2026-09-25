@@ -11,7 +11,12 @@ from typing import Any
 
 from app.datajud_client import lookup_datajud_metadata
 from app.judit import normalize_cnj
-from app.judit_client import create_lawsuit_request, judit_attachments_enabled
+from app.judit_client import (
+    JuditRequestError,
+    check_judit_connectivity,
+    create_lawsuit_request,
+    judit_attachments_enabled,
+)
 
 _CAPTURE_SCHEMA_VERSION = 1
 
@@ -50,6 +55,11 @@ def _error_report(provider: str, exc: Exception) -> dict[str, Any]:
             "error_class": type(exc).__name__,
         }
     )
+    if isinstance(exc, JuditRequestError):
+        report["error_code"] = exc.error_code
+        report["http_status"] = exc.http_status
+        report["retry_safe"] = exc.retry_safe
+        report["network_call_attempted"] = True
     return report
 
 
@@ -106,6 +116,45 @@ def load_replay(path: Path, *, code: str) -> dict[str, Any]:
     replay["network_calls_performed"] = False
     replay["replayed"] = True
     return replay
+
+
+async def diagnose_judit() -> dict[str, Any]:
+    report = _base_report("judit")
+    if not os.getenv("JUDIT_API_KEY", "").strip():
+        report["status"] = "skipped_missing_credentials"
+        return report
+
+    started = perf_counter()
+    try:
+        await check_judit_connectivity()
+    except JuditRequestError as exc:
+        elapsed_ms = (perf_counter() - started) * 1000
+        report.update(
+            {
+                "executed": True,
+                "network_calls_performed": True,
+                "network_call_type": "non_creating_connectivity_check",
+                "status": "error",
+                "latency_ms": round(elapsed_ms, 3),
+                "error_class": type(exc).__name__,
+                "error_code": exc.error_code,
+                "http_status": exc.http_status,
+                "retry_safe": exc.retry_safe,
+            }
+        )
+        return report
+
+    elapsed_ms = (perf_counter() - started) * 1000
+    report.update(
+        {
+            "executed": True,
+            "network_calls_performed": True,
+            "network_call_type": "non_creating_connectivity_check",
+            "status": "ok",
+            "latency_ms": round(elapsed_ms, 3),
+        }
+    )
+    return report
 
 
 async def _smoke_judit(code: str) -> dict[str, Any]:
@@ -191,6 +240,16 @@ async def run_smoke(provider: str, code: str) -> dict[str, Any]:
             report["status"] = "skipped_missing_credentials"
             return report
 
+        diagnostic = await diagnose_judit()
+        if diagnostic["status"] != "ok":
+            return {
+                "provider": "both",
+                "executed": False,
+                "network_calls_performed": False,
+                "status": "blocked_judit_diagnostic",
+                "diagnostic": diagnostic,
+            }
+
         judit, datajud = await asyncio.gather(
             _smoke_judit(normalized),
             _smoke_datajud(normalized),
@@ -224,6 +283,11 @@ def main() -> int:
     )
     parser.add_argument("--provider", choices=("judit", "datajud", "both"), default="both")
     parser.add_argument(
+        "--diagnose-judit",
+        action="store_true",
+        help="Validate Judit API-key connectivity with a non-creating GET and exit",
+    )
+    parser.add_argument(
         "--cnj",
         default=os.getenv("PROVIDER_ACCEPTANCE_CNJ", ""),
         help="Explicitly authorized CNJ; defaults to PROVIDER_ACCEPTANCE_CNJ",
@@ -241,6 +305,11 @@ def main() -> int:
         help="Replay a prior sanitized capture without provider network calls",
     )
     args = parser.parse_args()
+
+    if args.diagnose_judit:
+        report = asyncio.run(diagnose_judit())
+        print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0 if report["status"] == "ok" else 1
 
     if not str(args.cnj).strip():
         report = _base_report(args.provider)
