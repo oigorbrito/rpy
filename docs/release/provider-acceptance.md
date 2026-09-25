@@ -52,7 +52,7 @@ connectivity check:
 python scripts/provider_live_smoke.py --diagnose-judit
 ```
 
-The check performs only `GET /requests?page=1&page_size=1`. It does not create a lawsuit request.
+The check performs only `GET /requests?page=1&page_size=10`. It does not create a lawsuit request.
 GitHub Actions exposes this as `mode=diagnose` and uses it as the default workflow-dispatch mode.
 
 The diagnostic records only safe classifications such as `http_401`, `http_403`, `http_429`,

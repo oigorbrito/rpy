@@ -233,7 +233,7 @@ def _download_attachment_sync(
 def _check_connectivity_sync() -> dict[str, Any]:
     """Validate the configured API key without creating a paid lawsuit request."""
     body = _provider_request(
-        f"{JUDIT_REQUESTS_URL.rstrip('/')}?page=1&page_size=1",
+        f"{JUDIT_REQUESTS_URL.rstrip('/')}?page=1&page_size=10",
         method="GET",
         accepted_statuses={200},
     )
