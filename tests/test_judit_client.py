@@ -419,7 +419,7 @@ def test_connectivity_check_uses_non_creating_get(monkeypatch: pytest.MonkeyPatc
     request = captured["request"]
     assert request.method == "GET"
     assert request.data is None
-    assert request.full_url.endswith("/requests?page=1&page_size=1")
+    assert request.full_url.endswith("/requests?page=1&page_size=10")
     assert request.get_header("Api-key") == "diagnostic-key"
     assert body == {"page_data": []}
 
