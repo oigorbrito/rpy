@@ -59,7 +59,7 @@ async def test_requested_cnj_reaches_tenant_scoped_published_summary(monkeypatch
  tenant_id=uuid4(); token=f"request-token-{uuid4()}"; app.state.bearer_tokens={token:tenant_id}; request_id=f"request-{uuid4()}"; response_id=f"response-{uuid4()}"; code=f"0000000-00.2026.8.21.{str(uuid4().int)[-4:]}"; provider_calls=0
  async def fake_request(requested_code:str):
   nonlocal provider_calls; provider_calls+=1; assert requested_code==code; return JuditRequestResult(request_id=request_id)
- async def fake_generate(client,context,validation_errors=None): _prime_fake_structured_summary(context); return f"# Resumo do processo\n\nProcesso {code}. Situação atual registrada nos autos.\n\n## Pontos de atenção\nNenhuma divergência objetiva identificada."
+ async def fake_generate(client,context,validation_errors=None): _prime_fake_structured_summary(context); warning = context.get("source_warnings", [])[0] if context.get("source_warnings") else "Nenhuma divergência objetiva identificada."; return f"# Resumo do processo\n\nProcesso {code}. Situação atual registrada nos autos.\n\n## Pontos de atenção\n{warning}"
  monkeypatch.setattr(process_requests,"create_lawsuit_request",fake_request); monkeypatch.setattr(rag,"_generate",fake_generate)
  lawsuit=deepcopy(_fixture("tracking_lawsuit_response.json")); lawsuit["callback_id"]=f"lawsuit-{uuid4()}"; lawsuit["payload"]["request_id"]=request_id; lawsuit["payload"]["response_id"]=response_id; lawsuit["payload"]["response_data"]["code"]=code
  completion=deepcopy(_fixture("tracking_request_completed.json")); completion["callback_id"]=f"completion-{uuid4()}"; completion["payload"]["request_id"]=request_id
@@ -94,7 +94,8 @@ async def test_completion_before_lawsuit_reaches_authenticated_summary_with_work
   nonlocal generation_calls; generation_calls+=1
   if generation_calls==1:raise RuntimeError("transient provider failure")
   _prime_fake_structured_summary(context)
-  return f"# Resumo do processo\n\nProcesso {code}. Situação atual registrada nos autos.\n\n## Pontos de atenção\nNenhuma divergência objetiva identificada."
+  warning = context.get("source_warnings", [])[0] if context.get("source_warnings") else "Nenhuma divergência objetiva identificada."
+  return f"# Resumo do processo\n\nProcesso {code}. Situação atual registrada nos autos.\n\n## Pontos de atenção\n{warning}"
  monkeypatch.setattr(rag,"_generate",flaky_generate); transport=httpx.ASGITransport(app=app)
  try:
   await _reset(pool)

@@ -23,6 +23,8 @@ Normalized parties and representatives contain only the fields required by the a
 
 The public process view and deterministic summary renderer continue to consume `parties` only, so a representative cannot become a process party merely because Judit placed the record inside `parties[]`. The RAG context keeps representatives under their own key, while party-name validation remains bound to normalized `parties`.
 
+For post-generation attention signaling, Rpy uses one deliberately conservative structural rule: when at least one normalized party has explicit `side=Passive`, the normalized `representatives` collection is empty, and no supplied movement title/text contains an explicit citation marker, the summary must surface a generic attention warning. If any normalized representative exists without an explicit `represents` link, Rpy does **not** infer whether that representative belongs to the passive party and therefore does not emit this warning from that evidence alone.
+
 The raw source payload remains unchanged and can therefore retain the original source value under the repository's existing access, retention and audit controls.
 
 ## Movement text
