@@ -501,3 +501,60 @@ def test_connectivity_diagnostic_rejects_unsafe_provider_error_text(
         judit_client._check_connectivity_sync()
 
     assert exc.value.provider_error_code is None
+
+
+def test_connectivity_diagnostic_extracts_sanitized_validation_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("JUDIT_API_KEY", "diagnostic-key")
+
+    def fail(request, timeout):
+        raise urllib.error.HTTPError(
+            request.full_url,
+            400,
+            "provider validation failed",
+            {},
+            io.BytesIO(
+                b'{"error":{"name":"HttpBadRequestError","message":"BAD_REQUEST","data":['
+                b'{"field":"page","rule":"required","message":"page is required"},'
+                b'{"field":"page_size","rule":"min","message":"too small"}]}}'
+            ),
+        )
+
+    monkeypatch.setattr(judit_client.urllib.request, "urlopen", fail)
+
+    with pytest.raises(judit_client.JuditRequestError) as exc:
+        judit_client._check_connectivity_sync()
+
+    assert exc.value.provider_error_code == "HttpBadRequestError"
+    assert exc.value.provider_validation == [
+        {"field": "page", "rule": "required"},
+        {"field": "page_size", "rule": "min"},
+    ]
+    assert "page is required" not in str(exc.value)
+
+
+def test_connectivity_diagnostic_drops_unsafe_validation_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("JUDIT_API_KEY", "diagnostic-key")
+
+    def fail(request, timeout):
+        raise urllib.error.HTTPError(
+            request.full_url,
+            400,
+            "provider validation failed",
+            {},
+            io.BytesIO(
+                b'{"error":{"name":"HttpBadRequestError","data":['
+                b'{"field":"bad field with spaces","rule":"bad rule with spaces",'
+                b'"message":"possibly sensitive free text"}]}}'
+            ),
+        )
+
+    monkeypatch.setattr(judit_client.urllib.request, "urlopen", fail)
+
+    with pytest.raises(judit_client.JuditRequestError) as exc:
+        judit_client._check_connectivity_sync()
+
+    assert exc.value.provider_validation == []
