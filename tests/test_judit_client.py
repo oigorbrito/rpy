@@ -420,9 +420,34 @@ def test_connectivity_check_uses_non_creating_get(monkeypatch: pytest.MonkeyPatc
     request = captured["request"]
     assert request.method == "GET"
     assert request.data is None
-    assert request.full_url.endswith("/requests")
+    assert request.full_url.endswith("/requests?page=1&page_size=1")
     assert request.get_header("Api-key") == "diagnostic-key"
     assert body == {"page_data": []}
+
+
+def test_requests_host_can_use_known_compat_alias(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = {}
+    monkeypatch.setenv("JUDIT_API_KEY", "diagnostic-key")
+    monkeypatch.setenv("JUDIT_REQUESTS_BASE_URL", judit_client.JUDIT_REQUESTS_COMPAT_BASE_URL)
+    monkeypatch.setattr(
+        judit_client.urllib.request,
+        "urlopen",
+        lambda request, timeout: captured.update(request=request, timeout=timeout)
+        or _Response(b'{"page_data":[]}', status=200),
+    )
+
+    judit_client._check_connectivity_sync()
+
+    assert captured["request"].full_url == (
+        "https://requests.prod.judit.io/requests?page=1&page_size=1"
+    )
+
+
+def test_requests_host_rejects_unapproved_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("JUDIT_REQUESTS_BASE_URL", "https://example.invalid")
+
+    with pytest.raises(RuntimeError, match="approved Judit requests host"):
+        judit_client._requests_base_url()
 
 
 @pytest.mark.parametrize(

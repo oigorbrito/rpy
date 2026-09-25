@@ -13,7 +13,9 @@ from typing import Any
 
 from app.json_utils import loads_strict_json
 
-JUDIT_REQUESTS_URL = "https://requests.production.judit.io/requests/"
+JUDIT_REQUESTS_BASE_URL = "https://requests.production.judit.io"
+JUDIT_REQUESTS_COMPAT_BASE_URL = "https://requests.prod.judit.io"
+JUDIT_REQUESTS_URL = f"{JUDIT_REQUESTS_BASE_URL}/requests/"
 JUDIT_TRACKING_URL = "https://tracking.production.judit.io/tracking"
 JUDIT_LAWSUITS_URL = "https://lawsuits.production.judit.io/lawsuits"
 _MAX_RESPONSE_BYTES = 262144
@@ -101,6 +103,21 @@ def _api_key() -> str:
     if not value:
         raise RuntimeError("JUDIT_API_KEY is required")
     return value
+
+
+def _requests_base_url() -> str:
+    value = os.environ.get("JUDIT_REQUESTS_BASE_URL", JUDIT_REQUESTS_BASE_URL).strip().rstrip("/")
+    if value not in {JUDIT_REQUESTS_BASE_URL, JUDIT_REQUESTS_COMPAT_BASE_URL}:
+        raise RuntimeError(
+            "JUDIT_REQUESTS_BASE_URL must be an approved Judit requests host"
+        )
+    return value
+
+
+def _requests_url(path: str = "") -> str:
+    base = _requests_base_url()
+    suffix = path.lstrip("/")
+    return f"{base}/{suffix}" if suffix else base
 
 
 _SAFE_PROVIDER_CODE_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,80}$")
@@ -301,7 +318,7 @@ def _download_attachment_sync(
 def _check_connectivity_sync() -> dict[str, Any]:
     """Validate the configured API key without creating a paid lawsuit request."""
     body = _provider_request(
-        JUDIT_REQUESTS_URL.rstrip("/"),
+        f"{_requests_url('requests')}?page=1&page_size=1",
         method="GET",
         accepted_statuses={200},
     )
@@ -314,7 +331,7 @@ async def check_judit_connectivity() -> dict[str, Any]:
 
 def _create_request_sync(code: str) -> JuditRequestResult:
     body = _provider_request(
-        JUDIT_REQUESTS_URL,
+        _requests_url("requests/"),
         method="POST",
         payload={
             "search": {"search_type": "lawsuit_cnj", "search_key": code},

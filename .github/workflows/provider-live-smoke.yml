@@ -54,7 +54,27 @@ jobs:
             echo "::error::JUDIT_API_KEY is not provisioned."
             exit 1
           fi
-          python scripts/provider_live_smoke.py --diagnose-judit
+
+          set +e
+          production_rc=1
+          compat_rc=1
+
+          echo "::group::Judit documented production host"
+          JUDIT_REQUESTS_BASE_URL="https://requests.production.judit.io" \
+            python scripts/provider_live_smoke.py --diagnose-judit
+          production_rc=$?
+          echo "::endgroup::"
+
+          echo "::group::Judit compatibility prod host"
+          JUDIT_REQUESTS_BASE_URL="https://requests.prod.judit.io" \
+            python scripts/provider_live_smoke.py --diagnose-judit
+          compat_rc=$?
+          echo "::endgroup::"
+
+          if [ "$production_rc" -eq 0 ] || [ "$compat_rc" -eq 0 ]; then
+            exit 0
+          fi
+          exit 1
 
       - name: Run controlled DataJud-only live smoke
         if: ${{ github.event.inputs.mode == 'datajud' }}
