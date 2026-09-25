@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from app import bge_runtime_contract
+
 MODULE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "verify_bge_reranker_artifact.py"
 spec = importlib.util.spec_from_file_location("verify_bge_reranker_artifact", MODULE_PATH)
 assert spec is not None and spec.loader is not None
@@ -30,7 +32,7 @@ def test_reranker_artifact_accepts_local_offline_directory(
     model_dir.mkdir()
     (model_dir / "config.json").write_text('{"model_type": "xlm-roberta"}', encoding="utf-8")
     monkeypatch.setattr(importlib.util, "find_spec", lambda name: object())
-    monkeypatch.setattr(verifier, "package_version", lambda name: "1.4.2")
+    monkeypatch.setattr(bge_runtime_contract, "package_version", lambda name: "1.4.2")
 
     assert verifier.validate(model_dir=model_dir, environ=_offline_env(model_dir)) == []
 
@@ -56,7 +58,7 @@ def test_reranker_artifact_rejects_missing_or_invalid_config(
     model_dir = tmp_path / "bge-reranker-v2-m3"
     model_dir.mkdir()
     monkeypatch.setattr(importlib.util, "find_spec", lambda name: object())
-    monkeypatch.setattr(verifier, "package_version", lambda name: "1.4.2")
+    monkeypatch.setattr(bge_runtime_contract, "package_version", lambda name: "1.4.2")
 
     errors = verifier.validate(model_dir=model_dir, environ=_offline_env(model_dir))
     assert any("missing config.json" in error for error in errors)
@@ -74,7 +76,7 @@ def test_reranker_artifact_rejects_online_or_wrong_path(
     model_dir.mkdir()
     (model_dir / "config.json").write_text("{}", encoding="utf-8")
     monkeypatch.setattr(importlib.util, "find_spec", lambda name: object())
-    monkeypatch.setattr(verifier, "package_version", lambda name: "1.4.2")
+    monkeypatch.setattr(bge_runtime_contract, "package_version", lambda name: "1.4.2")
     env = _offline_env(model_dir)
     env["HF_HUB_OFFLINE"] = "0"
     env["BGE_RERANKER_PATH"] = "/other/model"
@@ -101,7 +103,7 @@ def test_reranker_artifact_rejects_ambiguous_config_json(
     model_dir.mkdir()
     (model_dir / "config.json").write_text(raw, encoding="utf-8")
     monkeypatch.setattr(importlib.util, "find_spec", lambda name: object())
-    monkeypatch.setattr(verifier, "package_version", lambda name: "1.4.2")
+    monkeypatch.setattr(bge_runtime_contract, "package_version", lambda name: "1.4.2")
 
     errors = verifier.validate(model_dir=model_dir, environ=_offline_env(model_dir))
     if not any("config.json is invalid" in error for error in errors):
@@ -118,7 +120,7 @@ def test_reranker_artifact_rejects_unlocked_flagembedding_version(
     model_dir.mkdir()
     (model_dir / "config.json").write_text("{}", encoding="utf-8")
     monkeypatch.setattr(importlib.util, "find_spec", lambda name: object())
-    monkeypatch.setattr(verifier, "package_version", lambda name: installed_version)
+    monkeypatch.setattr(bge_runtime_contract, "package_version", lambda name: installed_version)
 
     errors = verifier.validate(model_dir=model_dir, environ=_offline_env(model_dir))
 
@@ -136,9 +138,9 @@ def test_reranker_artifact_rejects_missing_distribution_metadata(
     monkeypatch.setattr(importlib.util, "find_spec", lambda name: object())
 
     def missing_metadata(name: str) -> str:
-        raise verifier.PackageNotFoundError(name)
+        raise bge_runtime_contract.PackageNotFoundError(name)
 
-    monkeypatch.setattr(verifier, "package_version", missing_metadata)
+    monkeypatch.setattr(bge_runtime_contract, "package_version", missing_metadata)
 
     errors = verifier.validate(model_dir=model_dir, environ=_offline_env(model_dir))
 
