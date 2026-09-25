@@ -68,6 +68,34 @@ Operational interpretation follows Judit's published authentication guidance:
 Judit documents that every submitted process request is accounted/billed according to contract even
 when the result is served from cache, so diagnostic GETs should be used before repeating a paid POST.
 
+### Controlled DataJud-only smoke
+
+While Judit acceptance is unresolved, DataJud can be validated independently without loading or
+calling the Judit boundary.
+
+GitHub Actions exposes `mode=datajud`, which requires only:
+
+```text
+PROVIDER_ACCEPTANCE_CNJ
+PROVIDER_ACCEPTANCE_AUTHORIZED=true
+DATAJUD_AUTHORIZED_USE=true
+DATAJUD_API_KEY
+```
+
+The run executes:
+
+```bash
+python scripts/provider_live_smoke.py --provider datajud
+```
+
+It does not read `JUDIT_API_KEY`, does not run the Judit diagnostic, and does not submit any Judit
+request. A DataJud result of `ok` or `not_found` proves the public API boundary is reachable and the
+request contract is accepted; `auth_error` or `unavailable` remains a failed provider acceptance.
+
+The current CNJ documentation publishes the API Pública key in the DataJud Wiki and specifies the
+request header as `Authorization: APIKey <public-key>`. Because CNJ may rotate that public key at any
+time, keep the current value in the environment/secret rather than hard-coding it in the repository.
+
 ### Controlled Judit/DataJud smoke
 
 The repository also provides a manual live smoke entrypoint:
