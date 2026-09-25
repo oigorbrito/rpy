@@ -120,3 +120,41 @@ def test_bge_image_readiness_rejects_non_object_config_json(
     errors = verifier.validate(model_dir=model_dir, environ=_offline_env(model_dir))
     if "BGE model config.json must contain an object" not in errors:
         raise AssertionError(f"expected object-root error, got {errors!r}")
+
+
+@pytest.mark.parametrize("installed_version", ["1.4.1", "1.4.3", "2.0.0"])
+def test_bge_image_readiness_rejects_unlocked_flagembedding_version(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    installed_version: str,
+) -> None:
+    model_dir = tmp_path / "model"
+    model_dir.mkdir()
+    (model_dir / "config.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: object())
+    monkeypatch.setattr(verifier, "package_version", lambda name: installed_version)
+
+    errors = verifier.validate(model_dir=model_dir, environ=_offline_env(model_dir))
+
+    if not any("FlagEmbedding version must match the locked runtime 1.4.2" in error for error in errors):
+        raise AssertionError(f"expected locked-version error, got {errors!r}")
+
+
+def test_bge_image_readiness_rejects_missing_distribution_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    model_dir = tmp_path / "model"
+    model_dir.mkdir()
+    (model_dir / "config.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: object())
+
+    def missing_metadata(name: str) -> str:
+        raise verifier.PackageNotFoundError(name)
+
+    monkeypatch.setattr(verifier, "package_version", missing_metadata)
+
+    errors = verifier.validate(model_dir=model_dir, environ=_offline_env(model_dir))
+
+    if "FlagEmbedding distribution metadata is unavailable" not in errors:
+        raise AssertionError(f"expected missing-metadata error, got {errors!r}")
