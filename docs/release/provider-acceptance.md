@@ -67,6 +67,39 @@ provisioned. If either boundary is not ready, neither network call is made. Indi
 remain available only for local diagnosis. This smoke does not replace end-to-end webhook acceptance,
 attachment acceptance, mass indexing, or legal/governance approval.
 
+### Capture and replay
+
+A successful live smoke can write a sanitized capture:
+
+```bash
+python scripts/provider_live_smoke.py --provider both \
+  --capture-file provider-acceptance-artifacts/provider-smoke-capture.json
+```
+
+The capture stores the CNJ only as SHA-256, records the request shape without credentials, and stores
+the sanitized smoke response (status, latency, request-id hash and DataJud result metadata flags).
+It does **not** persist API keys, the raw CNJ, raw judicial payloads, or the raw Judit request ID.
+
+The same capture can then be replayed without provider credentials or provider network calls:
+
+```bash
+python scripts/provider_live_smoke.py --provider both \
+  --cnj "<same-authorized-cnj>" \
+  --replay-file provider-acceptance-artifacts/provider-smoke-capture.json
+```
+
+Replay verifies that the supplied CNJ hashes to the same identity as the capture, sets
+`network_calls_performed=false`, and marks the result with `replayed=true`.
+
+The GitHub workflow exposes `mode=live|replay`. Live mode uploads the sanitized capture as the
+`provider-acceptance-capture` Actions artifact with 90-day retention. Replay mode accepts the prior
+workflow run ID, downloads that artifact, and performs no Judit/DataJud call.
+
+This capture replays the **acceptance smoke contract**, not a complete Judit lawsuit. Judit request
+creation is asynchronous: the immediate response is a request identifier. Reusing the full process
+content later requires a separate, sanitized capture/replay boundary for the finalized callback or
+lawsuit payload.
+
 ## Preconditions
 
 Do not start live provider acceptance until all applicable items below are satisfied:
