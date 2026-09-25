@@ -1,0 +1,67 @@
+name: provider-live-smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: Provider boundary to smoke
+        required: true
+        type: choice
+        options:
+          - judit
+          - datajud
+
+permissions:
+  contents: read
+
+concurrency:
+  group: provider-live-smoke-${{ github.event.inputs.provider }}
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.14"
+          cache: pip
+          cache-dependency-path: requirements/constraints.txt
+
+      - name: Install bounded smoke dependencies
+        run: |
+          python -m pip install pip==26.2.1
+          python -m pip install --constraint requirements/constraints.txt -e .
+          python -m pip check
+
+      - name: Run controlled provider smoke when provisioned
+        env:
+          PROVIDER: ${{ github.event.inputs.provider }}
+          PROVIDER_ACCEPTANCE_CNJ: ${{ secrets.PROVIDER_ACCEPTANCE_CNJ }}
+          PROVIDER_ACCEPTANCE_AUTHORIZED: ${{ secrets.PROVIDER_ACCEPTANCE_AUTHORIZED }}
+          JUDIT_API_KEY: ${{ secrets.JUDIT_API_KEY }}
+          JUDIT_ATTACHMENTS_ENABLED: "false"
+          DATAJUD_ENABLED: ${{ github.event.inputs.provider == 'datajud' && 'true' || 'false' }}
+          DATAJUD_AUTHORIZED_USE: ${{ secrets.DATAJUD_AUTHORIZED_USE }}
+          DATAJUD_API_KEY: ${{ secrets.DATAJUD_API_KEY }}
+        run: |
+          if [ -z "$PROVIDER_ACCEPTANCE_CNJ" ]; then
+            echo "::notice::PROVIDER_ACCEPTANCE_CNJ is not provisioned; live provider smoke is armed but not executed."
+            exit 0
+          fi
+          if [ "$PROVIDER_ACCEPTANCE_AUTHORIZED" != "true" ]; then
+            echo "::notice::PROVIDER_ACCEPTANCE_AUTHORIZED is not true; live provider smoke is armed but not executed."
+            exit 0
+          fi
+          if [ "$PROVIDER" = "judit" ] && [ -z "$JUDIT_API_KEY" ]; then
+            echo "::notice::JUDIT_API_KEY is not provisioned; Judit live smoke is armed but not executed."
+            exit 0
+          fi
+          if [ "$PROVIDER" = "datajud" ] && { [ "$DATAJUD_AUTHORIZED_USE" != "true" ] || [ -z "$DATAJUD_API_KEY" ]; }; then
+            echo "::notice::DataJud authorization/key is not provisioned; DataJud live smoke is armed but not executed."
+            exit 0
+          fi
+          python scripts/provider_live_smoke.py --provider "$PROVIDER"
