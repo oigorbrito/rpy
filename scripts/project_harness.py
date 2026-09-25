@@ -64,6 +64,7 @@ def _ci_gate_observations() -> list[Observation]:
         "synthetic-rag-eval": "python scripts/evaluate_synthetic_rag.py --check-baseline",
         "offline-pipeline-eval": "python scripts/evaluate_offline_pipeline.py --check-baseline",
         "offline-generation-eval": "python scripts/evaluate_offline_generation.py --check-baseline",
+        "synthetic-reranker-benchmark": "python scripts/benchmark_reranker.py --scorer synthetic --check-contract",
         "frontend-behavior": "node tests/frontend_behavior_test.mjs",
         "container-runtime-smoke": "sh scripts/verify_image_runtime.sh",
         "backup-restore-drill": "sh scripts/verify_backup_restore.sh",
