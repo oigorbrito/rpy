@@ -100,6 +100,8 @@ def readiness_report(
         "armed but not executed",
         "python scripts/provider_live_smoke.py",
         "--provider both",
+        "--provider datajud",
+        "github.event.inputs.mode == 'datajud'",
         "--capture-file provider-acceptance-artifacts/provider-smoke-capture.json",
     ):
         if marker not in provider_smoke_workflow:
