@@ -119,14 +119,51 @@ async def benchmark_cases(
     }
 
 
+def contract_failures(report: dict[str, Any]) -> list[str]:
+    failures: list[str] = []
+    if int(report.get("measured_long_cases", 0)) <= 0:
+        failures.append("benchmark dataset has no measured long cases")
+
+    baseline = report.get("baseline")
+    reranked = report.get("reranked")
+    if not isinstance(baseline, dict) or not isinstance(reranked, dict):
+        return failures + ["benchmark report is missing baseline/reranked metrics"]
+
+    if float(baseline.get("mandatory_milestone_recall", 0.0)) != 1.0:
+        failures.append("baseline mandatory milestone recall must remain 1.0")
+    if float(reranked.get("mandatory_milestone_recall", 0.0)) != 1.0:
+        failures.append("reranked mandatory milestone recall must remain 1.0")
+    if int(reranked.get("selected_candidates", 0)) > int(
+        baseline.get("selected_candidates", 0)
+    ):
+        failures.append("reranked context must not exceed baseline selected candidates")
+    if float(reranked.get("policy_candidate_precision", 0.0)) < float(
+        baseline.get("policy_candidate_precision", 0.0)
+    ):
+        failures.append("reranked synthetic precision must not regress below baseline")
+    return failures
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Compare Rpy retrieval with and without reranking")
     parser.add_argument("--dataset", type=Path, default=DEFAULT_DATASET)
     parser.add_argument("--scorer", choices=("synthetic", "bge"), default="synthetic")
+    parser.add_argument(
+        "--check-contract",
+        action="store_true",
+        help="fail if the existing deterministic benchmark contract regresses",
+    )
     args = parser.parse_args()
     report = asyncio.run(benchmark_cases(load_dataset(args.dataset), scorer_name=args.scorer))
+    failures = contract_failures(report) if args.check_contract else []
+    if args.check_contract:
+        report["contract_check"] = {
+            "passed": not failures,
+            "failure_count": len(failures),
+            "failures": failures,
+        }
     print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
-    return 0
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":
