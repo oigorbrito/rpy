@@ -42,7 +42,7 @@ This document tracks the current `main` after the historical `v0.1.0` release. I
 
 A **release blocker** prevents creation of a new software release artifact. An **activation blocker** prevents enabling a particular provider/data boundary in a target environment.
 
-At present, the repository has no known code/CI blocker for producing another **offline-qualified software artifact**. The private/secrecy retrieval hard-filter follow-up (#265) is closed with PostgreSQL integration evidence across load, lexical, vector and embedding paths. The unresolved open issues are primarily activation/acceptance/domain-governance or additional hardening work, except that product may choose to require #113/#114 completion as a release criterion.
+At present, the repository has no known code/CI blocker for producing another **offline-qualified software artifact**, and the default branch now has an active repository ruleset enforcing pull requests and required checks. The private/secrecy retrieval hard-filter follow-up (#265) is closed with PostgreSQL integration evidence across load, lexical, vector and embedding paths. The unresolved open issues are primarily activation/acceptance/domain-governance or additional hardening work, except that product may choose to require #113/#114 completion as a release criterion.
 
 Before a formal new tag, two release-owner decisions remain explicit:
 
@@ -53,14 +53,15 @@ Engineering must not silently resolve either decision.
 
 ## Current repository-qualified candidate
 
-The latest fully observed `main` candidate before this documentation-only branch is `b852370fe8d11457290fe314a892c29e5bf045f7`.
+The latest fully observed `main` candidate before this documentation-only branch is `88061c67b1e55361b6fecfcec1ca0b3574594515`.
 
 Exact-commit GitHub evidence:
 
-- CI run #3146 / id `36101976318`: success, including project harness, static quality, unit tests, synthetic RAG eval, offline pipeline eval, offline generation eval, frontend behavior/browser smoke, container image smoke, PostgreSQL backup/restore drill, PostgreSQL integration and offline release smoke.
-- vulnerability-scan run #118 / id `36101976315`: success for resolved Python dependencies and container-image HIGH/CRITICAL gates.
-- CodeQL "Push on main" run #847 / id `36101976539`: success for Actions, Python and JavaScript/TypeScript analysis.
-- CI run #3147 / id `36102051950` was cancelled and is not qualifying evidence.
+- CI run #3320 / id `36187131003`: success, including production Compose contract validation, project harness, provider-readiness gate, static quality, unit tests, synthetic RAG eval, offline pipeline eval, offline generation eval, frontend behavior/browser smoke, container image smoke, PostgreSQL backup/restore drill, PostgreSQL integration and offline release smoke.
+- vulnerability-scan run #131 / id `36187130986`: success.
+- CodeQL "Push on main" run #903 / id `36187130981`: success.
+- Repository ruleset `Protect main` is active for the default branch, requires pull requests and required status checks, blocks deletion and non-fast-forward updates, and has no bypass actors.
+- provider-live-smoke run #9 / id `36188280364` failed in the Judit diagnostic path and is not qualifying evidence for provider acceptance; the DataJud-only step was skipped in that run.
 
 This evidence qualifies repository-local behavior only for that exact commit and tested environment. It does not demonstrate live provider compatibility, real BGE quality/latency, production ingress behavior, legal authorization, production RTO/SLO, or hardware cost.
 
@@ -75,7 +76,7 @@ When those decisions are made:
 - run `python scripts/project_harness.py`;
 - run the exact release head through complete CI;
 - execute a clean offline smoke;
-- publish the exact image digest from trusted CI;
+- publish the exact image digest from trusted CI for the frozen release head;
 - smoke-test that published digest;
 - verify its GitHub artifact attestation;
 - record the immutable digest and release evidence;
