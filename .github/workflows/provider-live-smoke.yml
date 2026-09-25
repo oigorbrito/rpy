@@ -2,9 +2,23 @@ name: provider-live-smoke
 
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: Live provider call or replay a prior sanitized capture
+        required: true
+        type: choice
+        default: live
+        options:
+          - live
+          - replay
+      replay_run_id:
+        description: Prior provider-live-smoke run ID containing provider-acceptance-capture
+        required: false
+        type: string
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: provider-live-smoke-both
@@ -29,7 +43,37 @@ jobs:
           python -m pip install --constraint requirements/constraints.txt -e .
           python -m pip check
 
-      - name: Run controlled Judit + DataJud smoke when provisioned
+      - name: Download prior sanitized capture for replay
+        if: ${{ github.event.inputs.mode == 'replay' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPLAY_RUN_ID: ${{ github.event.inputs.replay_run_id }}
+        run: |
+          if [ -z "$REPLAY_RUN_ID" ]; then
+            echo "::error::replay_run_id is required in replay mode."
+            exit 1
+          fi
+          mkdir -p provider-acceptance-artifacts
+          gh run download "$REPLAY_RUN_ID" \
+            --repo "${{ github.repository }}" \
+            --name provider-acceptance-capture \
+            --dir provider-acceptance-artifacts
+
+      - name: Replay sanitized capture without provider calls
+        if: ${{ github.event.inputs.mode == 'replay' }}
+        env:
+          PROVIDER_ACCEPTANCE_CNJ: ${{ secrets.PROVIDER_ACCEPTANCE_CNJ }}
+        run: |
+          if [ -z "$PROVIDER_ACCEPTANCE_CNJ" ]; then
+            echo "::error::PROVIDER_ACCEPTANCE_CNJ is required to verify replay identity."
+            exit 1
+          fi
+          python scripts/provider_live_smoke.py \
+            --provider both \
+            --replay-file provider-acceptance-artifacts/provider-smoke-capture.json
+
+      - name: Run controlled Judit + DataJud live smoke and capture evidence
+        if: ${{ github.event.inputs.mode == 'live' }}
         env:
           PROVIDER_ACCEPTANCE_CNJ: ${{ secrets.PROVIDER_ACCEPTANCE_CNJ }}
           PROVIDER_ACCEPTANCE_AUTHORIZED: ${{ secrets.PROVIDER_ACCEPTANCE_AUTHORIZED }}
@@ -55,4 +99,15 @@ jobs:
             echo "::notice::DataJud authorization/key is not provisioned; combined live provider smoke is armed but not executed."
             exit 0
           fi
-          python scripts/provider_live_smoke.py --provider both
+          python scripts/provider_live_smoke.py \
+            --provider both \
+            --capture-file provider-acceptance-artifacts/provider-smoke-capture.json
+
+      - name: Upload sanitized provider capture
+        if: ${{ github.event.inputs.mode == 'live' && success() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: provider-acceptance-capture
+          path: provider-acceptance-artifacts/provider-smoke-capture.json
+          if-no-files-found: ignore
+          retention-days: 90

@@ -5,12 +5,15 @@ import asyncio
 import hashlib
 import json
 import os
+from pathlib import Path
 from time import perf_counter
 from typing import Any
 
 from app.datajud_client import lookup_datajud_metadata
 from app.judit import normalize_cnj
 from app.judit_client import create_lawsuit_request, judit_attachments_enabled
+
+_CAPTURE_SCHEMA_VERSION = 1
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -48,6 +51,61 @@ def _error_report(provider: str, exc: Exception) -> dict[str, Any]:
         }
     )
     return report
+
+
+def _capture_document(*, code: str, report: dict[str, Any]) -> dict[str, Any]:
+    normalized = normalize_cnj(code)
+    return {
+        "schema_version": _CAPTURE_SCHEMA_VERSION,
+        "kind": "provider_acceptance_capture",
+        "request": {
+            "provider": report.get("provider"),
+            "cnj_sha256": _hash_identifier(normalized),
+            "judit": {
+                "operation": "lawsuit_cnj",
+                "with_attachments": False,
+            },
+            "datajud": {
+                "operation": "public_cnj_lookup",
+                "secrecy_level": 0,
+            },
+        },
+        "response": report,
+    }
+
+
+def write_capture(path: Path, *, code: str, report: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    document = _capture_document(code=code, report=report)
+    path.write_text(
+        json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def load_replay(path: Path, *, code: str) -> dict[str, Any]:
+    document = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(document, dict):
+        raise RuntimeError("provider replay capture must be a JSON object")
+    if document.get("schema_version") != _CAPTURE_SCHEMA_VERSION:
+        raise RuntimeError("unsupported provider replay capture schema")
+    if document.get("kind") != "provider_acceptance_capture":
+        raise RuntimeError("invalid provider replay capture kind")
+
+    request = document.get("request")
+    response = document.get("response")
+    if not isinstance(request, dict) or not isinstance(response, dict):
+        raise RuntimeError("provider replay capture is incomplete")
+
+    expected_hash = _hash_identifier(normalize_cnj(code))
+    if request.get("cnj_sha256") != expected_hash:
+        raise RuntimeError("provider replay capture does not match the requested CNJ")
+
+    replay = dict(response)
+    replay["executed"] = True
+    replay["network_calls_performed"] = False
+    replay["replayed"] = True
+    return replay
 
 
 async def _smoke_judit(code: str) -> dict[str, Any]:
@@ -143,10 +201,12 @@ async def run_smoke(provider: str, code: str) -> dict[str, Any]:
             "network_calls_performed": bool(
                 judit["network_calls_performed"] and datajud["network_calls_performed"]
             ),
-            "status": "ok" if (
+            "status": "ok"
+            if (
                 judit["status"] == "request_created"
                 and datajud["status"] in {"ok", "not_found"}
-            ) else "incomplete",
+            )
+            else "incomplete",
             "results": {
                 "judit": judit,
                 "datajud": datajud,
@@ -158,8 +218,8 @@ async def run_smoke(provider: str, code: str) -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Run one controlled live provider smoke against an explicitly authorized CNJ. "
-            "Missing credentials/authorization produce a non-accepting skipped result."
+            "Run one controlled live provider smoke or replay a sanitized capture "
+            "against an explicitly authorized CNJ."
         )
     )
     parser.add_argument("--provider", choices=("judit", "datajud", "both"), default="both")
@@ -167,6 +227,18 @@ def main() -> int:
         "--cnj",
         default=os.getenv("PROVIDER_ACCEPTANCE_CNJ", ""),
         help="Explicitly authorized CNJ; defaults to PROVIDER_ACCEPTANCE_CNJ",
+    )
+    parser.add_argument(
+        "--capture-file",
+        type=Path,
+        default=None,
+        help="Write a sanitized request/response capture after a successful live execution",
+    )
+    parser.add_argument(
+        "--replay-file",
+        type=Path,
+        default=None,
+        help="Replay a prior sanitized capture without provider network calls",
     )
     args = parser.parse_args()
 
@@ -177,7 +249,12 @@ def main() -> int:
         return 0
 
     try:
-        report = asyncio.run(run_smoke(args.provider, args.cnj))
+        if args.replay_file is not None:
+            report = load_replay(args.replay_file, code=args.cnj)
+        else:
+            report = asyncio.run(run_smoke(args.provider, args.cnj))
+            if args.capture_file is not None and report.get("executed"):
+                write_capture(args.capture_file, code=args.cnj, report=report)
     except Exception as exc:
         report = _error_report(args.provider, exc)
 
