@@ -114,6 +114,25 @@ async def run_smoke(provider: str, code: str) -> dict[str, Any]:
     if provider == "datajud":
         return await _smoke_datajud(normalized)
     if provider == "both":
+        report = _base_report("both")
+        if not _env_bool("PROVIDER_ACCEPTANCE_AUTHORIZED", False):
+            report["status"] = "skipped_missing_authorization"
+            return report
+        if judit_attachments_enabled():
+            raise RuntimeError("Judit live smoke requires JUDIT_ATTACHMENTS_ENABLED=false")
+        if not _env_bool("DATAJUD_ENABLED", False):
+            report["status"] = "skipped_disabled"
+            return report
+        if not _env_bool("DATAJUD_AUTHORIZED_USE", False):
+            report["status"] = "skipped_missing_authorization"
+            return report
+        if (
+            not os.getenv("JUDIT_API_KEY", "").strip()
+            or not os.getenv("DATAJUD_API_KEY", "").strip()
+        ):
+            report["status"] = "skipped_missing_credentials"
+            return report
+
         judit, datajud = await asyncio.gather(
             _smoke_judit(normalized),
             _smoke_datajud(normalized),
@@ -122,7 +141,7 @@ async def run_smoke(provider: str, code: str) -> dict[str, Any]:
             "provider": "both",
             "executed": bool(judit["executed"] and datajud["executed"]),
             "network_calls_performed": bool(
-                judit["network_calls_performed"] or datajud["network_calls_performed"]
+                judit["network_calls_performed"] and datajud["network_calls_performed"]
             ),
             "status": "ok" if (
                 judit["status"] == "request_created"
