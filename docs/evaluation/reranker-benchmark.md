@@ -25,3 +25,29 @@ If `BGE_RERANKER_PATH` is unset, the scorer can still resolve the configured mod
 The report records observed wall-clock elapsed time for baseline and reranked paths plus retrieval quality metrics. `external_provider_cost_usd` is `0.0` because the BGE path is self-hosted. `hardware_cost_usd` remains `null`; the repository does not invent infrastructure pricing without an observed deployment/runtime cost model.
 
 The CI synthetic result is a regression gate for orchestration, not a substitute for the real BGE deployment benchmark. Issue #121 should remain open until a real local-artifact BGE run is recorded and reviewed against the same dataset.
+
+
+## Evaluation evidence classification
+
+The synthetic reranker path is repository evidence, not deployment evidence.
+
+For every recorded benchmark result, preserve:
+
+- exact Git commit;
+- scorer mode (`synthetic` or `bge`);
+- dataset path/version;
+- command line;
+- execution environment;
+- observed JSON report;
+- CI/job/run identifier when applicable.
+
+The synthetic scorer demonstrates only the deterministic retrieval/reranking contract encoded by the fixture: candidate-window behavior, mandatory milestone preservation, selected-context size and fixture-relative policy precision. Its elapsed time is diagnostic for that run and must not be used as a production latency claim.
+
+A real BGE result becomes deployment evidence only when the local artifact has passed the artifact verifier and the benchmark records the actual model artifact and hardware/runtime environment. Until then, real-model quality and latency remain unmeasured.
+
+Methodology references:
+
+- SWE-bench harness and evaluation outputs: https://www.swebench.com/SWE-bench/reference/harness/ and https://www.swebench.com/SWE-bench/guides/evaluation/
+- Harbor task/dataset/environment/result model: https://www.harborframework.com/docs/core-concepts and https://www.harborframework.com/docs/run-jobs/run-evals
+
+These references define evidence structure only. They do not supply Rpy acceptance thresholds or benchmark scores.
