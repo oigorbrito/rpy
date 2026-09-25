@@ -55,6 +55,29 @@ The harness follows the repository's empirical-engineering policy:
 
 This avoids two common failure modes: a giant meta-test suite that duplicates all other tests, and a purely textual checklist that silently drifts away from CI.
 
+## Methodology references
+
+The project harness is Rpy-specific. It is not an implementation of SWE-bench or Harbor. The repository uses their public documentation only to calibrate how evidence is identified and reproduced.
+
+Primary references:
+
+- SWE-bench harness: https://www.swebench.com/SWE-bench/reference/harness/
+- SWE-bench evaluation guide: https://www.swebench.com/SWE-bench/guides/evaluation/
+- Harbor core concepts: https://www.harborframework.com/docs/core-concepts
+- Harbor eval execution/results: https://www.harborframework.com/docs/run-jobs/run-evals
+
+The mapping is intentionally narrow:
+
+| External evaluation practice | Rpy mapping |
+|---|---|
+| Isolated/containerized execution | CI PostgreSQL service, container runtime smoke, offline smoke and restore drill |
+| Identifiable evaluation run | exact Git commit + GitHub Actions run id |
+| Explicit task/environment/test contract | named CI command, fixture/dataset and execution environment |
+| Structured result/log artifacts | evaluator JSON/stdout, pytest/CI logs and drill output |
+| Dataset/task separation from agent/runtime | synthetic fixtures and benchmark scripts remain separate from production provider/model evidence |
+
+The harness checks wiring and cheap invariants. It does not turn external benchmark methodology into Rpy score thresholds, and it does not make a synthetic result equivalent to live-provider or production evidence.
+
 ## Running
 
 Human-readable evidence:
