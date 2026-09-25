@@ -24,6 +24,7 @@ def test_ci_gate_observations_cover_behavioral_and_operational_evidence() -> Non
         "synthetic-rag-eval",
         "offline-pipeline-eval",
         "offline-generation-eval",
+        "synthetic-reranker-benchmark",
         "frontend-behavior",
         "container-runtime-smoke",
         "backup-restore-drill",
