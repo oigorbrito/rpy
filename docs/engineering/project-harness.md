@@ -83,3 +83,23 @@ Before adding a project-harness observation, identify:
 6. the condition that would make the rule obsolete.
 
 If the rule only asserts that a command remains wired to CI, the underlying command must itself provide meaningful evidence. Do not add ceremony-only gates, arbitrary thresholds, source-line counts, coverage quotas or stylistic checks without a demonstrated Rpy failure mode.
+
+
+## External evaluation methodology references
+
+Rpy does not claim compatibility with SWE-bench or Harbor, and it does not import either framework into the application runtime. Their public evaluation harness designs are used only as external methodology references for repository evidence.
+
+- SWE-bench evaluation harness: https://www.swebench.com/SWE-bench/reference/harness/
+- SWE-bench evaluation guide: https://www.swebench.com/SWE-bench/guides/evaluation/
+- Harbor framework: https://github.com/harbor-framework/harbor
+- Harbor documentation: https://www.harborframework.com/
+
+The repository adopts only methodology that maps to an existing Rpy failure mode or evidence requirement:
+
+1. **Isolated execution.** SWE-bench evaluates patches in containerized environments; Harbor evaluates tasks in sandboxed environments. Rpy maps this principle to container smoke, PostgreSQL service isolation, offline smoke and provider-free evaluation gates.
+2. **Named, reproducible runs.** SWE-bench associates evaluation output with a run identifier and per-instance logs. Rpy uses the immutable Git commit plus GitHub Actions run id as the execution identity for CI evidence.
+3. **Machine-readable result contracts.** SWE-bench emits structured result artifacts; Rpy evaluation scripts emit JSON reports and deterministic exit codes. The project harness verifies that those commands remain wired into CI.
+4. **Separation of benchmark from implementation tests.** Harbor separates benchmark/task/environment execution from the agent under evaluation. Rpy keeps benchmark/evaluation gates distinct from ordinary unit tests when a result is intended as release evidence.
+5. **No substitution of synthetic evidence for real deployment evidence.** Synthetic/fake-provider gates validate orchestration and deterministic invariants only. They do not establish live-provider compatibility, real model quality, production latency, RTO/SLO, or hardware cost.
+
+These references justify evidence structure, not Rpy-specific thresholds. Thresholds and invariants remain grounded in Rpy's own contracts, fixtures and observed failures.
