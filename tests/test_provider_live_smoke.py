@@ -275,3 +275,111 @@ def test_both_live_path_runs_judit_and_datajud_in_same_acceptance(
         raise AssertionError(f"unexpected Judit result: {report!r}")
     if report["results"]["datajud"]["status"] != "ok":
         raise AssertionError(f"unexpected DataJud result: {report!r}")
+
+
+def test_capture_redacts_cnj_and_can_be_replayed_without_network(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    capture_path = tmp_path / "provider-smoke-capture.json"
+    code = "0000000-00.2026.8.21.0001"
+    report = {
+        "provider": "both",
+        "executed": True,
+        "network_calls_performed": True,
+        "status": "ok",
+        "results": {
+            "judit": {
+                "provider": "judit",
+                "executed": True,
+                "network_calls_performed": True,
+                "status": "request_created",
+                "latency_ms": 12.3,
+                "request_id_sha256": "a" * 64,
+            },
+            "datajud": {
+                "provider": "datajud",
+                "executed": True,
+                "network_calls_performed": True,
+                "status": "ok",
+                "latency_ms": 8.2,
+                "metadata_present": True,
+                "error_code": None,
+            },
+        },
+    }
+
+    smoke.write_capture(capture_path, code=code, report=report)
+    rendered = capture_path.read_text(encoding="utf-8")
+
+    if code in rendered:
+        raise AssertionError("raw CNJ must not be persisted in provider capture")
+    document = __import__("json").loads(rendered)
+    if document["request"]["cnj_sha256"] != smoke._hash_identifier(code):
+        raise AssertionError(f"unexpected capture identity: {document!r}")
+
+    replay = smoke.load_replay(capture_path, code=code)
+    if replay["status"] != "ok" or replay["replayed"] is not True:
+        raise AssertionError(f"unexpected replay: {replay!r}")
+    if replay["network_calls_performed"] is not False:
+        raise AssertionError("replay must never claim provider network calls")
+
+
+def test_replay_rejects_capture_for_different_cnj(tmp_path: Path) -> None:
+    capture_path = tmp_path / "provider-smoke-capture.json"
+    smoke.write_capture(
+        capture_path,
+        code="0000000-00.2026.8.21.0001",
+        report={
+            "provider": "both",
+            "executed": True,
+            "network_calls_performed": True,
+            "status": "ok",
+        },
+    )
+
+    with pytest.raises(RuntimeError, match="does not match"):
+        smoke.load_replay(capture_path, code="1111111-11.2026.8.21.0001")
+
+
+def test_main_replay_does_not_require_provider_credentials(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    code = "0000000-00.2026.8.21.0001"
+    capture_path = tmp_path / "provider-smoke-capture.json"
+    smoke.write_capture(
+        capture_path,
+        code=code,
+        report={
+            "provider": "both",
+            "executed": True,
+            "network_calls_performed": True,
+            "status": "ok",
+            "results": {},
+        },
+    )
+    monkeypatch.delenv("JUDIT_API_KEY", raising=False)
+    monkeypatch.delenv("DATAJUD_API_KEY", raising=False)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "provider_live_smoke.py",
+            "--provider",
+            "both",
+            "--cnj",
+            code,
+            "--replay-file",
+            str(capture_path),
+        ],
+    )
+
+    exit_code = smoke.main()
+    report = __import__("json").loads(capsys.readouterr().out)
+
+    if exit_code != 0:
+        raise AssertionError(f"replay should succeed without provider credentials, got {exit_code}")
+    if report["replayed"] is not True or report["network_calls_performed"] is not False:
+        raise AssertionError(f"unexpected replay report: {report!r}")
