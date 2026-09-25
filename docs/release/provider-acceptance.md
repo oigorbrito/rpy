@@ -43,6 +43,32 @@ activation posture rather than provider availability:
 A green readiness result is **not** live-provider acceptance. It only proves that the repository is
 safe to hand off for later secret provisioning and controlled execution.
 
+### Judit non-creating credential diagnostic
+
+Before any paid `POST /requests`, validate the provisioned Judit key with the provider-documented
+connectivity check:
+
+```bash
+python scripts/provider_live_smoke.py --diagnose-judit
+```
+
+The check performs only `GET /requests?page=1&page_size=1`. It does not create a lawsuit request.
+GitHub Actions exposes this as `mode=diagnose` and uses it as the default workflow-dispatch mode.
+
+The diagnostic records only safe classifications such as `http_401`, `http_403`, `http_429`,
+`http_5xx`, `transport_error` or `invalid_response`; provider response bodies and credentials are
+not logged. Live combined acceptance also performs this connectivity check before the paid Judit
+request. If it fails, the paid Judit request and DataJud smoke are both blocked.
+
+Operational interpretation follows Judit's published authentication guidance:
+- 401: missing/invalid/expired key, malformed `api-key` header, or account usage limit condition;
+- 403: valid key without permission for the resource or feature unavailable in the contracted plan;
+- 429: rate-limit condition; do not immediately repeat a paid acceptance run;
+- transport/5xx: treat as provider/network availability and do not infer credential invalidity.
+
+Judit documents that every submitted process request is accounted/billed according to contract even
+when the result is served from cache, so diagnostic GETs should be used before repeating a paid POST.
+
 ### Controlled Judit/DataJud smoke
 
 The repository also provides a manual live smoke entrypoint:
