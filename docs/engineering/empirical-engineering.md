@@ -96,6 +96,24 @@ For material engineering policy, keep this table current. Dates are the dates th
 | Database evolution | Campos et al., *Data Schema Evolution for the Self-Adaptive Software Domain: A Systematic Mapping Study* (Software: Practice and Experience, 2026), 19 studies. DOI: `10.1002/spe.70083` | Treat schema evolution as preservation of data plus non-functional constraints; test migration strategies against application requirements. | Mapping study in a broader domain; supports risk framing, not a specific SQL recipe. |
 | Database evolution | *Requirements-driven database evolution: A systematic literature review* (Information and Software Technology, 2026), DOI: `10.1016/j.infsof.2026.108276` | Migration decisions should trace to requirements and reversibility/compatibility concerns rather than schema aesthetics. | Recent systematic review; operational details still require PostgreSQL-specific validation. |
 | Reliability | Google SRE Workbook, SLO Document / Error Budget Policy / Monitoring chapters | Define SLOs from measured SLIs, document caveats, use error budgets to balance reliability/change, and connect symptom metrics to diagnostic metrics. | Industry evidence/practice rather than controlled experiment; strong operational precedent, thresholds must be local. |
+| Evaluation harness | SWE-bench official evaluation harness and guide: containerized task execution, explicit `run_id`, per-instance reports/logs and test outputs. https://www.swebench.com/SWE-bench/reference/harness/ ; https://www.swebench.com/SWE-bench/guides/evaluation/ | Tie repository evaluation claims to an exact commit/run and preserve structured outputs/logs; prefer isolated execution for behavior that depends on the environment. | External benchmark methodology; it does not define Rpy quality thresholds or imply SWE-bench compatibility. |
+| Agent/task evaluation | Harbor official core concepts and eval docs: task = instruction + environment + test script; datasets group tasks; jobs persist config/result/trial artifacts. https://www.harborframework.com/docs/core-concepts ; https://www.harborframework.com/docs/run-jobs/run-evals | Keep task/environment/test contract explicit and distinguish benchmark execution artifacts from application behavior. Synthetic Rpy tasks remain synthetic evidence. | External evaluation framework methodology; no Harbor dependency or score is imported into Rpy. |
+| Reliability | Google SRE Workbook, Implementing SLOs, and SRE Book SLO chapters. https://sre.google/workbook/implementing-slos/ ; https://sre.google/sre-book/service-level-objectives/ | Define reliability targets only after the SLI and measurement point exist; keep target selection and error-budget response explicit. | Industry operational practice; target values must be selected and measured locally. |
+
+## Evaluation evidence protocol
+
+For benchmark/evaluation results, repository documentation must distinguish four fields:
+
+1. **Subject under evaluation** — exact commit, image digest, provider/model artifact, or migration set.
+2. **Evaluation definition** — command, dataset/fixtures, baseline/contract and test script.
+3. **Execution environment** — CI runner/container/service versions and, for performance claims, hardware/model runtime details.
+4. **Observed result** — run identifier plus machine-readable report/log or test outcome.
+
+A result is attributable only to the subject/environment that executed. Cancelled, superseded or stale runs are not qualifying evidence.
+
+Synthetic/fake-provider evaluations are valid for deterministic repository contracts, but their scope must remain explicit. They do not establish external-provider acceptance, real ML quality/latency, production throughput/cost, or production recovery objectives.
+
+This structure is consistent with SWE-bench's containerized evaluation plus `run_id`/per-instance artifacts and Harbor's explicit task/environment/test/job-result model. Rpy uses those ideas as methodology references only; no external benchmark score or threshold becomes an Rpy requirement without a separate local contract.
 
 ## Current Rpy empirical claims
 
