@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import argparse
 import csv
-import hashlib
 import json
 from pathlib import Path
 from typing import Any
 
+from app.artifact_provenance import sha256_file
 from app.tpu_glossary import TPU_SCHEMA_VERSION
 
 DEFAULT_PUBLISHER = "Conselho Nacional de Justiça (CNJ)"
@@ -127,14 +127,6 @@ def build_snapshot(
     return snapshot
 
 
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def write_snapshot(path: Path, snapshot: dict[str, Any]) -> None:
     if path.exists():
         raise ValueError(
@@ -177,7 +169,7 @@ def main() -> int:
             source_version_label=args.source_version_label,
             publisher=args.publisher,
             source=args.source,
-            input_sha256=_sha256(args.input),
+            input_sha256=sha256_file(args.input),
         )
         write_snapshot(args.output, snapshot)
     except ValueError as exc:

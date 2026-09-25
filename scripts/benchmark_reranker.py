@@ -4,11 +4,19 @@ import argparse
 import asyncio
 import importlib.util
 import json
+import os
+import platform
+import sys
 from pathlib import Path
 from time import perf_counter
 from typing import Any
 
-from app.reranker_bge import BGERerankerScorer
+from app.artifact_provenance import artifact_manifest, sha256_file
+from app.bge_runtime_contract import (
+    EXPECTED_FLAGEMBEDDING_VERSION,
+    validate_flagembedding_runtime,
+)
+from app.reranker_bge import BGERerankerScorer, DEFAULT_BGE_RERANKER_MODEL
 from app.reranking import select_context_steps
 from app.retrieval import Step
 
@@ -18,6 +26,86 @@ assert _SPEC is not None and _SPEC.loader is not None
 _EVALUATOR = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(_EVALUATOR)
 DEFAULT_DATASET = _EVALUATOR.DEFAULT_DATASET
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def _display_path(path: Path) -> str:
+    resolved = path.resolve()
+    try:
+        return resolved.relative_to(ROOT).as_posix()
+    except ValueError:
+        return f"<external>/{resolved.name}"
+
+
+def _host_provenance() -> dict[str, Any]:
+    return {
+        "python_version": platform.python_version(),
+        "system": platform.system(),
+        "release": platform.release(),
+        "machine": platform.machine(),
+        "processor": platform.processor() or None,
+        "cpu_count": os.cpu_count(),
+    }
+
+
+def _require_bge_runtime() -> None:
+    runtime_errors = validate_flagembedding_runtime()
+    if runtime_errors:
+        raise RuntimeError(
+            "BGE runtime contract failed: " + "; ".join(runtime_errors)
+        )
+
+
+def _runtime_provenance(scorer_name: str, scorer: Any) -> dict[str, Any]:
+    if scorer_name == "synthetic":
+        return {"kind": "synthetic"}
+
+    if scorer_name != "bge":
+        raise ValueError(f"unsupported scorer: {scorer_name}")
+
+    _require_bge_runtime()
+
+    model = str(getattr(scorer, "model", "")).strip()
+    if model != DEFAULT_BGE_RERANKER_MODEL:
+        raise RuntimeError(
+            "BGE benchmark evidence requires model "
+            f"{DEFAULT_BGE_RERANKER_MODEL}, got {model!r}"
+        )
+
+    artifact_path = getattr(scorer, "artifact_path", None)
+    config_sha256: str | None = None
+    artifact_manifest_data: dict[str, Any] | None = None
+    if artifact_path is not None:
+        artifact_root = Path(str(artifact_path))
+        config_path = artifact_root / "config.json"
+        if not config_path.is_file():
+            raise RuntimeError(
+                f"BGE reranker artifact is missing config.json: {artifact_path}"
+            )
+        config_sha256 = sha256_file(config_path)
+        print(
+            f"benchmark provenance: hashing BGE artifact {artifact_root}",
+            file=sys.stderr,
+        )
+        artifact_manifest_data = artifact_manifest(
+            artifact_root,
+            label="BGE reranker artifact",
+        )
+
+    return {
+        "kind": "bge",
+        "model": model,
+        "artifact_path": (
+            _display_path(Path(str(artifact_path)))
+            if artifact_path is not None
+            else None
+        ),
+        "local_artifact_bound": artifact_path is not None,
+        "artifact_config_sha256": config_sha256,
+        "artifact_manifest": artifact_manifest_data,
+        "use_fp16": bool(getattr(scorer, "use_fp16", False)),
+        "flagembedding_version": EXPECTED_FLAGEMBEDDING_VERSION,
+    }
 
 
 def load_dataset(path: Path = DEFAULT_DATASET) -> list[dict[str, Any]]:
@@ -46,14 +134,15 @@ async def _score_synthetic(query: str, steps: list[Step]) -> dict[Any, float]:
 
 
 async def benchmark_cases(
-    cases: list[dict[str, Any]], *, scorer_name: str = "synthetic"
+    cases: list[dict[str, Any]],
+    *,
+    scorer_name: str = "synthetic",
+    scorer: Any | None = None,
 ) -> dict[str, Any]:
-    if scorer_name == "synthetic":
-        scorer = _score_synthetic
-    elif scorer_name == "bge":
-        scorer = BGERerankerScorer()
-    else:
+    if scorer_name not in {"synthetic", "bge"}:
         raise ValueError(f"unsupported scorer: {scorer_name}")
+    if scorer is None:
+        scorer = _score_synthetic if scorer_name == "synthetic" else BGERerankerScorer()
 
     baseline_selected = 0
     reranked_selected = 0
@@ -119,12 +208,49 @@ async def benchmark_cases(
     }
 
 
+
+async def benchmark_report(
+    dataset_path: Path = DEFAULT_DATASET,
+    *,
+    scorer_name: str = "synthetic",
+) -> dict[str, Any]:
+    if scorer_name == "synthetic":
+        scorer: Any = _score_synthetic
+    elif scorer_name == "bge":
+        _require_bge_runtime()
+        scorer = BGERerankerScorer()
+    else:
+        raise ValueError(f"unsupported scorer: {scorer_name}")
+
+    dataset_provenance = {
+        "path": _display_path(dataset_path),
+        "sha256": sha256_file(dataset_path),
+    }
+    runtime_provenance = _runtime_provenance(scorer_name, scorer)
+    host_provenance = _host_provenance()
+
+    report = await benchmark_cases(
+        load_dataset(dataset_path),
+        scorer_name=scorer_name,
+        scorer=scorer,
+    )
+    return {
+        "report_version": 2,
+        "dataset": dataset_provenance,
+        "runtime": runtime_provenance,
+        "host": host_provenance,
+        **report,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Compare Rpy retrieval with and without reranking")
     parser.add_argument("--dataset", type=Path, default=DEFAULT_DATASET)
     parser.add_argument("--scorer", choices=("synthetic", "bge"), default="synthetic")
     args = parser.parse_args()
-    report = asyncio.run(benchmark_cases(load_dataset(args.dataset), scorer_name=args.scorer))
+    report = asyncio.run(
+        benchmark_report(args.dataset, scorer_name=args.scorer)
+    )
     print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
     return 0
 
