@@ -104,6 +104,14 @@ jobs:
           GEMINI_API_KEY: ""
         run: python scripts/evaluate_offline_generation.py --check-baseline
 
+      - name: Synthetic reranker benchmark gate
+        env:
+          ANTHROPIC_API_KEY: ""
+          OPENAI_API_KEY: ""
+          JUDIT_API_KEY: ""
+          GEMINI_API_KEY: ""
+        run: python scripts/benchmark_reranker.py --scorer synthetic --check-contract
+
       - name: Frontend behavior tests
         run: node tests/frontend_behavior_test.mjs
 
