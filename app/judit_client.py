@@ -4,6 +4,7 @@ import asyncio
 import json
 import math
 import os
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -20,7 +21,7 @@ _DEFAULT_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024
 
 
 class JuditRequestError(RuntimeError):
-    """Safe provider-boundary failure; response bodies are deliberately discarded."""
+    """Safe provider-boundary failure with allowlisted diagnostic metadata only."""
 
     def __init__(
         self,
@@ -29,11 +30,13 @@ class JuditRequestError(RuntimeError):
         retry_safe: bool = False,
         error_code: str = "provider_error",
         http_status: int | None = None,
+        provider_error_code: str | None = None,
     ) -> None:
         super().__init__(message)
         self.retry_safe = retry_safe
         self.error_code = error_code
         self.http_status = http_status
+        self.provider_error_code = provider_error_code
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,6 +101,45 @@ def _api_key() -> str:
     return value
 
 
+_SAFE_PROVIDER_CODE_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,80}$")
+
+
+def _safe_http_error_code(exc: urllib.error.HTTPError) -> str | None:
+    """Extract only a short allowlisted machine code from an HTTP error body."""
+    fp = getattr(exc, "fp", None)
+    if fp is None:
+        return None
+    try:
+        raw = fp.read(8193)
+    except (AttributeError, OSError):
+        return None
+    if not raw or len(raw) > 8192:
+        return None
+    try:
+        body: Any = loads_strict_json(raw)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(body, dict):
+        return None
+
+    candidates: list[Any] = [
+        body.get("code"),
+        body.get("error_code"),
+    ]
+    error = body.get("error")
+    if isinstance(error, dict):
+        candidates.extend([error.get("code"), error.get("name"), error.get("data")])
+    elif isinstance(error, str):
+        candidates.append(error)
+
+    for candidate in candidates:
+        if isinstance(candidate, str):
+            value = candidate.strip()
+            if _SAFE_PROVIDER_CODE_RE.fullmatch(value):
+                return value
+    return None
+
+
 def _provider_request(
     url: str,
     *,
@@ -148,6 +190,7 @@ def _provider_request(
             retry_safe=400 <= exc.code < 500 and exc.code not in {408, 429},
             error_code=f"http_{exc.code}",
             http_status=int(exc.code),
+            provider_error_code=_safe_http_error_code(exc),
         ) from None
     except (urllib.error.URLError, TimeoutError, OSError):
         raise JuditRequestError(
@@ -233,7 +276,7 @@ def _download_attachment_sync(
 def _check_connectivity_sync() -> dict[str, Any]:
     """Validate the configured API key without creating a paid lawsuit request."""
     body = _provider_request(
-        f"{JUDIT_REQUESTS_URL.rstrip('/')}?page=1&page_size=10",
+        JUDIT_REQUESTS_URL.rstrip("/"),
         method="GET",
         accepted_statuses={200},
     )

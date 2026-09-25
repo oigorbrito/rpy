@@ -59,6 +59,7 @@ def _error_report(provider: str, exc: Exception) -> dict[str, Any]:
         report["error_code"] = exc.error_code
         report["http_status"] = exc.http_status
         report["retry_safe"] = exc.retry_safe
+        report["provider_error_code"] = exc.provider_error_code
         report["network_call_attempted"] = True
     return report
 
@@ -140,6 +141,7 @@ async def diagnose_judit() -> dict[str, Any]:
                 "error_code": exc.error_code,
                 "http_status": exc.http_status,
                 "retry_safe": exc.retry_safe,
+                "provider_error_code": exc.provider_error_code,
             }
         )
         return report
