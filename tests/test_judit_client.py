@@ -402,3 +402,51 @@ def test_delete_tracking_rejects_empty_or_non_string_identifier(
 ) -> None:
     with pytest.raises(ValueError, match="tracking_id is required"):
         judit_client._delete_tracking_sync(tracking_id)
+
+
+def test_connectivity_check_uses_non_creating_get(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = {}
+    monkeypatch.setenv("JUDIT_API_KEY", "diagnostic-key")
+    monkeypatch.setattr(
+        judit_client.urllib.request,
+        "urlopen",
+        lambda request, timeout: captured.update(request=request, timeout=timeout)
+        or _Response(b'{"page_data":[]}', status=200),
+    )
+
+    body = judit_client._check_connectivity_sync()
+
+    request = captured["request"]
+    assert request.method == "GET"
+    assert request.data is None
+    assert request.full_url.endswith("/requests?page=1&page_size=1")
+    assert request.get_header("Api-key") == "diagnostic-key"
+    assert body == {"page_data": []}
+
+
+@pytest.mark.parametrize(
+    ("status", "error_code"),
+    [(401, "http_401"), (403, "http_403"), (429, "http_429"), (500, "http_500")],
+)
+def test_connectivity_diagnostic_exposes_only_safe_http_classification(
+    monkeypatch: pytest.MonkeyPatch, status: int, error_code: str
+) -> None:
+    monkeypatch.setenv("JUDIT_API_KEY", "diagnostic-key")
+
+    def fail(*_args, **_kwargs):
+        raise urllib.error.HTTPError(
+            judit_client.JUDIT_REQUESTS_URL,
+            status,
+            "provider secret body",
+            {},
+            None,
+        )
+
+    monkeypatch.setattr(judit_client.urllib.request, "urlopen", fail)
+
+    with pytest.raises(judit_client.JuditRequestError) as exc:
+        judit_client._check_connectivity_sync()
+
+    assert exc.value.error_code == error_code
+    assert exc.value.http_status == status
+    assert "provider secret body" not in str(exc.value)
