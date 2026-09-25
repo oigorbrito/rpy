@@ -15,7 +15,7 @@ from app.judit_client import create_lawsuit_request, judit_attachments_enabled
 
 def _env_bool(name: str, default: bool = False) -> bool:
     raw = os.getenv(name)
-    if raw is None:
+    if raw is None or not raw.strip():
         return default
     value = raw.strip().casefold()
     if value in {"1", "true", "yes", "on"}:
@@ -37,6 +37,17 @@ def _base_report(provider: str) -> dict[str, Any]:
         "status": "not_started",
         "latency_ms": None,
     }
+
+
+def _error_report(provider: str, exc: Exception) -> dict[str, Any]:
+    report = _base_report(provider)
+    report.update(
+        {
+            "status": "error",
+            "error_class": type(exc).__name__,
+        }
+    )
+    return report
 
 
 async def _smoke_judit(code: str) -> dict[str, Any]:
@@ -126,8 +137,14 @@ def main() -> int:
         print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
         return 0
 
-    report = asyncio.run(run_smoke(args.provider, str(args.cnj)))
+    try:
+        report = asyncio.run(run_smoke(args.provider, args.cnj))
+    except Exception as exc:
+        report = _error_report(args.provider, exc)
+
     print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+    if report["status"] == "error":
+        return 1
     if not report["executed"]:
         return 0
     if args.provider == "datajud":
