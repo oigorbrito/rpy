@@ -20,6 +20,8 @@ SECURITY_RESPONSE_HEADERS = {
     "x-frame-options": "DENY",
     "referrer-policy": "no-referrer",
     "permissions-policy": PERMISSIONS_POLICY,
+    "cross-origin-opener-policy": "same-origin",
+    "x-permitted-cross-domain-policies": "none",
 }
 
 

@@ -66,6 +66,8 @@ def test_browser_security_headers_apply_to_frontend_api_and_errors()->None:
   "x-frame-options":"DENY",
   "referrer-policy":"no-referrer",
   "permissions-policy":"camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+  "cross-origin-opener-policy":"same-origin",
+  "x-permitted-cross-domain-policies":"none",
  }
  for path in ("/","/app.js","/health","/missing-route"):
   response=client.get(path)
