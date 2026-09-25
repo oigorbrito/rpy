@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+from importlib.metadata import PackageNotFoundError, version as package_version
 import os
 from pathlib import Path
 
 from app.json_utils import loads_strict_json
+
+EXPECTED_FLAGEMBEDDING_VERSION = "1.4.2"
 
 REQUIRED_OFFLINE_ENV = (
     "PIP_NO_INDEX",
@@ -21,6 +24,17 @@ def validate(*, model_dir: Path, environ: dict[str, str] | None = None) -> list[
 
     if importlib.util.find_spec("FlagEmbedding") is None:
         errors.append("FlagEmbedding is not installed")
+    else:
+        try:
+            installed_version = package_version("FlagEmbedding")
+        except PackageNotFoundError:
+            errors.append("FlagEmbedding distribution metadata is unavailable")
+        else:
+            if installed_version != EXPECTED_FLAGEMBEDDING_VERSION:
+                errors.append(
+                    "FlagEmbedding version must match the locked runtime "
+                    f"{EXPECTED_FLAGEMBEDDING_VERSION}, got {installed_version}"
+                )
 
     if not model_dir.is_dir():
         errors.append(f"BGE reranker directory does not exist: {model_dir}")
