@@ -16,6 +16,11 @@ def _step(title: str, text: str = "") -> Step:
     )
 
 
+def _expect_warnings(actual: list[str], expected: list[str]) -> None:
+    if actual != expected:
+        raise AssertionError(f"unexpected warnings: {actual!r}; expected {expected!r}")
+
+
 def test_flags_passive_party_when_no_representatives_or_citation_exist() -> None:
     warnings = _passive_party_attention_warnings(
         [{"name": "Parte Sintética", "side": "Passive"}],
@@ -23,7 +28,10 @@ def test_flags_passive_party_when_no_representatives_or_citation_exist() -> None
         [_step("Distribuição"), _step("Juntada de petição")],
     )
 
-    assert warnings == [PASSIVE_PARTY_NO_REPRESENTATIVE_OR_CITATION_WARNING]
+    _expect_warnings(
+        warnings,
+        [PASSIVE_PARTY_NO_REPRESENTATIVE_OR_CITATION_WARNING],
+    )
 
 
 def test_does_not_flag_when_explicit_citation_exists() -> None:
@@ -33,7 +41,7 @@ def test_does_not_flag_when_explicit_citation_exists() -> None:
         [_step("CITAÇÃO", "Citação registrada nos autos.")],
     )
 
-    assert warnings == []
+    _expect_warnings(warnings, [])
 
 
 def test_does_not_flag_when_any_normalized_representative_exists() -> None:
