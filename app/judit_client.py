@@ -22,9 +22,18 @@ _DEFAULT_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024
 class JuditRequestError(RuntimeError):
     """Safe provider-boundary failure; response bodies are deliberately discarded."""
 
-    def __init__(self, message: str, *, retry_safe: bool = False) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        retry_safe: bool = False,
+        error_code: str = "provider_error",
+        http_status: int | None = None,
+    ) -> None:
         super().__init__(message)
         self.retry_safe = retry_safe
+        self.error_code = error_code
+        self.http_status = http_status
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,12 +124,19 @@ def _provider_request(
     try:
         with urllib.request.urlopen(request, timeout=_timeout_seconds()) as response:
             if response.status not in accepted_statuses:
-                raise JuditRequestError(f"Judit request failed with HTTP {response.status}")
+                raise JuditRequestError(
+                    f"Judit request failed with HTTP {response.status}",
+                    error_code=f"http_{response.status}",
+                    http_status=int(response.status),
+                )
             if response.status == 204:
                 return None
             raw = response.read(_MAX_RESPONSE_BYTES + 1)
             if len(raw) > _MAX_RESPONSE_BYTES:
-                raise JuditRequestError("Judit response exceeded safe size")
+                raise JuditRequestError(
+                "Judit response exceeded safe size",
+                error_code="response_too_large",
+            )
     except urllib.error.HTTPError as exc:
         if not_found_is_success and exc.code == 404:
             return None
@@ -130,18 +146,29 @@ def _provider_request(
         raise JuditRequestError(
             f"Judit request failed with HTTP {exc.code}",
             retry_safe=400 <= exc.code < 500 and exc.code not in {408, 429},
+            error_code=f"http_{exc.code}",
+            http_status=int(exc.code),
         ) from None
     except (urllib.error.URLError, TimeoutError, OSError):
-        raise JuditRequestError("Judit request failed") from None
+        raise JuditRequestError(
+            "Judit request failed",
+            error_code="transport_error",
+        ) from None
 
     if not raw:
         return None
     try:
         body: Any = loads_strict_json(raw)
     except ValueError:
-        raise JuditRequestError("Judit returned an invalid response") from None
+        raise JuditRequestError(
+            "Judit returned an invalid response",
+            error_code="invalid_response",
+        ) from None
     if not isinstance(body, dict):
-        raise JuditRequestError("Judit returned an invalid response")
+        raise JuditRequestError(
+            "Judit returned an invalid response",
+            error_code="invalid_response",
+        )
     return body
 
 
@@ -203,6 +230,20 @@ def _download_attachment_sync(
     return JuditAttachmentDownload(content_type=content_type, data=data)
 
 
+def _check_connectivity_sync() -> dict[str, Any]:
+    """Validate the configured API key without creating a paid lawsuit request."""
+    body = _provider_request(
+        f"{JUDIT_REQUESTS_URL.rstrip('/')}?page=1&page_size=1",
+        method="GET",
+        accepted_statuses={200},
+    )
+    return body or {}
+
+
+async def check_judit_connectivity() -> dict[str, Any]:
+    return await asyncio.to_thread(_check_connectivity_sync)
+
+
 def _create_request_sync(code: str) -> JuditRequestResult:
     body = _provider_request(
         JUDIT_REQUESTS_URL,
@@ -215,7 +256,10 @@ def _create_request_sync(code: str) -> JuditRequestResult:
     )
     request_id = body.get("request_id") if body else None
     if not isinstance(request_id, str) or not request_id.strip():
-        raise JuditRequestError("Judit response missing request id")
+        raise JuditRequestError(
+            "Judit response missing request id",
+            error_code="missing_request_id",
+        )
     return JuditRequestResult(request_id=request_id.strip())
 
 
