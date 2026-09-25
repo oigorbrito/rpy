@@ -154,6 +154,35 @@ Use empirical literature as a calibration layer:
 
 See `docs/engineering/empirical-engineering.md` for the evidence ledger and how claims are translated into repository policy.
 
+## Evaluation and benchmark evidence protocol
+
+Agents must treat evaluations and benchmarks as reproducible experiments, not narrative claims.
+
+For every result used to justify a change, release candidate, performance statement, or provider/model decision, record enough information to reproduce the observation:
+
+- exact Git commit or immutable artifact digest;
+- evaluation command and dataset/fixture identity;
+- execution environment relevant to the result (for example container image, PostgreSQL version, model artifact and hardware when applicable);
+- run identifier when the execution system provides one;
+- machine-readable result or test output;
+- pass/fail/metric interpretation and explicit scope limits.
+
+Repository tests and CI results qualify only the commit and environment that actually executed. A later commit inherits no green status automatically.
+
+Synthetic, fake-provider and fixture-based evaluations must be labeled as synthetic evidence. They may demonstrate orchestration, regression invariants, schema/contracts and deterministic quality properties encoded by the fixture. They must not be presented as evidence of live-provider compatibility, real-model quality, production latency, throughput, cost, RTO/RPO, or hardware performance.
+
+Real performance/quality claims require the real implementation under the intended execution conditions. For local ML artifacts, record the exact model/artifact identity and verifier result before using benchmark numbers as deployment evidence.
+
+Evaluation methodology references:
+
+- SWE-bench evaluation harness: https://www.swebench.com/SWE-bench/reference/harness/
+- SWE-bench evaluation guide: https://www.swebench.com/SWE-bench/guides/evaluation/
+- Harbor core concepts: https://www.harborframework.com/docs/core-concepts
+- Harbor eval execution/results: https://www.harborframework.com/docs/run-jobs/run-evals
+- Google SRE SLO guidance: https://sre.google/workbook/implementing-slos/
+
+These references support reproducible execution, isolated environments, identifiable runs, structured results, and measured reliability objectives. They do not supply Rpy-specific acceptance thresholds. Rpy thresholds must come from an explicit product/SLO contract or from locally measured evidence with the measurement method documented.
+
 ## Definition of done for a transplant or architectural change
 
 A change is complete only when:

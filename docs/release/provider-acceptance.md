@@ -41,16 +41,17 @@ Record the approval reference outside the repository when it contains contractua
 For each acceptance run, record:
 
 - date/time and environment;
-- exact application image digest;
+- exact Git commit and application image digest;
 - provider and model selector;
 - non-sensitive approval/reference ID;
 - provider request/tracking ID when safe to retain;
 - HTTP/result class, not raw provider response bodies;
-- observed latency;
+- observed latency and the measurement point;
 - provider-reported usage/cost when available;
 - retry count;
 - final application state;
-- sanitized log reference;
+- CI/job/run identifier or equivalent execution identifier;
+- sanitized log/report reference;
 - operator/reviewer identity according to the organization's normal change-management system.
 
 Never record API keys, bearer tokens, webhook tokens, signed attachment URLs, raw judicial payloads or unredacted personal identifiers.
@@ -192,6 +193,8 @@ Before production enablement:
 3. execute `python scripts/benchmark_reranker.py --scorer bge` on the prepared hardware;
 4. record observed quality and latency evidence.
 
+Record the exact Git commit, verified local artifact path/identity, FlagEmbedding/runtime version, hardware/runtime environment, benchmark command, machine-readable report and execution/run identifier. The synthetic scorer result is not a substitute for this evidence.
+
 This is the remaining objective acceptance blocker for #121.
 
 ### Cohere Rerank
@@ -205,6 +208,16 @@ Only after separate external-reranker authorization:
 - worker-only `COHERE_API_KEY`.
 
 A Cohere reranker acceptance does not substitute for the real BGE benchmark required by the product decision in #121.
+
+## Evaluation methodology references
+
+Provider/model acceptance uses Rpy-specific contracts, but the evidence record follows established evaluation structure:
+
+- SWE-bench official harness/evaluation documentation uses isolated execution, explicit run identifiers and persisted result/test logs: https://www.swebench.com/SWE-bench/reference/harness/ and https://www.swebench.com/SWE-bench/guides/evaluation/
+- Harbor models evaluation as explicit tasks/datasets/environments with stored job/trial configs and results: https://www.harborframework.com/docs/core-concepts and https://www.harborframework.com/docs/run-jobs/run-evals
+- Google SRE guidance treats SLOs as measured objectives built from defined SLIs and measurement points: https://sre.google/workbook/implementing-slos/
+
+These sources inform evidence structure only. Provider acceptance criteria, legal authorization and performance thresholds remain Rpy/environment-specific.
 
 ## Stop conditions
 
