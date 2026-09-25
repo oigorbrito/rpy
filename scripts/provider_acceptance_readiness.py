@@ -8,6 +8,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_ENV = ROOT / ".env.production.example"
 DEFAULT_LIVE_WORKFLOW = ROOT / ".github" / "workflows" / "adversarial-live.yml"
+DEFAULT_PROVIDER_SMOKE_WORKFLOW = ROOT / ".github" / "workflows" / "provider-live-smoke.yml"
 DEFAULT_RUNBOOK = ROOT / "docs" / "release" / "provider-acceptance.md"
 
 CREDENTIAL_KEYS = (
@@ -57,6 +58,7 @@ def readiness_report(
     *,
     env_path: Path = DEFAULT_ENV,
     live_workflow_path: Path = DEFAULT_LIVE_WORKFLOW,
+    provider_smoke_workflow_path: Path = DEFAULT_PROVIDER_SMOKE_WORKFLOW,
     runbook_path: Path = DEFAULT_RUNBOOK,
 ) -> dict[str, Any]:
     errors: list[str] = []
@@ -88,6 +90,18 @@ def readiness_report(
     ):
         if marker not in workflow:
             errors.append(f"live Anthropic workflow missing safety marker: {marker}")
+
+    provider_smoke_workflow = provider_smoke_workflow_path.read_text(encoding="utf-8")
+    for marker in (
+        "workflow_dispatch:",
+        "PROVIDER_ACCEPTANCE_CNJ: ${{ secrets.PROVIDER_ACCEPTANCE_CNJ }}",
+        "PROVIDER_ACCEPTANCE_AUTHORIZED: ${{ secrets.PROVIDER_ACCEPTANCE_AUTHORIZED }}",
+        'JUDIT_ATTACHMENTS_ENABLED: "false"',
+        "armed but not executed",
+        'python scripts/provider_live_smoke.py --provider "$PROVIDER"',
+    ):
+        if marker not in provider_smoke_workflow:
+            errors.append(f"live provider smoke workflow missing safety marker: {marker}")
 
     runbook = runbook_path.read_text(encoding="utf-8")
     for marker in RUNBOOK_MARKERS:
