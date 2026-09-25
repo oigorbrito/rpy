@@ -20,6 +20,29 @@ Externally revalidated on 2026-09-18 against official provider documentation:
 
 The repository tests prove the request shapes with fakes and enforce these configured identifiers. This table is not a substitute for a live acceptance against the account/plan actually provisioned to the target environment.
 
+## Credential-free readiness gate
+
+Before any secret is provisioned, run:
+
+```bash
+python scripts/provider_acceptance_readiness.py --json
+```
+
+This check performs no network calls and requires no credentials. It validates the repository's
+activation posture rather than provider availability:
+
+- Judit and Anthropic are reported as `ready_to_provision` only when their production template
+  fields remain empty or explicit placeholders and the live acceptance contract is present;
+- DataJud and Cohere remain disabled until their separate authorization gates are explicitly
+  changed in the target environment;
+- paid Judit attachments remain disabled;
+- BGE is reported as pending real artifact/hardware evidence, not as a credentialed provider;
+- the Anthropic adversarial workflow must remain manually dispatchable and must skip cleanly when
+  `ANTHROPIC_API_KEY` is absent.
+
+A green readiness result is **not** live-provider acceptance. It only proves that the repository is
+safe to hand off for later secret provisioning and controlled execution.
+
 ## Preconditions
 
 Do not start live provider acceptance until all applicable items below are satisfied:

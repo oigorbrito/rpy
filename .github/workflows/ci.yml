@@ -74,6 +74,9 @@ jobs:
       - name: Project harness
         run: python scripts/project_harness.py
 
+      - name: Credential-free provider readiness
+        run: python scripts/provider_acceptance_readiness.py --json
+
       - name: Static Python quality
         run: ruff check app scripts tests
 
