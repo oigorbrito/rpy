@@ -51,7 +51,7 @@ def test_does_not_flag_when_any_normalized_representative_exists() -> None:
         [_step("Distribuição")],
     )
 
-    assert warnings == []
+    _expect_warnings(warnings, [])
 
 
 def test_does_not_infer_passive_party_from_person_type_or_name() -> None:
@@ -61,7 +61,7 @@ def test_does_not_infer_passive_party_from_person_type_or_name() -> None:
         [_step("Distribuição")],
     )
 
-    assert warnings == []
+    _expect_warnings(warnings, [])
 
 
 def test_accepts_unaccented_explicit_citation_marker() -> None:
@@ -71,4 +71,4 @@ def test_accepts_unaccented_explicit_citation_marker() -> None:
         [_step("Citacao eletrônica realizada")],
     )
 
-    assert warnings == []
+    _expect_warnings(warnings, [])
