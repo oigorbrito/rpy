@@ -56,7 +56,7 @@ The check performs only bare `GET /requests`, matching the provider's basic auth
 GitHub Actions exposes this as `mode=diagnose` and uses it as the default workflow-dispatch mode.
 
 The diagnostic records only safe classifications such as `http_401`, `http_403`, `http_429`,
-`http_5xx`, `transport_error` or `invalid_response`; when the provider returns a short machine-safe error code, the diagnostic may expose that code only. Raw provider response bodies and credentials are never logged. Live combined acceptance also performs this connectivity check before the paid Judit
+`http_5xx`, `transport_error` or `invalid_response`; when the provider returns structured validation data, the diagnostic may expose only a short machine-safe `provider_error_code` plus allowlisted `field`/`rule` pairs from `error.data`. Free-form validation messages, raw provider response bodies and credentials are never logged. Live combined acceptance also performs this connectivity check before the paid Judit
 request. If it fails, the paid Judit request and DataJud smoke are both blocked.
 
 Operational interpretation follows Judit's published authentication guidance:
