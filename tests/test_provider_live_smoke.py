@@ -119,3 +119,85 @@ def test_datajud_live_path_uses_existing_adapter_and_sanitized_result(
     expected = {"code": "0000000-00.2026.8.21.0001", "secrecy_level": 0}
     if observed != [expected]:
         raise AssertionError(f"unexpected adapter invocation: {observed!r}")
+
+
+def test_empty_boolean_env_uses_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PROVIDER_ACCEPTANCE_AUTHORIZED", "")
+    if smoke._env_bool("PROVIDER_ACCEPTANCE_AUTHORIZED", False) is not False:
+        raise AssertionError("empty boolean environment value must use the supplied default")
+
+
+def test_judit_missing_provider_authorization_skips_without_network(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    called = False
+
+    async def fake_create(code: str):
+        nonlocal called
+        called = True
+        return SimpleNamespace(request_id="should-not-run")
+
+    monkeypatch.setenv("JUDIT_API_KEY", "test-key")
+    monkeypatch.setenv("PROVIDER_ACCEPTANCE_AUTHORIZED", "false")
+    monkeypatch.setenv("JUDIT_ATTACHMENTS_ENABLED", "false")
+    monkeypatch.setattr(smoke, "create_lawsuit_request", fake_create)
+
+    report = asyncio.run(smoke.run_smoke("judit", "0000000-00.2026.8.21.0001"))
+
+    if report["status"] != "skipped_missing_authorization":
+        raise AssertionError(f"unexpected report: {report!r}")
+    if called:
+        raise AssertionError("unauthorized Judit smoke must not call the adapter")
+
+
+def test_main_missing_cnj_emits_json_skip_and_zero_exit(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["provider_live_smoke.py", "--provider", "judit", "--cnj", ""],
+    )
+
+    exit_code = smoke.main()
+    report = __import__("json").loads(capsys.readouterr().out)
+
+    if exit_code != 0:
+        raise AssertionError(f"missing CNJ should be an inert skip, got {exit_code}")
+    if report["status"] != "skipped_missing_cnj":
+        raise AssertionError(f"unexpected report: {report!r}")
+    if report["network_calls_performed"] is not False:
+        raise AssertionError("missing CNJ must not perform network calls")
+
+
+def test_main_provider_exception_emits_sanitized_json_error(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    async def fake_run_smoke(provider: str, code: str):
+        raise RuntimeError("provider body with secret-value")
+
+    monkeypatch.setattr(smoke, "run_smoke", fake_run_smoke)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "provider_live_smoke.py",
+            "--provider",
+            "judit",
+            "--cnj",
+            "0000000-00.2026.8.21.0001",
+        ],
+    )
+
+    exit_code = smoke.main()
+    rendered = capsys.readouterr().out
+    report = __import__("json").loads(rendered)
+
+    if exit_code != 1:
+        raise AssertionError(f"provider exception must fail the smoke, got {exit_code}")
+    if report["status"] != "error" or report["error_class"] != "RuntimeError":
+        raise AssertionError(f"unexpected report: {report!r}")
+    if "secret-value" in rendered:
+        raise AssertionError("provider exception text must not leak into machine-readable output")
