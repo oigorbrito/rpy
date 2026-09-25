@@ -113,6 +113,26 @@ async def run_smoke(provider: str, code: str) -> dict[str, Any]:
         return await _smoke_judit(normalized)
     if provider == "datajud":
         return await _smoke_datajud(normalized)
+    if provider == "both":
+        judit, datajud = await asyncio.gather(
+            _smoke_judit(normalized),
+            _smoke_datajud(normalized),
+        )
+        return {
+            "provider": "both",
+            "executed": bool(judit["executed"] and datajud["executed"]),
+            "network_calls_performed": bool(
+                judit["network_calls_performed"] or datajud["network_calls_performed"]
+            ),
+            "status": "ok" if (
+                judit["status"] == "request_created"
+                and datajud["status"] in {"ok", "not_found"}
+            ) else "incomplete",
+            "results": {
+                "judit": judit,
+                "datajud": datajud,
+            },
+        }
     raise ValueError(f"unsupported provider: {provider}")
 
 
@@ -123,7 +143,7 @@ def main() -> int:
             "Missing credentials/authorization produce a non-accepting skipped result."
         )
     )
-    parser.add_argument("--provider", choices=("judit", "datajud"), required=True)
+    parser.add_argument("--provider", choices=("judit", "datajud", "both"), default="both")
     parser.add_argument(
         "--cnj",
         default=os.getenv("PROVIDER_ACCEPTANCE_CNJ", ""),
@@ -147,6 +167,8 @@ def main() -> int:
         return 1
     if not report["executed"]:
         return 0
+    if args.provider == "both":
+        return 0 if report["status"] == "ok" else 1
     if args.provider == "datajud":
         return 0 if report["status"] in {"ok", "not_found"} else 1
     return 0 if report["status"] == "request_created" else 1
