@@ -201,3 +201,77 @@ def test_main_provider_exception_emits_sanitized_json_error(
         raise AssertionError(f"unexpected report: {report!r}")
     if "secret-value" in rendered:
         raise AssertionError("provider exception text must not leak into machine-readable output")
+
+
+def test_both_preflight_requires_all_credentials_before_any_network(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    judit_called = False
+    datajud_called = False
+
+    async def fake_create(code: str):
+        nonlocal judit_called
+        judit_called = True
+        return SimpleNamespace(request_id="should-not-run")
+
+    async def fake_lookup(**kwargs):
+        nonlocal datajud_called
+        datajud_called = True
+        return SimpleNamespace(status="ok", metadata=object(), error_code=None)
+
+    monkeypatch.setenv("PROVIDER_ACCEPTANCE_AUTHORIZED", "true")
+    monkeypatch.setenv("JUDIT_ATTACHMENTS_ENABLED", "false")
+    monkeypatch.setenv("DATAJUD_ENABLED", "true")
+    monkeypatch.setenv("DATAJUD_AUTHORIZED_USE", "true")
+    monkeypatch.setenv("JUDIT_API_KEY", "test-key")
+    monkeypatch.delenv("DATAJUD_API_KEY", raising=False)
+    monkeypatch.setattr(smoke, "create_lawsuit_request", fake_create)
+    monkeypatch.setattr(smoke, "lookup_datajud_metadata", fake_lookup)
+
+    report = asyncio.run(smoke.run_smoke("both", "0000000-00.2026.8.21.0001"))
+
+    if report["status"] != "skipped_missing_credentials":
+        raise AssertionError(f"unexpected report: {report!r}")
+    if report["network_calls_performed"] is not False:
+        raise AssertionError("combined preflight must perform no partial network calls")
+    if judit_called or datajud_called:
+        raise AssertionError("combined preflight must block both providers when either is not ready")
+
+
+def test_both_live_path_runs_judit_and_datajud_in_same_acceptance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: list[str] = []
+
+    async def fake_create(code: str):
+        observed.append(f"judit:{code}")
+        return SimpleNamespace(request_id="provider-request-123")
+
+    async def fake_lookup(**kwargs):
+        observed.append(f"datajud:{kwargs['code']}")
+        return SimpleNamespace(status="ok", metadata=object(), error_code=None)
+
+    monkeypatch.setenv("PROVIDER_ACCEPTANCE_AUTHORIZED", "true")
+    monkeypatch.setenv("JUDIT_ATTACHMENTS_ENABLED", "false")
+    monkeypatch.setenv("DATAJUD_ENABLED", "true")
+    monkeypatch.setenv("DATAJUD_AUTHORIZED_USE", "true")
+    monkeypatch.setenv("JUDIT_API_KEY", "test-key")
+    monkeypatch.setenv("DATAJUD_API_KEY", "test-key")
+    monkeypatch.setattr(smoke, "create_lawsuit_request", fake_create)
+    monkeypatch.setattr(smoke, "lookup_datajud_metadata", fake_lookup)
+
+    report = asyncio.run(smoke.run_smoke("both", "0000000-00.2026.8.21.0001"))
+
+    if report["status"] != "ok" or report["executed"] is not True:
+        raise AssertionError(f"unexpected report: {report!r}")
+    if report["network_calls_performed"] is not True:
+        raise AssertionError("combined acceptance must record both provider network calls")
+    if set(observed) != {
+        "judit:0000000-00.2026.8.21.0001",
+        "datajud:0000000-00.2026.8.21.0001",
+    }:
+        raise AssertionError(f"unexpected combined provider calls: {observed!r}")
+    if report["results"]["judit"]["status"] != "request_created":
+        raise AssertionError(f"unexpected Judit result: {report!r}")
+    if report["results"]["datajud"]["status"] != "ok":
+        raise AssertionError(f"unexpected DataJud result: {report!r}")

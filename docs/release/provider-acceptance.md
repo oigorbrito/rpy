@@ -48,8 +48,7 @@ safe to hand off for later secret provisioning and controlled execution.
 The repository also provides a manual live smoke entrypoint:
 
 ```bash
-python scripts/provider_live_smoke.py --provider judit
-python scripts/provider_live_smoke.py --provider datajud
+python scripts/provider_live_smoke.py --provider both
 ```
 
 The CNJ comes from `PROVIDER_ACCEPTANCE_CNJ` unless `--cnj` is supplied. A real network call
@@ -58,12 +57,15 @@ Without those values the command returns a machine-readable skipped state and pe
 call.
 
 The workflow `.github/workflows/provider-live-smoke.yml` is manually dispatchable and follows the
-same rule. It reads the authorized CNJ and credentials from GitHub Secrets, keeps Judit attachments
-disabled, and exits with a notice rather than claiming acceptance when provisioning is incomplete.
+same rule. It reads the authorized CNJ and **both** provider credentials from GitHub Secrets, keeps
+Judit attachments disabled, and exits with a notice rather than claiming acceptance when provisioning
+is incomplete.
 
-The smoke is intentionally bounded: one Judit lawsuit request or one DataJud lookup. It does not
-replace end-to-end webhook acceptance, attachment acceptance, mass indexing, or legal/governance
-approval.
+The official acceptance path is combined: one Judit lawsuit request and one DataJud lookup are issued
+in the same smoke execution after a joint preflight confirms both boundaries are authorized and
+provisioned. If either boundary is not ready, neither network call is made. Individual provider modes
+remain available only for local diagnosis. This smoke does not replace end-to-end webhook acceptance,
+attachment acceptance, mass indexing, or legal/governance approval.
 
 ## Preconditions
 
