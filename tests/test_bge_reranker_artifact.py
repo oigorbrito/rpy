@@ -30,6 +30,7 @@ def test_reranker_artifact_accepts_local_offline_directory(
     model_dir.mkdir()
     (model_dir / "config.json").write_text('{"model_type": "xlm-roberta"}', encoding="utf-8")
     monkeypatch.setattr(importlib.util, "find_spec", lambda name: object())
+    monkeypatch.setattr(verifier, "package_version", lambda name: "1.4.2")
 
     assert verifier.validate(model_dir=model_dir, environ=_offline_env(model_dir)) == []
 
@@ -55,6 +56,7 @@ def test_reranker_artifact_rejects_missing_or_invalid_config(
     model_dir = tmp_path / "bge-reranker-v2-m3"
     model_dir.mkdir()
     monkeypatch.setattr(importlib.util, "find_spec", lambda name: object())
+    monkeypatch.setattr(verifier, "package_version", lambda name: "1.4.2")
 
     errors = verifier.validate(model_dir=model_dir, environ=_offline_env(model_dir))
     assert any("missing config.json" in error for error in errors)
@@ -72,6 +74,7 @@ def test_reranker_artifact_rejects_online_or_wrong_path(
     model_dir.mkdir()
     (model_dir / "config.json").write_text("{}", encoding="utf-8")
     monkeypatch.setattr(importlib.util, "find_spec", lambda name: object())
+    monkeypatch.setattr(verifier, "package_version", lambda name: "1.4.2")
     env = _offline_env(model_dir)
     env["HF_HUB_OFFLINE"] = "0"
     env["BGE_RERANKER_PATH"] = "/other/model"
@@ -98,6 +101,7 @@ def test_reranker_artifact_rejects_ambiguous_config_json(
     model_dir.mkdir()
     (model_dir / "config.json").write_text(raw, encoding="utf-8")
     monkeypatch.setattr(importlib.util, "find_spec", lambda name: object())
+    monkeypatch.setattr(verifier, "package_version", lambda name: "1.4.2")
 
     errors = verifier.validate(model_dir=model_dir, environ=_offline_env(model_dir))
     if not any("config.json is invalid" in error for error in errors):
