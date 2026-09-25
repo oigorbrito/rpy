@@ -16,15 +16,9 @@ Do not move, recreate or retarget `v0.1.0`.
 
 ## Current main
 
-Current `main` contains substantial work after `v0.1.0`. Until a release owner explicitly selects the next version:
+Current `main` contains substantial work after `v0.1.0`. The release owner selected `0.1.1` for the next release. Release preparation is tracked in `docs/release/next-release.md`; the immutable tag must not be created until the exact release head has passed the complete gates and its published image digest has been smoke-tested and attested.
 
-- `pyproject.toml` may still carry the last released package version as repository metadata;
-- documentation must not call current `main` “v0.1.0”;
-- no new release tag may reuse `v0.1.0`;
-- the next release identifier is `TBD`;
-- release readiness is tracked in `docs/release/next-release.md`.
-
-The version choice is a release/product decision. Engineering should provide the evidence needed to make it, not silently choose a number.
+Documentation must not call current `main` “v0.1.0”, and the historical `v0.1.0` tag must never be moved or reused.
 
 ## Version selection rule
 
