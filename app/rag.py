@@ -51,7 +51,7 @@ from app.provenance import (
 )
 from app.reranker_provider import configured_reranker_scorer
 from app.reranking import RERANK_CANDIDATE_LIMIT, select_context_steps
-from app.retrieval import load_steps, vector_search
+from app.retrieval import Step, load_steps, vector_search
 from app.summary_output import (
     SUMMARY_OUTPUT_SCHEMA,
     parse_structured_summary,
@@ -88,6 +88,10 @@ RETRIEVAL_QUERY = (
     "trânsito em julgado"
 )
 EMPTY_STEPS_WARNING = "Nenhum movimento processual foi fornecido no payload."
+PASSIVE_PARTY_NO_REPRESENTATIVE_OR_CITATION_WARNING = (
+    "Há parte passiva sem representante normalizado e sem citação explícita "
+    "nos movimentos fornecidos."
+)
 DEFAULT_PROVIDER_PROMPT_MAX_CHARS = 120_000
 DEFAULT_PROVIDER_STEP_TEXT_MAX_CHARS = 12_000
 DEFAULT_PROVIDER_STEPS_TEXT_MAX_CHARS = 80_000
@@ -192,6 +196,30 @@ def _serialize_steps(ranked: list[Any]) -> list[dict[str, Any]]:
         }
         for item, text in zip(ranked, texts, strict=True)
     ]
+
+
+def _passive_party_attention_warnings(
+    parties: list[dict[str, Any]],
+    representatives: list[dict[str, Any]],
+    steps: list[Step],
+) -> list[str]:
+    has_passive_party = any(
+        str(party.get("side") or "").strip().casefold() == "passive"
+        for party in parties
+        if isinstance(party, dict)
+    )
+    if not has_passive_party or representatives:
+        return []
+
+    for step in steps:
+        title = (step.title or "").casefold()
+        if "citação" in title or "citacao" in title:
+            return []
+        text = step.text.casefold()
+        if "citação" in text or "citacao" in text:
+            return []
+
+    return [PASSIVE_PARTY_NO_REPRESENTATIVE_OR_CITATION_WARNING]
 
 
 def _source_step_gap_warnings(steps: list[Any]) -> list[str]:
@@ -304,6 +332,13 @@ async def _load_context(
     base["step_count"] = len(steps)
     source_warnings = (
         [EMPTY_STEPS_WARNING] if not steps else _source_step_gap_warnings(steps)
+    )
+    source_warnings.extend(
+        _passive_party_attention_warnings(
+            base.get("parties") or [],
+            base.get("representatives") or [],
+            steps,
+        )
     )
     source_warnings.extend(
         datajud_conflict_warning(str(field))
