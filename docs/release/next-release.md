@@ -53,9 +53,16 @@ Engineering must not silently resolve either decision.
 
 ## Current repository-qualified candidate
 
-The current repository-qualified candidate is `0ebc14958e5fd9adb7be54d7d4ea4fc93b771965`. Exact-head CI #2652, CodeQL #667 and vulnerability scan #76 completed successfully. The candidate includes the previously qualified browser/container/restore/PostgreSQL/offline-smoke gates plus the latest offline hardening: shared deterministic monetary parsing with property-based equivalence checks (#302), structured credential redaction fuzzing (#303), aggregate webhook-body limit fuzzing across chunk boundaries and underdeclared Content-Length (#304), and malformed webhook-path credential redaction that preserves invalid routing (#305).
+The latest fully observed `main` candidate before this documentation/harness change is `b852370fe8d11457290fe314a892c29e5bf045f7`.
 
-These observations qualify repository-local behavior only. They do not demonstrate live provider compatibility, production ingress redaction, legal authorization, real BGE quality/latency, or production RTO/SLO performance.
+Observed GitHub evidence for that exact commit:
+
+- CI run #3146 / id `36101976318`: success. Named steps include project harness, static quality, unit tests, synthetic RAG eval, offline pipeline eval, offline generation eval, frontend behavior/browser smoke, container image smoke, PostgreSQL backup/restore drill, PostgreSQL integration and offline release smoke.
+- vulnerability-scan run #118 / id `36101976315`: success for resolved Python dependencies and container-image HIGH/CRITICAL gates.
+- CodeQL "Push on main" run #847 / id `36101976539`: success for Actions, Python and JavaScript/TypeScript analysis.
+- CI run #3147 / id `36102051950` was cancelled and is not used as qualifying evidence.
+
+This evidence qualifies repository-local behavior for that exact commit. It does not establish live provider compatibility, production ingress behavior, legal authorization, real BGE quality/latency, production RTO/SLO or hardware cost.
 
 This commit is a **repository/offline candidate**, not a production activation decision. Any later code change creates a new candidate and must repeat the exact-head gates.
 
