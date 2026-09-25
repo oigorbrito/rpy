@@ -5,6 +5,7 @@ import re
 import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import lru_cache
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -229,7 +230,10 @@ def _masked_personal_id(value: str) -> str:
     raise ValueError("personal id must contain 11 or 14 digits")
 
 
+@lru_cache(maxsize=1024)
 def _normalized_person_type(value: Any) -> str:
+    # Memoize Unicode NFKD normalization and diacritic removal to prevent repeated CPU bottlenecks
+    # on person_type string lookups during party classification.
     rendered = unicodedata.normalize("NFKD", str(value or "").strip())
     ascii_value = "".join(
         character

@@ -6,6 +6,7 @@ import unicodedata
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
+from functools import lru_cache
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -96,7 +97,10 @@ def _normalize_digits(value: str) -> str:
     return "".join(character for character in value if character.isdigit())
 
 
+@lru_cache(maxsize=2048)
 def _normalize_party_name(value: str) -> str:
+    # Memoize Unicode NFKD normalization and diacritic removal to prevent repeated CPU bottlenecks
+    # on headings, party names, section titles, and meta-output markers during document validation.
     decomposed = unicodedata.normalize("NFKD", value)
     without_marks = "".join(
         character for character in decomposed if not unicodedata.combining(character)
