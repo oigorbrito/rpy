@@ -10,6 +10,7 @@ on:
         default: diagnose
         options:
           - diagnose
+          - datajud
           - live
           - replay
       replay_run_id:
@@ -54,6 +55,33 @@ jobs:
             exit 1
           fi
           python scripts/provider_live_smoke.py --diagnose-judit
+
+      - name: Run controlled DataJud-only live smoke
+        if: ${{ github.event.inputs.mode == 'datajud' }}
+        env:
+          PROVIDER_ACCEPTANCE_CNJ: ${{ secrets.PROVIDER_ACCEPTANCE_CNJ }}
+          PROVIDER_ACCEPTANCE_AUTHORIZED: ${{ secrets.PROVIDER_ACCEPTANCE_AUTHORIZED }}
+          DATAJUD_ENABLED: "true"
+          DATAJUD_AUTHORIZED_USE: ${{ secrets.DATAJUD_AUTHORIZED_USE }}
+          DATAJUD_API_KEY: ${{ secrets.DATAJUD_API_KEY }}
+        run: |
+          if [ -z "$PROVIDER_ACCEPTANCE_CNJ" ]; then
+            echo "::error::PROVIDER_ACCEPTANCE_CNJ is required for DataJud smoke."
+            exit 1
+          fi
+          if [ "$PROVIDER_ACCEPTANCE_AUTHORIZED" != "true" ]; then
+            echo "::error::PROVIDER_ACCEPTANCE_AUTHORIZED must be true for DataJud smoke."
+            exit 1
+          fi
+          if [ "$DATAJUD_AUTHORIZED_USE" != "true" ]; then
+            echo "::error::DATAJUD_AUTHORIZED_USE must be true for DataJud smoke."
+            exit 1
+          fi
+          if [ -z "$DATAJUD_API_KEY" ]; then
+            echo "::error::DATAJUD_API_KEY is required for DataJud smoke."
+            exit 1
+          fi
+          python scripts/provider_live_smoke.py --provider datajud
 
       - name: Download prior sanitized capture for replay
         if: ${{ github.event.inputs.mode == 'replay' }}
