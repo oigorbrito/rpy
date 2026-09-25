@@ -43,6 +43,28 @@ activation posture rather than provider availability:
 A green readiness result is **not** live-provider acceptance. It only proves that the repository is
 safe to hand off for later secret provisioning and controlled execution.
 
+### Controlled Judit/DataJud smoke
+
+The repository also provides a manual live smoke entrypoint:
+
+```bash
+python scripts/provider_live_smoke.py --provider judit
+python scripts/provider_live_smoke.py --provider datajud
+```
+
+The CNJ comes from `PROVIDER_ACCEPTANCE_CNJ` unless `--cnj` is supplied. A real network call
+requires `PROVIDER_ACCEPTANCE_AUTHORIZED=true` plus the provider-specific credentials and gates.
+Without those values the command returns a machine-readable skipped state and performs no network
+call.
+
+The workflow `.github/workflows/provider-live-smoke.yml` is manually dispatchable and follows the
+same rule. It reads the authorized CNJ and credentials from GitHub Secrets, keeps Judit attachments
+disabled, and exits with a notice rather than claiming acceptance when provisioning is incomplete.
+
+The smoke is intentionally bounded: one Judit lawsuit request or one DataJud lookup. It does not
+replace end-to-end webhook acceptance, attachment acceptance, mass indexing, or legal/governance
+approval.
+
 ## Preconditions
 
 Do not start live provider acceptance until all applicable items below are satisfied:
