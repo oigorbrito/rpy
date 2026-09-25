@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import urllib.error
 from uuid import uuid4
@@ -419,7 +420,7 @@ def test_connectivity_check_uses_non_creating_get(monkeypatch: pytest.MonkeyPatc
     request = captured["request"]
     assert request.method == "GET"
     assert request.data is None
-    assert request.full_url.endswith("/requests?page=1&page_size=10")
+    assert request.full_url.endswith("/requests")
     assert request.get_header("Api-key") == "diagnostic-key"
     assert body == {"page_data": []}
 
@@ -450,3 +451,53 @@ def test_connectivity_diagnostic_exposes_only_safe_http_classification(
     assert exc.value.error_code == error_code
     assert exc.value.http_status == status
     assert "provider secret body" not in str(exc.value)
+
+
+def test_connectivity_diagnostic_extracts_only_allowlisted_provider_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("JUDIT_API_KEY", "diagnostic-key")
+
+    def fail(request, timeout):
+        raise urllib.error.HTTPError(
+            request.full_url,
+            400,
+            "provider validation failed",
+            {},
+            io.BytesIO(
+                b'{"error":{"name":"HttpBadRequestError","data":"INVALID_QUERY"}}'
+            ),
+        )
+
+    monkeypatch.setattr(judit_client.urllib.request, "urlopen", fail)
+
+    with pytest.raises(judit_client.JuditRequestError) as exc:
+        judit_client._check_connectivity_sync()
+
+    assert exc.value.error_code == "http_400"
+    assert exc.value.provider_error_code == "HttpBadRequestError"
+    assert "provider validation failed" not in str(exc.value)
+
+
+def test_connectivity_diagnostic_rejects_unsafe_provider_error_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("JUDIT_API_KEY", "diagnostic-key")
+
+    def fail(request, timeout):
+        raise urllib.error.HTTPError(
+            request.full_url,
+            400,
+            "provider validation failed",
+            {},
+            io.BytesIO(
+                b'{"error":{"data":"contains spaces and possibly sensitive text"}}'
+            ),
+        )
+
+    monkeypatch.setattr(judit_client.urllib.request, "urlopen", fail)
+
+    with pytest.raises(judit_client.JuditRequestError) as exc:
+        judit_client._check_connectivity_sync()
+
+    assert exc.value.provider_error_code is None
