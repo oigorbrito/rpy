@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from app import bge_runtime_contract
+
 MODULE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "verify_bge_image_runtime.py"
 spec = importlib.util.spec_from_file_location("verify_bge_image_runtime", MODULE_PATH)
 assert spec is not None and spec.loader is not None
@@ -30,6 +32,7 @@ def test_bge_image_readiness_accepts_local_1024_artifact(
     model_dir.mkdir()
     (model_dir / "config.json").write_text('{"hidden_size": 1024}', encoding="utf-8")
     monkeypatch.setattr(importlib.util, "find_spec", lambda name: object())
+    monkeypatch.setattr(bge_runtime_contract, "package_version", lambda name: "1.4.2")
 
     assert verifier.validate(model_dir=model_dir, environ=_offline_env(model_dir)) == []
 
@@ -55,6 +58,7 @@ def test_bge_image_readiness_rejects_online_or_wrong_artifact(
     model_dir.mkdir()
     (model_dir / "config.json").write_text('{"hidden_size": 768}', encoding="utf-8")
     monkeypatch.setattr(importlib.util, "find_spec", lambda name: object())
+    monkeypatch.setattr(bge_runtime_contract, "package_version", lambda name: "1.4.2")
     env = _offline_env(model_dir)
     env["HF_HUB_OFFLINE"] = "0"
     env["BGE_EMBEDDING_PATH"] = "/other/model"
@@ -96,6 +100,7 @@ def test_bge_image_readiness_rejects_ambiguous_config_json(
     model_dir.mkdir()
     (model_dir / "config.json").write_text(raw, encoding="utf-8")
     monkeypatch.setattr(importlib.util, "find_spec", lambda name: object())
+    monkeypatch.setattr(bge_runtime_contract, "package_version", lambda name: "1.4.2")
 
     errors = verifier.validate(model_dir=model_dir, environ=_offline_env(model_dir))
     if not any("config.json is invalid" in error for error in errors):
@@ -112,6 +117,7 @@ def test_bge_image_readiness_rejects_non_object_config_json(
     model_dir.mkdir()
     (model_dir / "config.json").write_text(raw, encoding="utf-8")
     monkeypatch.setattr(importlib.util, "find_spec", lambda name: object())
+    monkeypatch.setattr(bge_runtime_contract, "package_version", lambda name: "1.4.2")
 
     errors = verifier.validate(model_dir=model_dir, environ=_offline_env(model_dir))
     if "BGE model config.json must contain an object" not in errors:

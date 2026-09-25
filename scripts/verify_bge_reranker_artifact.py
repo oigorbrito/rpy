@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import os
 from pathlib import Path
 
+from app.bge_runtime_contract import validate_flagembedding_runtime
 from app.json_utils import loads_strict_json
 
 REQUIRED_OFFLINE_ENV = (
@@ -19,8 +19,7 @@ def validate(*, model_dir: Path, environ: dict[str, str] | None = None) -> list[
     env = dict(os.environ if environ is None else environ)
     errors: list[str] = []
 
-    if importlib.util.find_spec("FlagEmbedding") is None:
-        errors.append("FlagEmbedding is not installed")
+    errors.extend(validate_flagembedding_runtime())
 
     if not model_dir.is_dir():
         errors.append(f"BGE reranker directory does not exist: {model_dir}")
