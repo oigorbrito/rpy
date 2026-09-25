@@ -227,6 +227,7 @@ def test_both_preflight_requires_all_credentials_before_any_network(
     monkeypatch.delenv("DATAJUD_API_KEY", raising=False)
     monkeypatch.setattr(smoke, "create_lawsuit_request", fake_create)
     monkeypatch.setattr(smoke, "lookup_datajud_metadata", fake_lookup)
+    monkeypatch.setattr(smoke, "diagnose_judit", fake_diagnostic)
 
     report = asyncio.run(smoke.run_smoke("both", "0000000-00.2026.8.21.0001"))
 
@@ -250,6 +251,16 @@ def test_both_live_path_runs_judit_and_datajud_in_same_acceptance(
     async def fake_lookup(**kwargs):
         observed.append(f"datajud:{kwargs['code']}")
         return SimpleNamespace(status="ok", metadata=object(), error_code=None)
+
+    async def fake_diagnostic():
+        return {
+            "provider": "judit",
+            "executed": True,
+            "network_calls_performed": True,
+            "network_call_type": "non_creating_connectivity_check",
+            "status": "ok",
+            "latency_ms": 1.0,
+        }
 
     monkeypatch.setenv("PROVIDER_ACCEPTANCE_AUTHORIZED", "true")
     monkeypatch.setenv("JUDIT_ATTACHMENTS_ENABLED", "false")
