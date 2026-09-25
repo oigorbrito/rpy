@@ -65,8 +65,8 @@ def main() -> int:
 
         if tag not in release_text:
             errors.append(f"release notes must identify tag {tag}")
-        if f"`{version}`" not in candidate_text or f"`{tag}`" not in candidate_text:
-            errors.append("offline release candidate must match pyproject version/tag")
+        if "`0.1.0`" not in candidate_text or "`v0.1.0`" not in candidate_text:
+            errors.append("offline release candidate must retain the historical v0.1.0 evidence")
         if "- [ ]" in candidate_text:
             errors.append("offline release Definition of Done still contains unchecked items")
         for marker in (
@@ -83,12 +83,12 @@ def main() -> int:
         for marker in (
             "The historical first release is:",
             "Do not move, recreate or retarget `v0.1.0`.",
-            "the next release identifier is `TBD`",
+            f"selected `{version}` for the next release",
         ):
             if marker not in versioning_text:
                 errors.append(f"release versioning policy missing required marker: {marker}")
         for marker in (
-            "**Release version: TBD**",
+            f"**Release version: {version}**",
             "## Release blockers vs activation blockers",
             "create a **new** tag; never retarget `v0.1.0`.",
         ):
@@ -126,7 +126,7 @@ def main() -> int:
         return 1
 
     print(
-        f"Release harness: OK (historical_version={version}, historical_tag={tag}, license=MIT, next_release=TBD, canonical smoke entrypoints verified)"
+        f"Release harness: OK (release_version={version}, release_tag={tag}, historical_tag=v0.1.0, license=MIT, canonical smoke entrypoints verified)"
     )
     return 0
 
