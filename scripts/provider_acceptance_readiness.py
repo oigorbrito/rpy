@@ -98,7 +98,9 @@ def readiness_report(
         "PROVIDER_ACCEPTANCE_AUTHORIZED: ${{ secrets.PROVIDER_ACCEPTANCE_AUTHORIZED }}",
         'JUDIT_ATTACHMENTS_ENABLED: "false"',
         "armed but not executed",
-        "python scripts/provider_live_smoke.py --provider both",
+        "python scripts/provider_live_smoke.py",
+        "--provider both",
+        "--capture-file provider-acceptance-artifacts/provider-smoke-capture.json",
     ):
         if marker not in provider_smoke_workflow:
             errors.append(f"live provider smoke workflow missing safety marker: {marker}")
