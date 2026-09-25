@@ -10,9 +10,18 @@ on:
         default: diagnose
         options:
           - diagnose
+          - judit
           - datajud
           - live
           - replay
+      judit_requests_host:
+        description: Judit requests host for the controlled Judit-only call
+        required: true
+        type: choice
+        default: prod
+        options:
+          - prod
+          - production
       replay_run_id:
         description: Prior provider-live-smoke run ID containing provider-acceptance-capture
         required: false
@@ -75,6 +84,45 @@ jobs:
             exit 0
           fi
           exit 1
+
+      - name: Run one controlled Judit-only lawsuit request
+        if: ${{ github.event.inputs.mode == 'judit' }}
+        env:
+          PROVIDER_ACCEPTANCE_CNJ: ${{ secrets.PROVIDER_ACCEPTANCE_CNJ }}
+          PROVIDER_ACCEPTANCE_AUTHORIZED: ${{ secrets.PROVIDER_ACCEPTANCE_AUTHORIZED }}
+          JUDIT_API_KEY: ${{ secrets.JUDIT_API_KEY }}
+          JUDIT_ATTACHMENTS_ENABLED: "false"
+          JUDIT_REQUESTS_HOST_CHOICE: ${{ github.event.inputs.judit_requests_host }}
+        run: |
+          if [ -z "$PROVIDER_ACCEPTANCE_CNJ" ]; then
+            echo "::error::PROVIDER_ACCEPTANCE_CNJ is required for Judit smoke."
+            exit 1
+          fi
+          if [ "$PROVIDER_ACCEPTANCE_AUTHORIZED" != "true" ]; then
+            echo "::error::PROVIDER_ACCEPTANCE_AUTHORIZED must be true for Judit smoke."
+            exit 1
+          fi
+          if [ -z "$JUDIT_API_KEY" ]; then
+            echo "::error::JUDIT_API_KEY is required for Judit smoke."
+            exit 1
+          fi
+
+          case "$JUDIT_REQUESTS_HOST_CHOICE" in
+            prod)
+              export JUDIT_REQUESTS_BASE_URL="https://requests.prod.judit.io"
+              ;;
+            production)
+              export JUDIT_REQUESTS_BASE_URL="https://requests.production.judit.io"
+              ;;
+            *)
+              echo "::error::Unsupported Judit requests host choice."
+              exit 1
+              ;;
+          esac
+
+          python scripts/provider_live_smoke.py \
+            --provider judit \
+            --capture-file provider-acceptance-artifacts/provider-smoke-capture.json
 
       - name: Run controlled DataJud-only live smoke
         if: ${{ github.event.inputs.mode == 'datajud' }}
@@ -164,7 +212,7 @@ jobs:
             --capture-file provider-acceptance-artifacts/provider-smoke-capture.json
 
       - name: Upload sanitized provider capture
-        if: ${{ github.event.inputs.mode == 'live' && success() }}
+        if: ${{ (github.event.inputs.mode == 'live' || github.event.inputs.mode == 'judit') && success() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: provider-acceptance-capture
