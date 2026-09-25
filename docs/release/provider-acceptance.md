@@ -96,9 +96,38 @@ The GitHub workflow exposes `mode=live|replay`. Live mode uploads the sanitized 
 workflow run ID, downloads that artifact, and performs no Judit/DataJud call.
 
 This capture replays the **acceptance smoke contract**, not a complete Judit lawsuit. Judit request
-creation is asynchronous: the immediate response is a request identifier. Reusing the full process
-content later requires a separate, sanitized capture/replay boundary for the finalized callback or
-lawsuit payload.
+creation is asynchronous: the immediate response is a request identifier.
+
+For finalized process reuse, Rpy already retains recent webhook envelopes temporarily in
+`judit_deliveries.raw_payload` (bounded by the repository's delivery-retention policy). Export a
+sanitized replay bundle from that controlled store:
+
+```bash
+python scripts/export_judit_replay.py \
+  --cnj "<same-authorized-cnj>" \
+  --output private-artifacts/judit-webhook-replay.json
+```
+
+The exporter resolves the most recent Judit request for the CNJ, reads its callback sequence, replaces
+provider request/response/callback identifiers with stable hashes, redacts direct document/contact
+fields, pseudonymizes party-name fields, and writes the ordered webhook sequence. The output must stay
+outside the repository unless separately reviewed as synthetic-safe.
+
+The bundle can then be applied to a local or staging Rpy environment without calling Judit:
+
+```bash
+python scripts/replay_judit_webhooks.py \
+  --bundle private-artifacts/judit-webhook-replay.json \
+  --cnj "<same-authorized-cnj>" \
+  --base-url "http://localhost:8000"
+```
+
+`JUDIT_WEBHOOK_TOKEN` is used only to authenticate to the Rpy webhook endpoint. The replay command
+does not need `JUDIT_API_KEY` and reports `provider_network_calls_performed=false`.
+
+This gives two reusable layers: the GitHub smoke capture proves provider connectivity/contract, while
+the database-exported webhook bundle exercises Judit ingestion and finalization repeatedly without a
+new paid provider request.
 
 ## Preconditions
 
