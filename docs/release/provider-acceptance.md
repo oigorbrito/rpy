@@ -76,7 +76,7 @@ connectivity check:
 python scripts/provider_live_smoke.py --diagnose-judit
 ```
 
-The check performs only the provider-documented `GET /requests?page=1&page_size=1`; it does not create a lawsuit request. The requests base URL is constrained to Judit's documented `requests.production.judit.io` host or the `requests.prod.judit.io` compatibility alias observed in Judit's own examples and public integrations. GitHub Actions `mode=diagnose` probes both hosts independently, without any `POST /requests`, so host/account routing can be distinguished from payload or billing behavior.
+The check performs only the provider-documented `GET /requests?page=1&page_size=1`; it does not create a lawsuit request. The requests base URL is constrained to Judit's documented `requests.prod.judit.io` host or the `requests.prod.judit.io` compatibility alias observed in Judit's own examples and public integrations. GitHub Actions `mode=diagnose` probes both hosts independently, without any `POST /requests`, so host/account routing can be distinguished from payload or billing behavior.
 
 The diagnostic records only safe classifications such as `http_401`, `http_403`, `http_429`,
 `http_5xx`, `transport_error` or `invalid_response`; when the provider returns structured validation data, the diagnostic may expose only a short machine-safe `provider_error_code` plus allowlisted `field`/`rule` pairs from `error.data`. Free-form validation messages, raw provider response bodies and credentials are never logged. Live combined acceptance also performs this connectivity check before the paid Judit
@@ -101,12 +101,24 @@ The workflow requires only the authorized CNJ, `PROVIDER_ACCEPTANCE_AUTHORIZED=t
 The request contract is pinned to Judit's current official CNJ body: `search.search_type=lawsuit_cnj`,
 `search.search_key=<CNJ>`, and `with_attachments=false`. The official request example does not
 require clients to send `response_type` for this CNJ request; Judit returns `response_type=lawsuit`
-in the created request/response objects. The workflow makes the requests host an explicit choice
-between the canonical `requests.production.judit.io` host and the observed compatibility alias.
+in the created request/response objects. The workflow defaults to Judit's currently documented `requests.prod.judit.io` host and keeps
+`requests.production.judit.io` only as a compatibility alias observed in earlier successful runs.
 Use exactly one host per paid run; do not probe both with POST requests.
 
 A successful run must return `request_created` and stores only the sanitized request-id hash and
 timing metadata in the acceptance capture.
+
+A production acquisition should prefer webhook completion over long-lived polling. When
+`JUDIT_CALLBACK_URL` is configured, Rpy includes it in the Judit request payload. The value must be
+an absolute HTTPS URL without URL credentials, query parameters or fragments. The webhook token may
+remain in the path because the existing Rpy receiver is `/webhooks/judit/{token}`; never print or
+persist the configured callback URL in acceptance logs.
+
+For environments without a public callback endpoint, do not repeatedly create paid requests just to
+extend polling. GitHub Actions `mode=judit-observe` performs GET-only observation of an existing
+request using `PROVIDER_ACCEPTANCE_JUDIT_REQUEST_ID` from repository secrets. This mode performs
+zero provider POSTs and records only the SHA-256 of the request identifier plus sanitized status/count
+metadata.
 
 ### Controlled DataJud-only smoke
 
@@ -276,7 +288,7 @@ Acceptance must prove:
 6. provider errors are sanitized and do not expose response bodies or credentials;
 7. observed request volume/cost is within the pre-approved acceptance budget.
 
-The current Judit documentation index states that API calls use `api-key`, that asynchronous requests use `requests.production.judit.io`, tracking uses `tracking.production.judit.io`, and lawsuit/attachment access is under `lawsuits.production.judit.io`.
+The current Judit documentation index states that API calls use `api-key`, that asynchronous requests use `requests.prod.judit.io`, tracking uses `tracking.production.judit.io`, and lawsuit/attachment access is under `lawsuits.production.judit.io`.
 
 ### Attachment activation hold
 

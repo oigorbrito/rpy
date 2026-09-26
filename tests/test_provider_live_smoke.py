@@ -534,3 +534,105 @@ def test_main_cnj_preflight_never_calls_provider(
     assert exit_code == 0
     assert report["status"] == "ok"
     assert report["network_calls_performed"] is False
+
+
+
+def test_observe_existing_judit_request_never_creates_provider_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created = False
+    statuses = []
+    responses = []
+
+    async def forbidden_create(_code: str):
+        nonlocal created
+        created = True
+        raise AssertionError("observe mode must not create a Judit request")
+
+    async def fake_status(request_id: str):
+        statuses.append(request_id)
+        return SimpleNamespace(status="completed")
+
+    async def fake_responses(request_id: str):
+        responses.append(request_id)
+        return SimpleNamespace(
+            request_status="completed",
+            response_count=1,
+            lawsuit_response_count=1,
+            application_info_count=0,
+            application_error_count=0,
+            application_error_code=None,
+            application_error_message=None,
+            other_response_count=0,
+            direct_payload_count=0,
+        )
+
+    monkeypatch.setenv("JUDIT_API_KEY", "test-key")
+    monkeypatch.setenv("PROVIDER_ACCEPTANCE_AUTHORIZED", "true")
+    monkeypatch.setattr(smoke, "create_lawsuit_request", forbidden_create)
+    monkeypatch.setattr(smoke, "get_lawsuit_request_status", fake_status)
+    monkeypatch.setattr(smoke, "get_lawsuit_responses", fake_responses)
+
+    report = asyncio.run(
+        smoke._observe_judit_request("provider-request-existing", post_calls=0)
+    )
+
+    assert report["status"] == "observed_completed"
+    assert report["post_calls"] == 0
+    assert report["get_calls"] == 2
+    assert "request_id" not in report
+    assert len(report["request_id_sha256"]) == 64
+    assert statuses == ["provider-request-existing"]
+    assert responses == ["provider-request-existing"]
+    assert created is False
+
+
+def test_observe_existing_judit_request_requires_explicit_authorization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("JUDIT_API_KEY", "test-key")
+    monkeypatch.setenv("PROVIDER_ACCEPTANCE_AUTHORIZED", "false")
+
+    report = asyncio.run(
+        smoke._observe_judit_request("provider-request-existing", post_calls=0)
+    )
+
+    assert report["status"] == "skipped_missing_authorization"
+    assert report["network_calls_performed"] is False
+
+
+def test_main_judit_observe_does_not_require_cnj(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    async def fake_observe(request_id: str, *, post_calls: int):
+        assert request_id == "existing-request"
+        assert post_calls == 0
+        return {
+            "provider": "judit",
+            "executed": True,
+            "network_calls_performed": True,
+            "status": "observed_completed",
+            "post_calls": 0,
+        }
+
+    monkeypatch.setattr(smoke, "_observe_judit_request", fake_observe)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "provider_live_smoke.py",
+            "--judit-observe",
+            "--request-id",
+            "existing-request",
+            "--cnj",
+            "",
+        ],
+    )
+
+    exit_code = smoke.main()
+    report = __import__("json").loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert report["status"] == "observed_completed"
+    assert report["post_calls"] == 0

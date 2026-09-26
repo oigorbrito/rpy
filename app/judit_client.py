@@ -13,8 +13,8 @@ from typing import Any
 
 from app.json_utils import loads_strict_json
 
-JUDIT_REQUESTS_BASE_URL = "https://requests.production.judit.io"
-JUDIT_REQUESTS_COMPAT_BASE_URL = "https://requests.prod.judit.io"
+JUDIT_REQUESTS_BASE_URL = "https://requests.prod.judit.io"
+JUDIT_REQUESTS_COMPAT_BASE_URL = "https://requests.production.judit.io"
 JUDIT_REQUESTS_URL = f"{JUDIT_REQUESTS_BASE_URL}/requests/"
 JUDIT_TRACKING_URL = "https://tracking.production.judit.io/tracking"
 JUDIT_LAWSUITS_URL = "https://lawsuits.production.judit.io/lawsuits"
@@ -136,6 +136,20 @@ def _requests_url(path: str = "") -> str:
     base = _requests_base_url()
     suffix = path.lstrip("/")
     return f"{base}/{suffix}" if suffix else base
+
+
+def _callback_url() -> str | None:
+    value = os.environ.get("JUDIT_CALLBACK_URL", "").strip()
+    if not value:
+        return None
+    parsed = urllib.parse.urlsplit(value)
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise RuntimeError("JUDIT_CALLBACK_URL must be an absolute HTTPS URL")
+    if parsed.username is not None or parsed.password is not None:
+        raise RuntimeError("JUDIT_CALLBACK_URL must not contain URL credentials")
+    if parsed.query or parsed.fragment:
+        raise RuntimeError("JUDIT_CALLBACK_URL must not contain query parameters or fragments")
+    return value
 
 
 _SAFE_PROVIDER_CODE_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,80}$")
@@ -348,16 +362,21 @@ async def check_judit_connectivity() -> dict[str, Any]:
 
 
 def _create_request_sync(code: str) -> JuditRequestResult:
+    payload: dict[str, Any] = {
+        "search": {
+            "search_type": "lawsuit_cnj",
+            "search_key": code,
+        },
+        "with_attachments": judit_attachments_enabled(),
+    }
+    callback_url = _callback_url()
+    if callback_url is not None:
+        payload["callback_url"] = callback_url
+
     body = _provider_request(
         _requests_url("requests/"),
         method="POST",
-        payload={
-            "search": {
-                "search_type": "lawsuit_cnj",
-                "search_key": code,
-            },
-            "with_attachments": judit_attachments_enabled(),
-        },
+        payload=payload,
         accepted_statuses={201},
     )
     request_id = body.get("request_id") if body else None
