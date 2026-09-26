@@ -236,7 +236,11 @@ async def _smoke_judit(code: str) -> dict[str, Any]:
     return report
 
 
-async def _smoke_judit_roundtrip(code: str) -> dict[str, Any]:
+async def _observe_judit_request(
+    request_id: str,
+    *,
+    post_calls: int,
+) -> dict[str, Any]:
     report = _base_report("judit")
     if not os.getenv("JUDIT_API_KEY", "").strip():
         report["status"] = "skipped_missing_credentials"
@@ -244,23 +248,24 @@ async def _smoke_judit_roundtrip(code: str) -> dict[str, Any]:
     if not _env_bool("PROVIDER_ACCEPTANCE_AUTHORIZED", False):
         report["status"] = "skipped_missing_authorization"
         return report
-    if judit_attachments_enabled():
-        raise RuntimeError("Judit round-trip smoke requires JUDIT_ATTACHMENTS_ENABLED=false")
+    normalized_request_id = str(request_id or "").strip()
+    if not normalized_request_id:
+        report["status"] = "skipped_missing_request_id"
+        return report
 
     started = perf_counter()
-    created = await create_lawsuit_request(code)
-    request_id_hash = _hash_identifier(created.request_id)
-    poll_interval = 2.0
-    max_attempts = 60
+    request_id_hash = _hash_identifier(normalized_request_id)
+    poll_interval = 3.0
+    max_attempts = 40
     final_status = "unknown"
     response_status = None
     attempts = 0
     responses = None
 
     for attempts in range(1, max_attempts + 1):
-        status_result = await get_lawsuit_request_status(created.request_id)
+        status_result = await get_lawsuit_request_status(normalized_request_id)
         final_status = status_result.status
-        responses = await get_lawsuit_responses(created.request_id)
+        responses = await get_lawsuit_responses(normalized_request_id)
         response_status = responses.request_status
         terminal_status = response_status or final_status
         if terminal_status == "completed":
@@ -270,7 +275,7 @@ async def _smoke_judit_roundtrip(code: str) -> dict[str, Any]:
         await asyncio.sleep(poll_interval)
 
     if responses is None:
-        responses = await get_lawsuit_responses(created.request_id)
+        responses = await get_lawsuit_responses(normalized_request_id)
 
     elapsed_ms = (perf_counter() - started) * 1000
     effective_status = response_status or final_status
@@ -278,17 +283,25 @@ async def _smoke_judit_roundtrip(code: str) -> dict[str, Any]:
         responses.lawsuit_response_count > 0
         or responses.direct_payload_count > 0
     )
-    success = (
+    if (
         effective_status == "completed"
         and responses.response_count > 0
         and has_process_payload
         and responses.application_error_count == 0
-    )
+    ):
+        status = "observed_completed"
+    elif responses.application_error_count > 0:
+        status = "observed_application_error"
+    elif effective_status == "completed":
+        status = "observed_completed_without_process"
+    else:
+        status = "observed_pending"
+
     report.update(
         {
             "executed": True,
             "network_calls_performed": True,
-            "status": "roundtrip_completed" if success else "roundtrip_incomplete",
+            "status": status,
             "latency_ms": round(elapsed_ms, 3),
             "request_id_sha256": request_id_hash,
             "request_status": final_status,
@@ -303,9 +316,31 @@ async def _smoke_judit_roundtrip(code: str) -> dict[str, Any]:
             "application_error_message": responses.application_error_message,
             "other_response_count": responses.other_response_count,
             "direct_payload_count": responses.direct_payload_count,
-            "post_calls": 1,
+            "post_calls": post_calls,
             "get_calls": attempts * 2,
         }
+    )
+    return report
+
+
+async def _smoke_judit_roundtrip(code: str) -> dict[str, Any]:
+    if judit_attachments_enabled():
+        raise RuntimeError("Judit round-trip smoke requires JUDIT_ATTACHMENTS_ENABLED=false")
+    if not os.getenv("JUDIT_API_KEY", "").strip():
+        report = _base_report("judit")
+        report["status"] = "skipped_missing_credentials"
+        return report
+    if not _env_bool("PROVIDER_ACCEPTANCE_AUTHORIZED", False):
+        report = _base_report("judit")
+        report["status"] = "skipped_missing_authorization"
+        return report
+
+    created = await create_lawsuit_request(code)
+    report = await _observe_judit_request(created.request_id, post_calls=1)
+    report["status"] = (
+        "roundtrip_completed"
+        if report["status"] == "observed_completed"
+        else "roundtrip_incomplete"
     )
     return report
 
@@ -420,6 +455,16 @@ def main() -> int:
         help="Create one Judit request, poll status by GET, and fetch sanitized response metadata",
     )
     parser.add_argument(
+        "--judit-observe",
+        action="store_true",
+        help="Observe an existing Judit request by GET only; never creates a provider request",
+    )
+    parser.add_argument(
+        "--request-id",
+        default=os.getenv("PROVIDER_ACCEPTANCE_JUDIT_REQUEST_ID", ""),
+        help="Existing Judit request id for --judit-observe; prefer environment injection",
+    )
+    parser.add_argument(
         "--preflight-cnj",
         action="store_true",
         help="Validate CNJ format/check digits locally and exit without network calls",
@@ -452,6 +497,16 @@ def main() -> int:
         report = preflight_cnj(args.cnj)
         print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
         return 0 if report["status"] == "ok" else 1
+
+    if args.judit_observe:
+        try:
+            report = asyncio.run(
+                _observe_judit_request(args.request_id, post_calls=0)
+            )
+        except Exception as exc:
+            report = _error_report("judit", exc)
+        print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0 if report["status"] == "observed_completed" else 1
 
     if args.judit_roundtrip:
         if not str(args.cnj).strip():
