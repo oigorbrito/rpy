@@ -408,6 +408,68 @@ def test_delete_tracking_rejects_empty_or_non_string_identifier(
         judit_client._delete_tracking_sync(tracking_id)
 
 
+def test_create_request_includes_explicit_https_callback_when_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = {}
+    monkeypatch.setenv("JUDIT_API_KEY", "callback-key")
+    monkeypatch.setenv(
+        "JUDIT_CALLBACK_URL",
+        "https://staging.example.test/webhooks/judit/token-value",
+    )
+    monkeypatch.setattr(
+        judit_client.urllib.request,
+        "urlopen",
+        lambda request, timeout: captured.update(request=request, timeout=timeout)
+        or _Response(b'{"request_id":"req-callback"}'),
+    )
+
+    result = judit_client._create_request_sync("0000000-00.0000.0.00.0001")
+
+    assert result.request_id == "req-callback"
+    assert json.loads(captured["request"].data)["callback_url"] == (
+        "https://staging.example.test/webhooks/judit/token-value"
+    )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "http://staging.example.test/webhooks/judit/token",
+        "https://user:pass@staging.example.test/webhooks/judit/token",
+        "https://staging.example.test/webhooks/judit/token?secret=query",
+        "https://staging.example.test/webhooks/judit/token#fragment",
+        "/webhooks/judit/token",
+    ],
+)
+def test_callback_url_rejects_unsafe_or_non_public_shape(
+    monkeypatch: pytest.MonkeyPatch,
+    value: str,
+) -> None:
+    monkeypatch.setenv("JUDIT_API_KEY", "callback-key")
+    monkeypatch.setenv("JUDIT_CALLBACK_URL", value)
+    with pytest.raises(RuntimeError, match="JUDIT_CALLBACK_URL"):
+        judit_client._create_request_sync("0000000-00.0000.0.00.0001")
+
+
+def test_create_request_omits_callback_when_not_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = {}
+    monkeypatch.setenv("JUDIT_API_KEY", "callback-key")
+    monkeypatch.delenv("JUDIT_CALLBACK_URL", raising=False)
+    monkeypatch.setattr(
+        judit_client.urllib.request,
+        "urlopen",
+        lambda request, timeout: captured.update(request=request, timeout=timeout)
+        or _Response(b'{"request_id":"req-no-callback"}'),
+    )
+
+    judit_client._create_request_sync("0000000-00.0000.0.00.0001")
+
+    assert "callback_url" not in json.loads(captured["request"].data)
+
+
 def test_connectivity_check_uses_non_creating_get(monkeypatch: pytest.MonkeyPatch) -> None:
     captured = {}
     monkeypatch.setenv("JUDIT_API_KEY", "diagnostic-key")
@@ -442,7 +504,7 @@ def test_requests_host_can_use_known_compat_alias(monkeypatch: pytest.MonkeyPatc
     judit_client._check_connectivity_sync()
 
     assert captured["request"].full_url == (
-        "https://requests.prod.judit.io/requests?page=1&page_size=1"
+        "https://requests.production.judit.io/requests?page=1&page_size=1"
     )
 
 
