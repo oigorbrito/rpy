@@ -43,6 +43,23 @@ activation posture rather than provider availability:
 A green readiness result is **not** live-provider acceptance. It only proves that the repository is
 safe to hand off for later secret provisioning and controlled execution.
 
+### CNJ preflight (zero network)
+
+Before any provider diagnostic or paid request, validate the exact `PROVIDER_ACCEPTANCE_CNJ`
+locally:
+
+```bash
+python scripts/provider_live_smoke.py --preflight-cnj
+```
+
+GitHub Actions exposes the same check as `mode=preflight`. It performs no provider network calls,
+does not require provider credentials, and never prints the raw CNJ. The report exposes only:
+format validity, CNJ check-digit validity, digit count, input form, justice code and tribunal code.
+
+A result other than `status=ok` blocks every provider smoke for that CNJ until the secret is
+corrected. This preflight exists specifically to prevent repeated host/payload experiments when the
+test identifier itself is invalid.
+
 ### Judit non-creating credential diagnostic
 
 Before any paid `POST /requests`, validate the provisioned Judit key with the provider-documented

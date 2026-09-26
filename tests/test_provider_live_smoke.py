@@ -461,3 +461,76 @@ def test_both_blocks_paid_calls_when_judit_diagnostic_fails(
     assert report["network_calls_performed"] is False
     assert judit_called is False
     assert datajud_called is False
+
+
+def test_cnj_preflight_accepts_valid_canonical_without_network() -> None:
+    report = smoke.preflight_cnj("0000000-30.2026.8.21.0001")
+
+    assert report == {
+        "provider": "local",
+        "executed": True,
+        "network_calls_performed": False,
+        "status": "ok",
+        "format_valid": True,
+        "checksum_valid": True,
+        "digit_count": 20,
+        "input_form": "canonical",
+        "justice_code": "8",
+        "tribunal_code": "21",
+    }
+
+
+def test_cnj_preflight_accepts_valid_digits_without_network() -> None:
+    report = smoke.preflight_cnj("00000003020268210001")
+
+    assert report["status"] == "ok"
+    assert report["input_form"] == "digits"
+    assert report["format_valid"] is True
+    assert report["checksum_valid"] is True
+    assert report["network_calls_performed"] is False
+
+
+def test_cnj_preflight_rejects_bad_checksum_without_network() -> None:
+    report = smoke.preflight_cnj("0000000-00.2026.8.21.0001")
+
+    assert report["status"] == "invalid_checksum"
+    assert report["format_valid"] is True
+    assert report["checksum_valid"] is False
+    assert report["network_calls_performed"] is False
+
+
+def test_cnj_preflight_rejects_bad_format_without_echoing_value() -> None:
+    raw = "not-a-cnj-123"
+    report = smoke.preflight_cnj(raw)
+
+    assert report["status"] == "invalid_cnj"
+    assert report["format_valid"] is False
+    assert report["network_calls_performed"] is False
+    assert raw not in __import__("json").dumps(report)
+
+
+def test_main_cnj_preflight_never_calls_provider(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    async def forbidden(*_args, **_kwargs):
+        raise AssertionError("provider call must not occur during preflight")
+
+    monkeypatch.setattr(smoke, "run_smoke", forbidden)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "provider_live_smoke.py",
+            "--preflight-cnj",
+            "--cnj",
+            "0000000-30.2026.8.21.0001",
+        ],
+    )
+
+    exit_code = smoke.main()
+    report = __import__("json").loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert report["status"] == "ok"
+    assert report["network_calls_performed"] is False
