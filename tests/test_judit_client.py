@@ -61,7 +61,6 @@ def test_create_request_uses_cnj_contract_without_attachments(monkeypatch: pytes
         "search": {
             "search_type": "lawsuit_cnj",
             "search_key": "0000000-00.0000.0.00.0001",
-            "response_type": "lawsuit",
         },
         "with_attachments": False,
     }

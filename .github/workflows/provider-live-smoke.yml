@@ -18,10 +18,10 @@ on:
         description: Judit requests host for the controlled Judit-only call
         required: true
         type: choice
-        default: prod
+        default: production
         options:
-          - prod
           - production
+          - prod
       replay_run_id:
         description: Prior provider-live-smoke run ID containing provider-acceptance-capture
         required: false
