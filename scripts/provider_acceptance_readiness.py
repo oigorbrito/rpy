@@ -94,7 +94,9 @@ def readiness_report(
     provider_smoke_workflow = provider_smoke_workflow_path.read_text(encoding="utf-8")
     for marker in (
         "workflow_dispatch:",
-        "PROVIDER_ACCEPTANCE_CNJ: ${{ secrets.PROVIDER_ACCEPTANCE_CNJ }}",
+        "public_cnj:",
+        "PROVIDER_ACCEPTANCE_CNJ: ${{ github.event.inputs.public_cnj || secrets.PROVIDER_ACCEPTANCE_CNJ }}",
+        "python scripts/provider_live_smoke.py --preflight-cnj",
         "PROVIDER_ACCEPTANCE_AUTHORIZED: ${{ secrets.PROVIDER_ACCEPTANCE_AUTHORIZED }}",
         'JUDIT_ATTACHMENTS_ENABLED: "false"',
         "armed but not executed",

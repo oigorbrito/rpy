@@ -56,6 +56,13 @@ GitHub Actions exposes the same check as `mode=preflight`. It performs no provid
 does not require provider credentials, and never prints the raw CNJ. The report exposes only:
 format validity, CNJ check-digit validity, digit count, input form, justice code and tribunal code.
 
+For controlled tests with an explicitly public/non-sensitive process, workflow dispatch also accepts
+the optional `public_cnj` input. When present, it overrides the repository secret
+`PROVIDER_ACCEPTANCE_CNJ` for that run. GitHub workflow inputs are visible in Actions metadata, so
+never place a private, secret, sealed, tenant-confidential or otherwise sensitive process number
+there. All provider-bearing modes (`judit`, `datajud`, `live`, and `replay`) now execute the
+same zero-network preflight first and are blocked automatically if the selected CNJ is invalid.
+
 A result other than `status=ok` blocks every provider smoke for that CNJ until the secret is
 corrected. This preflight exists specifically to prevent repeated host/payload experiments when the
 test identifier itself is invalid.
