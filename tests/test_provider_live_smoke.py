@@ -415,7 +415,29 @@ def test_judit_diagnostic_reports_safe_http_error_without_paid_request(
     assert report["status"] == "error"
     assert report["error_code"] == "http_403"
     assert report["http_status"] == 403
-    assert report["network_call_type"] == "non_creating_connectivity_check"
+    assert report["network_call_type"] == "non_creating_reachability_probe"
+
+
+def test_judit_diagnostic_treats_documented_bad_request_as_reachable_unverified(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fail():
+        raise smoke.JuditRequestError(
+            "safe message",
+            error_code="http_400",
+            http_status=400,
+            retry_safe=True,
+            provider_error_code="HttpBadRequestError",
+        )
+
+    monkeypatch.setenv("JUDIT_API_KEY", "test-key")
+    monkeypatch.setattr(smoke, "check_judit_connectivity", fail)
+
+    report = asyncio.run(smoke.diagnose_judit())
+
+    assert report["status"] == "reachable_unverified"
+    assert report["auth_validated"] is False
+    assert report["network_calls_performed"] is True
 
 
 def test_both_blocks_paid_calls_when_judit_diagnostic_fails(
