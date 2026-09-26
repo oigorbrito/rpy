@@ -337,7 +337,6 @@ def _create_request_sync(code: str) -> JuditRequestResult:
             "search": {
                 "search_type": "lawsuit_cnj",
                 "search_key": code,
-                "response_type": "lawsuit",
             },
             "with_attachments": judit_attachments_enabled(),
         },
