@@ -74,9 +74,12 @@ paid Judit acceptance call can be run independently of DataJud with GitHub Actio
 The workflow requires only the authorized CNJ, `PROVIDER_ACCEPTANCE_AUTHORIZED=true`,
 `JUDIT_API_KEY`, and keeps `JUDIT_ATTACHMENTS_ENABLED=false`.
 
-The request contract is pinned to a lawsuit CNJ search with `response_type=lawsuit` inside
-`search`. The workflow also makes the requests host an explicit choice between the two allowlisted
-Judit hosts. Use exactly one host per paid run; do not probe both with POST requests.
+The request contract is pinned to Judit's current official CNJ body: `search.search_type=lawsuit_cnj`,
+`search.search_key=<CNJ>`, and `with_attachments=false`. The official request example does not
+require clients to send `response_type` for this CNJ request; Judit returns `response_type=lawsuit`
+in the created request/response objects. The workflow makes the requests host an explicit choice
+between the canonical `requests.production.judit.io` host and the observed compatibility alias.
+Use exactly one host per paid run; do not probe both with POST requests.
 
 A successful run must return `request_created` and stores only the sanitized request-id hash and
 timing metadata in the acceptance capture.
