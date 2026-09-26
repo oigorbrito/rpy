@@ -9,6 +9,7 @@ on:
         type: choice
         default: diagnose
         options:
+          - preflight
           - diagnose
           - judit
           - datajud
@@ -53,6 +54,17 @@ jobs:
           python -m pip install pip==26.2.1
           python -m pip install --constraint requirements/constraints.txt -e .
           python -m pip check
+
+      - name: Validate provider CNJ locally with zero network
+        if: ${{ github.event.inputs.mode == 'preflight' }}
+        env:
+          PROVIDER_ACCEPTANCE_CNJ: ${{ secrets.PROVIDER_ACCEPTANCE_CNJ }}
+        run: |
+          if [ -z "$PROVIDER_ACCEPTANCE_CNJ" ]; then
+            echo "::error::PROVIDER_ACCEPTANCE_CNJ is required for CNJ preflight."
+            exit 1
+          fi
+          python scripts/provider_live_smoke.py --preflight-cnj
 
       - name: Diagnose Judit credentials without creating a paid request
         if: ${{ github.event.inputs.mode == 'diagnose' }}
