@@ -116,6 +116,8 @@ def test_responses_query_is_request_scoped_and_returns_only_counts(
     assert result.application_error_count == 0
     assert result.other_response_count == 1
     assert result.direct_payload_count == 0
+    assert result.application_error_code is None
+    assert result.application_error_message is None
     assert not hasattr(result, "response_data")
 
 
@@ -232,3 +234,64 @@ def test_responses_uses_item_request_status_when_top_level_missing(
 
     result = judit_client._get_responses_sync("req-1")
     assert result.request_status == "completed"
+
+
+def test_responses_extracts_machine_safe_application_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("JUDIT_API_KEY", "roundtrip-key")
+    body = {
+        "request_status": "completed",
+        "page": 1,
+        "page_data": [
+            {
+                "response_type": "application_error",
+                "response_data": {
+                    "code": 2,
+                    "message": "LAWSUIT_NOT_FOUND",
+                    "details": "free form text must not escape",
+                },
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        judit_client.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: _Response(json.dumps(body).encode()),
+    )
+
+    result = judit_client._get_responses_sync("req-1")
+
+    assert result.request_status == "completed"
+    assert result.application_error_count == 1
+    assert result.application_error_code == 2
+    assert result.application_error_message == "LAWSUIT_NOT_FOUND"
+
+
+def test_responses_drops_unsafe_application_error_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("JUDIT_API_KEY", "roundtrip-key")
+    body = {
+        "request_status": "completed",
+        "page": 1,
+        "page_data": [
+            {
+                "response_type": "application_error",
+                "response_data": {
+                    "code": 9,
+                    "message": "free form potentially sensitive provider message",
+                },
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        judit_client.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: _Response(json.dumps(body).encode()),
+    )
+
+    result = judit_client._get_responses_sync("req-1")
+
+    assert result.application_error_code == 9
+    assert result.application_error_message is None
