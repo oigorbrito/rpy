@@ -109,8 +109,12 @@ def test_responses_query_is_request_scoped_and_returns_only_counts(
     parsed = urllib.parse.urlsplit(request.full_url)
     assert parsed.path == "/responses"
     assert urllib.parse.parse_qs(parsed.query) == {"request_id": ["req/id ?#"]}
+    assert result.request_status is None
     assert result.response_count == 2
     assert result.lawsuit_response_count == 1
+    assert result.application_info_count == 0
+    assert result.application_error_count == 0
+    assert result.other_response_count == 1
     assert result.direct_payload_count == 0
     assert not hasattr(result, "response_data")
 
@@ -159,6 +163,72 @@ def test_responses_accept_direct_process_payload_shape(
 
     result = judit_client._get_responses_sync("req-1")
 
+    assert result.request_status is None
     assert result.response_count == 1
     assert result.lawsuit_response_count == 0
+    assert result.application_info_count == 0
+    assert result.application_error_count == 0
+    assert result.other_response_count == 0
     assert result.direct_payload_count == 1
+
+
+def test_responses_extracts_safe_terminal_status_and_signal_types(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("JUDIT_API_KEY", "roundtrip-key")
+    body = {
+        "request_status": "completed",
+        "page": 1,
+        "page_data": [
+            {
+                "request_id": "req-1",
+                "response_id": "resp-1",
+                "response_type": "lawsuit",
+                "response_data": {"code": "sensitive-process-data"},
+            },
+            {
+                "request_id": "req-1",
+                "response_id": "resp-2",
+                "response_type": "application_info",
+                "response_data": {"code": 600, "message": "REQUEST_COMPLETED"},
+            },
+        ],
+    }
+    monkeypatch.setattr(
+        judit_client.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: _Response(json.dumps(body).encode()),
+    )
+
+    result = judit_client._get_responses_sync("req-1")
+
+    assert result.request_status == "completed"
+    assert result.response_count == 2
+    assert result.lawsuit_response_count == 1
+    assert result.application_info_count == 1
+    assert result.application_error_count == 0
+    assert result.other_response_count == 0
+
+
+def test_responses_uses_item_request_status_when_top_level_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("JUDIT_API_KEY", "roundtrip-key")
+    body = {
+        "page": 1,
+        "page_data": [
+            {
+                "request_status": "completed",
+                "response_type": "lawsuit",
+                "response_data": {"code": "sensitive-process-data"},
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        judit_client.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: _Response(json.dumps(body).encode()),
+    )
+
+    result = judit_client._get_responses_sync("req-1")
+    assert result.request_status == "completed"

@@ -61,8 +61,12 @@ class JuditRequestStatusResult:
 
 @dataclass(frozen=True, slots=True)
 class JuditResponsesResult:
+    request_status: str | None
     response_count: int
     lawsuit_response_count: int
+    application_info_count: int
+    application_error_count: int
+    other_response_count: int
     direct_payload_count: int
 
 
@@ -402,19 +406,45 @@ def _get_responses_sync(request_id: str) -> JuditResponsesResult:
             "Judit responses payload missing page_data",
             error_code="invalid_responses_payload",
         )
+    request_status_raw = body.get("request_status") if body else None
+    request_status = None
+    if isinstance(request_status_raw, str):
+        candidate = request_status_raw.strip().lower()
+        if _SAFE_PROVIDER_CODE_RE.fullmatch(candidate):
+            request_status = candidate
+
     lawsuit_count = 0
+    application_info_count = 0
+    application_error_count = 0
+    other_response_count = 0
     direct_payload_count = 0
     for item in page_data:
         if not isinstance(item, dict):
             continue
+        if request_status is None:
+            item_status = item.get("request_status")
+            if isinstance(item_status, str):
+                candidate = item_status.strip().lower()
+                if _SAFE_PROVIDER_CODE_RE.fullmatch(candidate):
+                    request_status = candidate
         response_type = str(item.get("response_type") or "").strip().lower()
         if response_type == "lawsuit":
             lawsuit_count += 1
-        elif "response_type" not in item:
+        elif response_type == "application_info":
+            application_info_count += 1
+        elif response_type == "application_error":
+            application_error_count += 1
+        elif response_type:
+            other_response_count += 1
+        else:
             direct_payload_count += 1
     return JuditResponsesResult(
+        request_status=request_status,
         response_count=len(page_data),
         lawsuit_response_count=lawsuit_count,
+        application_info_count=application_info_count,
+        application_error_count=application_error_count,
+        other_response_count=other_response_count,
         direct_payload_count=direct_payload_count,
     )
 
