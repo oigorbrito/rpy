@@ -7,6 +7,7 @@ import unicodedata
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
+from functools import lru_cache
 from typing import Any, Protocol, Sequence
 from zoneinfo import ZoneInfo
 
@@ -229,12 +230,21 @@ def _known_party_names(context: dict[str, Any]) -> frozenset[str]:
     return frozenset(values)
 
 
+@lru_cache(maxsize=1024)
+def _party_name_regex(name: str) -> re.Pattern[str]:
+    return re.compile(rf"(?<!\w){re.escape(name)}(?!\w)")
+
+
 def _party_names_in_text(text: str, known: frozenset[str]) -> frozenset[str]:
+    if not known or not text:
+        return frozenset()
     normalized = _normalized_text(text)
+    if not normalized:
+        return frozenset()
     return frozenset(
         name
         for name in known
-        if re.search(rf"(?<!\w){re.escape(name)}(?!\w)", normalized)
+        if _party_name_regex(name).search(normalized)
     )
 
 
