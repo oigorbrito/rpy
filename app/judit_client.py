@@ -348,7 +348,11 @@ def _download_attachment_sync(
 
 
 def _check_connectivity_sync() -> dict[str, Any]:
-    """Validate the configured API key without creating a paid lawsuit request."""
+    """Probe Judit reachability without creating a paid lawsuit request.
+
+    This collection-style GET is not a documented auth-validation endpoint.
+    Callers must not treat HTTP 400 as proof that the API key is invalid.
+    """
     body = _provider_request(
         f"{_requests_url('requests')}?page=1&page_size=1",
         method="GET",
