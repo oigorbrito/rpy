@@ -68,6 +68,8 @@ class JuditResponsesResult:
     application_error_count: int
     other_response_count: int
     direct_payload_count: int
+    application_error_code: int | None
+    application_error_message: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -418,6 +420,8 @@ def _get_responses_sync(request_id: str) -> JuditResponsesResult:
     application_error_count = 0
     other_response_count = 0
     direct_payload_count = 0
+    application_error_code = None
+    application_error_message = None
     for item in page_data:
         if not isinstance(item, dict):
             continue
@@ -434,6 +438,16 @@ def _get_responses_sync(request_id: str) -> JuditResponsesResult:
             application_info_count += 1
         elif response_type == "application_error":
             application_error_count += 1
+            response_data = item.get("response_data")
+            if isinstance(response_data, dict):
+                code = response_data.get("code")
+                if isinstance(code, int) and not isinstance(code, bool):
+                    application_error_code = code
+                message = response_data.get("message")
+                if isinstance(message, str):
+                    normalized_message = message.strip()
+                    if _SAFE_PROVIDER_CODE_RE.fullmatch(normalized_message):
+                        application_error_message = normalized_message
         elif response_type:
             other_response_count += 1
         else:
@@ -446,6 +460,8 @@ def _get_responses_sync(request_id: str) -> JuditResponsesResult:
         application_error_count=application_error_count,
         other_response_count=other_response_count,
         direct_payload_count=direct_payload_count,
+        application_error_code=application_error_code,
+        application_error_message=application_error_message,
     )
 
 

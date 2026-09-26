@@ -299,6 +299,8 @@ async def _smoke_judit_roundtrip(code: str) -> dict[str, Any]:
             "lawsuit_response_count": responses.lawsuit_response_count,
             "application_info_count": responses.application_info_count,
             "application_error_count": responses.application_error_count,
+            "application_error_code": responses.application_error_code,
+            "application_error_message": responses.application_error_message,
             "other_response_count": responses.other_response_count,
             "direct_payload_count": responses.direct_payload_count,
             "post_calls": 1,
