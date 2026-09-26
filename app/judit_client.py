@@ -334,7 +334,11 @@ def _create_request_sync(code: str) -> JuditRequestResult:
         _requests_url("requests/"),
         method="POST",
         payload={
-            "search": {"search_type": "lawsuit_cnj", "search_key": code},
+            "search": {
+                "search_type": "lawsuit_cnj",
+                "search_key": code,
+                "response_type": "lawsuit",
+            },
             "with_attachments": judit_attachments_enabled(),
         },
         accepted_statuses={201},

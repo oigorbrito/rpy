@@ -67,6 +67,20 @@ Operational interpretation follows Judit's published authentication guidance:
 Judit documents that every submitted process request is accounted/billed according to contract even
 when the result is served from cache, so diagnostic GETs should be used before repeating a paid POST.
 
+### Controlled Judit-only smoke
+
+After the non-creating diagnostic has isolated host/auth behavior, a single explicitly authorized
+paid Judit acceptance call can be run independently of DataJud with GitHub Actions `mode=judit`.
+The workflow requires only the authorized CNJ, `PROVIDER_ACCEPTANCE_AUTHORIZED=true`,
+`JUDIT_API_KEY`, and keeps `JUDIT_ATTACHMENTS_ENABLED=false`.
+
+The request contract is pinned to a lawsuit CNJ search with `response_type=lawsuit` inside
+`search`. The workflow also makes the requests host an explicit choice between the two allowlisted
+Judit hosts. Use exactly one host per paid run; do not probe both with POST requests.
+
+A successful run must return `request_created` and stores only the sanitized request-id hash and
+timing metadata in the acceptance capture.
+
 ### Controlled DataJud-only smoke
 
 While Judit acceptance is unresolved, DataJud can be validated independently without loading or
@@ -113,11 +127,11 @@ same rule. It reads the authorized CNJ and **both** provider credentials from Gi
 Judit attachments disabled, and exits with a notice rather than claiming acceptance when provisioning
 is incomplete.
 
-The official acceptance path is combined: one Judit lawsuit request and one DataJud lookup are issued
-in the same smoke execution after a joint preflight confirms both boundaries are authorized and
-provisioned. If either boundary is not ready, neither network call is made. Individual provider modes
-remain available only for local diagnosis. This smoke does not replace end-to-end webhook acceptance,
-attachment acceptance, mass indexing, or legal/governance approval.
+The combined path remains available when both providers are ready, but Judit and DataJud may also be
+accepted independently so one unresolved provider does not force an unnecessary call to the other.
+Each live mode remains bounded to one provider request path per execution and must use an explicitly
+authorized CNJ. This smoke does not replace end-to-end webhook acceptance, attachment acceptance,
+mass indexing, or legal/governance approval.
 
 ### Capture and replay
 
