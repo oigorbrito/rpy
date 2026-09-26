@@ -37,6 +37,53 @@ def _hash_identifier(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def _cnj_checksum_valid(normalized: str) -> bool:
+    digits = "".join(character for character in normalized if character.isdigit())
+    if len(digits) != 20:
+        return False
+    expected = int(digits[7:9])
+    base = digits[:7] + digits[9:] + "00"
+    calculated = 98 - (int(base) % 97)
+    return expected == calculated
+
+
+def preflight_cnj(value: str) -> dict[str, Any]:
+    raw = str(value or "").strip()
+    report: dict[str, Any] = {
+        "provider": "local",
+        "executed": True,
+        "network_calls_performed": False,
+        "status": "invalid_cnj",
+        "format_valid": False,
+        "checksum_valid": False,
+        "digit_count": sum(character.isdigit() for character in raw),
+        "input_form": "empty",
+        "justice_code": None,
+        "tribunal_code": None,
+    }
+    if not raw:
+        return report
+    report["input_form"] = "digits" if raw.isdigit() else "canonical_or_other"
+    try:
+        normalized = normalize_cnj(raw)
+    except ValueError:
+        return report
+
+    digits = "".join(character for character in normalized if character.isdigit())
+    report.update(
+        {
+            "format_valid": True,
+            "checksum_valid": _cnj_checksum_valid(normalized),
+            "digit_count": len(digits),
+            "input_form": "digits" if raw.isdigit() else "canonical",
+            "justice_code": digits[13],
+            "tribunal_code": digits[14:16],
+        }
+    )
+    report["status"] = "ok" if report["checksum_valid"] else "invalid_checksum"
+    return report
+
+
 def _base_report(provider: str) -> dict[str, Any]:
     return {
         "provider": provider,
@@ -292,6 +339,11 @@ def main() -> int:
         help="Validate Judit API-key connectivity with a non-creating GET and exit",
     )
     parser.add_argument(
+        "--preflight-cnj",
+        action="store_true",
+        help="Validate CNJ format/check digits locally and exit without network calls",
+    )
+    parser.add_argument(
         "--cnj",
         default=os.getenv("PROVIDER_ACCEPTANCE_CNJ", ""),
         help="Explicitly authorized CNJ; defaults to PROVIDER_ACCEPTANCE_CNJ",
@@ -312,6 +364,11 @@ def main() -> int:
 
     if args.diagnose_judit:
         report = asyncio.run(diagnose_judit())
+        print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0 if report["status"] == "ok" else 1
+
+    if args.preflight_cnj:
+        report = preflight_cnj(args.cnj)
         print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
         return 0 if report["status"] == "ok" else 1
 
