@@ -111,6 +111,7 @@ def test_responses_query_is_request_scoped_and_returns_only_counts(
     assert urllib.parse.parse_qs(parsed.query) == {"request_id": ["req/id ?#"]}
     assert result.response_count == 2
     assert result.lawsuit_response_count == 1
+    assert result.direct_payload_count == 0
     assert not hasattr(result, "response_data")
 
 
@@ -134,3 +135,30 @@ def test_roundtrip_reads_require_request_id(request_id) -> None:
         judit_client._get_request_status_sync(request_id)
     with pytest.raises(ValueError, match="request_id is required"):
         judit_client._get_responses_sync(request_id)
+
+
+def test_responses_accept_direct_process_payload_shape(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("JUDIT_API_KEY", "roundtrip-key")
+    body = {
+        "page": 1,
+        "page_data": [
+            {
+                "code": "0012014-10.2024.8.16.7000",
+                "court": "TJPR",
+                "steps": [],
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        judit_client.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: _Response(json.dumps(body).encode()),
+    )
+
+    result = judit_client._get_responses_sync("req-1")
+
+    assert result.response_count == 1
+    assert result.lawsuit_response_count == 0
+    assert result.direct_payload_count == 1
