@@ -63,6 +63,7 @@ class JuditRequestStatusResult:
 class JuditResponsesResult:
     response_count: int
     lawsuit_response_count: int
+    direct_payload_count: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -402,14 +403,19 @@ def _get_responses_sync(request_id: str) -> JuditResponsesResult:
             error_code="invalid_responses_payload",
         )
     lawsuit_count = 0
+    direct_payload_count = 0
     for item in page_data:
         if not isinstance(item, dict):
             continue
-        if str(item.get("response_type") or "").strip().lower() == "lawsuit":
+        response_type = str(item.get("response_type") or "").strip().lower()
+        if response_type == "lawsuit":
             lawsuit_count += 1
+        elif "response_type" not in item:
+            direct_payload_count += 1
     return JuditResponsesResult(
         response_count=len(page_data),
         lawsuit_response_count=lawsuit_count,
+        direct_payload_count=direct_payload_count,
     )
 
 
