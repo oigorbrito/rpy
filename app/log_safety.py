@@ -41,6 +41,9 @@ _STRUCTURED_SECRET_RE = re.compile(
     (?P=quote)
     """
 )
+_URI_QUERY_SECRET_RE = re.compile(
+    r"(?i)([?&](?:api[_-]?key|token|access[_-]?token|password|secret)=)([^&\s]+)"
+)
 # Redact application/provider API keys even when not configured in env or when
 # appearing without authorization headers or query parameter names.
 _API_KEY_TOKEN_RE = re.compile(
@@ -94,6 +97,9 @@ def sanitize_error_message(value: object, *, max_chars: int = MAX_ERROR_MESSAGE_
             f"{REDACTED}{match.group('quote')}"
         ),
         text,
+    )
+    text = _URI_QUERY_SECRET_RE.sub(
+        lambda match: f"{match.group(1)}{REDACTED}", text
     )
     text = _API_KEY_TOKEN_RE.sub(REDACTED, text)
 

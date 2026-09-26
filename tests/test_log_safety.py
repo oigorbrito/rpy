@@ -139,3 +139,22 @@ def test_sanitize_error_message_redacts_standalone_sk_token_families(
 
     assert token not in rendered  # nosec B101
     assert REDACTED in rendered  # nosec B101
+
+
+@pytest.mark.parametrize(
+    ("param_key", "param_val"),
+    [
+        ("api_key", "secret123key"),
+        ("api-key", "secret456key"),
+        ("token", "mytoken789"),
+        ("access_token", "access999token"),
+        ("secret", "topsecret000"),
+        ("password", "p@ssword123"),
+    ],
+)
+def test_sanitize_error_message_redacts_uri_query_params(param_key: str, param_val: str) -> None:
+    url = f"https://api.example.com/v1/resource?{param_key}={param_val}&param=normal"
+    rendered = sanitize_error_message(f"HTTP GET request failed for {url}")
+
+    assert param_val not in rendered
+    assert f"?{param_key}={REDACTED}&param=normal" in rendered
