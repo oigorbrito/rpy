@@ -75,3 +75,11 @@ def test_naive_source_datetime_is_treated_as_utc_before_sao_paulo_conversion() -
     step = fields["steps"][0]
     assert step["text"] == "Movimento com espaços"
     assert step["occurred_at"].isoformat() == "2026-06-15T12:00:00-03:00"
+
+
+def test_normalized_person_type_handles_unhashable_input_types() -> None:
+    from app.judit import _normalized_person_type
+
+    assert _normalized_person_type({"type": "ADVOGADO"}) == "TYPE_ADVOGADO"
+    assert _normalized_person_type(["ADVOGADO", "AUTOR"]) == "ADVOGADO_AUTOR"
+    assert _normalized_person_type(None) == ""

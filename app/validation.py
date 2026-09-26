@@ -97,8 +97,15 @@ def _normalize_digits(value: str) -> str:
     return "".join(character for character in value if character.isdigit())
 
 
+def _normalize_party_name(value: Any) -> str:
+    # Convert arbitrary inputs (including potential unhashable types) to str
+    # before delegating to the memoized string normalization helper.
+    rendered_str = str(value or "")
+    return _cached_normalize_party_name(rendered_str)
+
+
 @lru_cache(maxsize=2048)
-def _normalize_party_name(value: str) -> str:
+def _cached_normalize_party_name(value: str) -> str:
     # Memoize Unicode NFKD normalization and diacritic removal to prevent repeated CPU bottlenecks
     # on headings, party names, section titles, and meta-output markers during document validation.
     decomposed = unicodedata.normalize("NFKD", value)
