@@ -7,6 +7,7 @@ import unicodedata
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
+from functools import lru_cache
 from typing import Any, Protocol, Sequence
 from zoneinfo import ZoneInfo
 
