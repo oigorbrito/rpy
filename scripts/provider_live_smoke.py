@@ -180,12 +180,16 @@ async def diagnose_judit() -> dict[str, Any]:
         await check_judit_connectivity()
     except JuditRequestError as exc:
         elapsed_ms = (perf_counter() - started) * 1000
+        reachable_unverified = (
+            exc.http_status == 400
+            and exc.provider_error_code == "HttpBadRequestError"
+        )
         report.update(
             {
                 "executed": True,
                 "network_calls_performed": True,
-                "network_call_type": "non_creating_connectivity_check",
-                "status": "error",
+                "network_call_type": "non_creating_reachability_probe",
+                "status": "reachable_unverified" if reachable_unverified else "error",
                 "latency_ms": round(elapsed_ms, 3),
                 "error_class": type(exc).__name__,
                 "error_code": exc.error_code,
@@ -193,6 +197,7 @@ async def diagnose_judit() -> dict[str, Any]:
                 "retry_safe": exc.retry_safe,
                 "provider_error_code": exc.provider_error_code,
                 "provider_validation": exc.provider_validation,
+                "auth_validated": False,
             }
         )
         return report
@@ -202,8 +207,9 @@ async def diagnose_judit() -> dict[str, Any]:
         {
             "executed": True,
             "network_calls_performed": True,
-            "network_call_type": "non_creating_connectivity_check",
+            "network_call_type": "non_creating_reachability_probe",
             "status": "ok",
+            "auth_validated": True,
             "latency_ms": round(elapsed_ms, 3),
         }
     )
@@ -403,7 +409,7 @@ async def run_smoke(provider: str, code: str) -> dict[str, Any]:
             return report
 
         diagnostic = await diagnose_judit()
-        if diagnostic["status"] != "ok":
+        if diagnostic["status"] not in {"ok", "reachable_unverified"}:
             return {
                 "provider": "both",
                 "executed": False,
@@ -491,7 +497,7 @@ def main() -> int:
     if args.diagnose_judit:
         report = asyncio.run(diagnose_judit())
         print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
-        return 0 if report["status"] == "ok" else 1
+        return 0 if report["status"] in {"ok", "reachable_unverified"} else 1
 
     if args.preflight_cnj:
         report = preflight_cnj(args.cnj)
