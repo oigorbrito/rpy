@@ -55,6 +55,17 @@ class JuditTrackingResult:
 
 
 @dataclass(frozen=True, slots=True)
+class JuditRequestStatusResult:
+    status: str
+
+
+@dataclass(frozen=True, slots=True)
+class JuditResponsesResult:
+    response_count: int
+    lawsuit_response_count: int
+
+
+@dataclass(frozen=True, slots=True)
 class JuditAttachmentDownload:
     content_type: str
     data: bytes
@@ -351,6 +362,57 @@ def _create_request_sync(code: str) -> JuditRequestResult:
     return JuditRequestResult(request_id=request_id.strip())
 
 
+def _get_request_status_sync(request_id: str) -> JuditRequestStatusResult:
+    if not isinstance(request_id, str) or not request_id.strip():
+        raise ValueError("request_id is required")
+    identifier = urllib.parse.quote(request_id.strip(), safe="").replace(".", "%2E")
+    body = _provider_request(
+        _requests_url(f"requests/{identifier}"),
+        method="GET",
+        accepted_statuses={200},
+    )
+    status = body.get("status") if body else None
+    if not isinstance(status, str) or not status.strip():
+        raise JuditRequestError(
+            "Judit request status response missing status",
+            error_code="missing_request_status",
+        )
+    normalized_status = status.strip().lower()
+    if not _SAFE_PROVIDER_CODE_RE.fullmatch(normalized_status):
+        raise JuditRequestError(
+            "Judit request status response contained unsafe status",
+            error_code="invalid_request_status",
+        )
+    return JuditRequestStatusResult(status=normalized_status)
+
+
+def _get_responses_sync(request_id: str) -> JuditResponsesResult:
+    if not isinstance(request_id, str) or not request_id.strip():
+        raise ValueError("request_id is required")
+    query = urllib.parse.urlencode({"request_id": request_id.strip()})
+    body = _provider_request(
+        f"{_requests_url('responses')}?{query}",
+        method="GET",
+        accepted_statuses={200},
+    )
+    page_data = body.get("page_data") if body else None
+    if not isinstance(page_data, list):
+        raise JuditRequestError(
+            "Judit responses payload missing page_data",
+            error_code="invalid_responses_payload",
+        )
+    lawsuit_count = 0
+    for item in page_data:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("response_type") or "").strip().lower() == "lawsuit":
+            lawsuit_count += 1
+    return JuditResponsesResult(
+        response_count=len(page_data),
+        lawsuit_response_count=lawsuit_count,
+    )
+
+
 def _create_tracking_sync(code: str, recurrence_days: int) -> JuditTrackingResult:
     if recurrence_days <= 0:
         raise ValueError("tracking recurrence_days must be greater than zero")
@@ -390,6 +452,14 @@ def _delete_tracking_sync(tracking_id: str) -> None:
 
 async def create_lawsuit_request(code: str) -> JuditRequestResult:
     return await asyncio.to_thread(_create_request_sync, code)
+
+
+async def get_lawsuit_request_status(request_id: str) -> JuditRequestStatusResult:
+    return await asyncio.to_thread(_get_request_status_sync, request_id)
+
+
+async def get_lawsuit_responses(request_id: str) -> JuditResponsesResult:
+    return await asyncio.to_thread(_get_responses_sync, request_id)
 
 
 async def create_lawsuit_tracking(code: str, *, recurrence_days: int = 1) -> JuditTrackingResult:
