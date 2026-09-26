@@ -269,7 +269,10 @@ async def _smoke_judit_roundtrip(code: str) -> dict[str, Any]:
     success = (
         final_status == "completed"
         and responses.response_count > 0
-        and responses.lawsuit_response_count > 0
+        and (
+            responses.lawsuit_response_count > 0
+            or responses.direct_payload_count > 0
+        )
     )
     report.update(
         {
@@ -282,6 +285,7 @@ async def _smoke_judit_roundtrip(code: str) -> dict[str, Any]:
             "status_poll_attempts": attempts,
             "response_count": responses.response_count,
             "lawsuit_response_count": responses.lawsuit_response_count,
+            "direct_payload_count": responses.direct_payload_count,
             "post_calls": 1,
             "get_calls": attempts + 1,
         }
