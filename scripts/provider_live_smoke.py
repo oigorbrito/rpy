@@ -251,28 +251,38 @@ async def _smoke_judit_roundtrip(code: str) -> dict[str, Any]:
     created = await create_lawsuit_request(code)
     request_id_hash = _hash_identifier(created.request_id)
     poll_interval = 2.0
-    max_attempts = 30
+    max_attempts = 60
     final_status = "unknown"
+    response_status = None
     attempts = 0
+    responses = None
 
     for attempts in range(1, max_attempts + 1):
         status_result = await get_lawsuit_request_status(created.request_id)
         final_status = status_result.status
-        if final_status == "completed":
+        responses = await get_lawsuit_responses(created.request_id)
+        response_status = responses.request_status
+        terminal_status = response_status or final_status
+        if terminal_status == "completed":
             break
-        if final_status in {"failed", "error", "cancelled", "canceled"}:
+        if terminal_status in {"failed", "error", "cancelled", "canceled"}:
             break
         await asyncio.sleep(poll_interval)
 
-    responses = await get_lawsuit_responses(created.request_id)
+    if responses is None:
+        responses = await get_lawsuit_responses(created.request_id)
+
     elapsed_ms = (perf_counter() - started) * 1000
+    effective_status = response_status or final_status
+    has_process_payload = (
+        responses.lawsuit_response_count > 0
+        or responses.direct_payload_count > 0
+    )
     success = (
-        final_status == "completed"
+        effective_status == "completed"
         and responses.response_count > 0
-        and (
-            responses.lawsuit_response_count > 0
-            or responses.direct_payload_count > 0
-        )
+        and has_process_payload
+        and responses.application_error_count == 0
     )
     report.update(
         {
@@ -282,12 +292,17 @@ async def _smoke_judit_roundtrip(code: str) -> dict[str, Any]:
             "latency_ms": round(elapsed_ms, 3),
             "request_id_sha256": request_id_hash,
             "request_status": final_status,
+            "responses_request_status": response_status,
+            "effective_request_status": effective_status,
             "status_poll_attempts": attempts,
             "response_count": responses.response_count,
             "lawsuit_response_count": responses.lawsuit_response_count,
+            "application_info_count": responses.application_info_count,
+            "application_error_count": responses.application_error_count,
+            "other_response_count": responses.other_response_count,
             "direct_payload_count": responses.direct_payload_count,
             "post_calls": 1,
-            "get_calls": attempts + 1,
+            "get_calls": attempts * 2,
         }
     )
     return report
