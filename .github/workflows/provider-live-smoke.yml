@@ -15,6 +15,10 @@ on:
           - datajud
           - live
           - replay
+      public_cnj:
+        description: PUBLIC/non-sensitive CNJ override; workflow inputs are visible in Actions metadata
+        required: false
+        type: string
       judit_requests_host:
         description: Judit requests host for the controlled Judit-only call
         required: true
@@ -55,13 +59,13 @@ jobs:
           python -m pip install --constraint requirements/constraints.txt -e .
           python -m pip check
 
-      - name: Validate provider CNJ locally with zero network
-        if: ${{ github.event.inputs.mode == 'preflight' }}
+      - name: Validate provider CNJ locally before any provider work
+        if: ${{ github.event.inputs.mode != 'diagnose' }}
         env:
-          PROVIDER_ACCEPTANCE_CNJ: ${{ secrets.PROVIDER_ACCEPTANCE_CNJ }}
+          PROVIDER_ACCEPTANCE_CNJ: ${{ github.event.inputs.public_cnj || secrets.PROVIDER_ACCEPTANCE_CNJ }}
         run: |
           if [ -z "$PROVIDER_ACCEPTANCE_CNJ" ]; then
-            echo "::error::PROVIDER_ACCEPTANCE_CNJ is required for CNJ preflight."
+            echo "::error::A complete CNJ is required. Set public_cnj for a PUBLIC/non-sensitive process or fix PROVIDER_ACCEPTANCE_CNJ."
             exit 1
           fi
           python scripts/provider_live_smoke.py --preflight-cnj
@@ -100,7 +104,7 @@ jobs:
       - name: Run one controlled Judit-only lawsuit request
         if: ${{ github.event.inputs.mode == 'judit' }}
         env:
-          PROVIDER_ACCEPTANCE_CNJ: ${{ secrets.PROVIDER_ACCEPTANCE_CNJ }}
+          PROVIDER_ACCEPTANCE_CNJ: ${{ github.event.inputs.public_cnj || secrets.PROVIDER_ACCEPTANCE_CNJ }}
           PROVIDER_ACCEPTANCE_AUTHORIZED: ${{ secrets.PROVIDER_ACCEPTANCE_AUTHORIZED }}
           JUDIT_API_KEY: ${{ secrets.JUDIT_API_KEY }}
           JUDIT_ATTACHMENTS_ENABLED: "false"
@@ -139,7 +143,7 @@ jobs:
       - name: Run controlled DataJud-only live smoke
         if: ${{ github.event.inputs.mode == 'datajud' }}
         env:
-          PROVIDER_ACCEPTANCE_CNJ: ${{ secrets.PROVIDER_ACCEPTANCE_CNJ }}
+          PROVIDER_ACCEPTANCE_CNJ: ${{ github.event.inputs.public_cnj || secrets.PROVIDER_ACCEPTANCE_CNJ }}
           PROVIDER_ACCEPTANCE_AUTHORIZED: ${{ secrets.PROVIDER_ACCEPTANCE_AUTHORIZED }}
           DATAJUD_ENABLED: "true"
           DATAJUD_AUTHORIZED_USE: ${{ secrets.DATAJUD_AUTHORIZED_USE }}
@@ -182,7 +186,7 @@ jobs:
       - name: Replay sanitized capture without provider calls
         if: ${{ github.event.inputs.mode == 'replay' }}
         env:
-          PROVIDER_ACCEPTANCE_CNJ: ${{ secrets.PROVIDER_ACCEPTANCE_CNJ }}
+          PROVIDER_ACCEPTANCE_CNJ: ${{ github.event.inputs.public_cnj || secrets.PROVIDER_ACCEPTANCE_CNJ }}
         run: |
           if [ -z "$PROVIDER_ACCEPTANCE_CNJ" ]; then
             echo "::error::PROVIDER_ACCEPTANCE_CNJ is required to verify replay identity."
@@ -195,7 +199,7 @@ jobs:
       - name: Run controlled Judit + DataJud live smoke and capture evidence
         if: ${{ github.event.inputs.mode == 'live' }}
         env:
-          PROVIDER_ACCEPTANCE_CNJ: ${{ secrets.PROVIDER_ACCEPTANCE_CNJ }}
+          PROVIDER_ACCEPTANCE_CNJ: ${{ github.event.inputs.public_cnj || secrets.PROVIDER_ACCEPTANCE_CNJ }}
           PROVIDER_ACCEPTANCE_AUTHORIZED: ${{ secrets.PROVIDER_ACCEPTANCE_AUTHORIZED }}
           JUDIT_API_KEY: ${{ secrets.JUDIT_API_KEY }}
           JUDIT_ATTACHMENTS_ENABLED: "false"
