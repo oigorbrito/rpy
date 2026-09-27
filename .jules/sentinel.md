@@ -2,3 +2,8 @@
 **Vulnerability:** Dynamic API key tokens (`sk_live_...` and `sk_test_...`) created at runtime and stored hashed in PostgreSQL were not redacted by `sanitize_error_message()` when formatted as standalone tokens or within unhandled exception strings, leaking secrets to persistent logs and job error fields.
 **Learning:** Env-var based secret redaction and header-based regexes miss application-specific bearer/API tokens when tokens are passed or printed without standard `Authorization: Bearer` or `api_key=` prefixes.
 **Prevention:** Include token format regexes (such as `\bsk_(?:live|test)_[a-zA-Z0-9_-]+\b`) directly in centralized log sanitization routines.
+
+## 2026-03-31 - Redacting Password Credentials in URIs with Empty Usernames
+**Vulnerability:** URIs with omitted or empty usernames (e.g. `postgres://:password@host` or `redis://:password@host`) were not matched by `_URI_CREDENTIALS_RE` because `(?P<user>[^\s/:@]+)` required at least one username character, exposing raw database/service passwords in error logs and job failure fields.
+**Learning:** URI authentication specs allow empty usernames before the colon (e.g. `:password@host`). Regexes matching URI credentials must use `[^\s/:@]*` for the username component.
+**Prevention:** Allow zero-or-more username characters when extracting password fields from URI schemes in `sanitize_error_message()`.
