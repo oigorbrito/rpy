@@ -44,6 +44,18 @@ def test_sanitize_error_message_redacts_uri_password_and_bearer() -> None:
     assert "Authorization: Bearer [REDACTED]" in rendered
 
 
+def test_sanitize_error_message_redacts_empty_user_uri_passwords() -> None:
+    rendered = sanitize_error_message(
+        "failed postgresql://:db-super-secret@postgres:5432/rpy "
+        "redis://:topsecret@redis.internal:6379/0"
+    )
+
+    assert "db-super-secret" not in rendered
+    assert "topsecret" not in rendered
+    assert "postgresql://:[REDACTED]@postgres:5432/rpy" in rendered
+    assert "redis://:[REDACTED]@redis.internal:6379/0" in rendered
+
+
 def test_sanitize_error_message_is_bounded() -> None:
     rendered = sanitize_error_message("x" * 5000, max_chars=120)
 
