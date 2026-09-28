@@ -108,11 +108,13 @@ Use exactly one host per paid run; do not probe both with POST requests.
 A successful run must return `request_created` and stores only the sanitized request-id hash and
 timing metadata in the acceptance capture.
 
-A production acquisition should prefer webhook completion over long-lived polling. When
-`JUDIT_CALLBACK_URL` is configured, Rpy includes it in the Judit request payload. The value must be
-an absolute HTTPS URL without URL credentials, query parameters or fragments. The webhook token may
-remain in the path because the existing Rpy receiver is `/webhooks/judit/{token}`; never print or
-persist the configured callback URL in acceptance logs.
+A production acquisition should prefer webhook completion over long-lived polling. Production
+deployment now requires `JUDIT_CALLBACK_URL`, and Rpy includes it in the Judit request payload. The
+value must be an absolute HTTPS URL without URL credentials, query parameters or fragments, and its
+path must match `/webhooks/judit/<JUDIT_WEBHOOK_TOKEN>`. The complete callback URL is secret-managed
+because the existing Rpy receiver carries the webhook capability token in the path; never print or
+persist the configured callback URL in acceptance logs. The live public-callback evidence is recorded
+in `docs/release/judit-live-callback-acceptance-2026-09-28.md`.
 
 For environments without a public callback endpoint, do not repeatedly create paid requests just to
 extend polling. GitHub Actions `mode=judit-observe` performs GET-only observation of an existing

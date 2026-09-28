@@ -41,3 +41,17 @@ def test_whitespace_in_http_auth_token_fails(
 
     with pytest.raises(RuntimeError, match=f"{name} must not contain whitespace"):
         validate_http_auth_config()
+
+@pytest.mark.parametrize(
+    "value",
+    ["token/slash", "token?query", "token#fragment", "token%2Fencoded"],
+)
+def test_webhook_token_must_be_single_url_path_segment(
+    monkeypatch, value: str
+) -> None:
+    _valid(monkeypatch)
+    monkeypatch.setenv("JUDIT_WEBHOOK_TOKEN", value)
+
+    with pytest.raises(RuntimeError, match="single URL path segment"):
+        validate_http_auth_config()
+

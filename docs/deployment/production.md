@@ -44,7 +44,7 @@ Workers join `backend` plus a second internal network named `provider-gateway`. 
 
 This topology makes the network route itself a control: a compromised worker cannot bypass the proxy by opening a direct internet socket because neither of its networks has an external gateway. The proxy has no database connection and receives no provider/API credentials. It is a transport gateway, not an application credential broker.
 
-The minimum allowlist depends on activated features. Anthropic plus Judit request/tracking hosts are always required. The legacy OpenAI embedding path additionally requires `api.openai.com`. Cohere requires `api.cohere.com` only when external embedding or reranking is explicitly enabled. Judit attachment download additionally requires `lawsuits.production.judit.io`. Enabled DataJud and Langfuse require the exact hostnames from their configured HTTPS base URLs. `scripts/validate_deploy_env.py` checks these relationships before deployment.
+The minimum allowlist depends on activated features. Anthropic plus Judit request/tracking hosts are always required. The Judit request hostname is derived from the explicitly configured `JUDIT_REQUESTS_BASE_URL` (normally `https://requests.prod.judit.io`) so the worker client and proxy allowlist cannot silently diverge. The legacy OpenAI embedding path additionally requires `api.openai.com`. Cohere requires `api.cohere.com` only when external embedding or reranking is explicitly enabled. Judit attachment download additionally requires `lawsuits.production.judit.io`. Enabled DataJud and Langfuse require the exact hostnames from their configured HTTPS base URLs. `scripts/validate_deploy_env.py` checks these relationships before deployment.
 
 Adding a new provider hostname is an explicit security change:
 
@@ -109,6 +109,8 @@ Production has no fallback values for:
 - `BACKUP_DATABASE_URL`;
 - `ANTHROPIC_API_KEY`;
 - `JUDIT_API_KEY`;
+- `JUDIT_REQUESTS_BASE_URL`;
+- `JUDIT_CALLBACK_URL`;
 - `JUDIT_WEBHOOK_TOKEN`;
 - `RPY_BEARER_TOKENS`;
 - `RPY_OPS_TOKEN`.
@@ -128,7 +130,7 @@ Database credentials are split by responsibility. The five URLs must use distinc
 Secrets are scoped by service instead of being copied to the whole stack:
 
 - `api` receives `API_DATABASE_URL` plus Judit, bearer-token and ops credentials;
-- `worker-*` receives `WORKER_DATABASE_URL`, Judit/DataJud, Anthropic and embedding/reranker settings; provider credentials stay worker-only;
+- `worker-*` receives `WORKER_DATABASE_URL`, Judit/DataJud, Anthropic and embedding/reranker settings; provider credentials stay worker-only. Workers receive the secret-managed `JUDIT_CALLBACK_URL` capability URL because they create asynchronous Judit requests, but they do not receive the raw `JUDIT_WEBHOOK_TOKEN`;
 - `scheduler` receives only `SCHEDULER_DATABASE_URL` and retention/scheduling settings;
 - `migrate` receives the migration URL plus the four runtime/backup URLs needed to provision and rotate their roles;
 - provider keys must not be present in API, scheduler or migration environments;
@@ -137,6 +139,24 @@ Secrets are scoped by service instead of being copied to the whole stack:
 If a PostgreSQL password contains reserved URL characters, URL-encode it in the corresponding database URL. Do not reuse the migration/admin role for API, worker, scheduler or backup access.
 
 Bearer-token rotation is performed by temporarily mapping both old and new tokens to the same tenant, deploying that overlap, migrating clients, and then removing the old token in a later deploy.
+
+
+### Judit callback and requests host
+
+Production workers must receive both `JUDIT_REQUESTS_BASE_URL` and `JUDIT_CALLBACK_URL`.
+The requests URL is restricted to the approved Judit request hosts and its hostname must be present in
+`EGRESS_PROXY_ALLOWED_HOSTS`.
+
+`JUDIT_CALLBACK_URL` must be an absolute HTTPS URL without URL credentials, query parameters or
+fragments, and its path must be `/webhooks/judit/<JUDIT_WEBHOOK_TOKEN>`. Treat the complete callback
+URL as secret-managed configuration because the path contains the webhook capability token. The API
+receives the raw webhook token; workers receive the complete callback URL; the scheduler, migration
+job, parser and egress proxy receive neither.
+
+The live acceptance recorded in
+`docs/release/judit-live-callback-acceptance-2026-09-28.md` demonstrated the callback path with a
+temporary test ingress. Production must replace that diagnostic ingress with an owned
+TLS-terminating hostname.
 
 ## Embedding rollout and rollback
 

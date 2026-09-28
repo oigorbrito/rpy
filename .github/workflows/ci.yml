@@ -62,10 +62,12 @@ jobs:
           ANTHROPIC_API_KEY: ci-anthropic-key
           OPENAI_API_KEY: ci-openai-key
           JUDIT_API_KEY: ci-judit-api-key
+          JUDIT_REQUESTS_BASE_URL: https://requests.prod.judit.io
+          JUDIT_CALLBACK_URL: https://rpy.invalid/webhooks/judit/ci-judit-token
           JUDIT_WEBHOOK_TOKEN: ci-judit-token
           RPY_BEARER_TOKENS: '{"ci-bearer-token":"00000000-0000-0000-0000-000000000001"}'
           RPY_OPS_TOKEN: ci-ops-token
-          EGRESS_PROXY_ALLOWED_HOSTS: api.anthropic.com,api.openai.com,requests.production.judit.io,tracking.production.judit.io
+          EGRESS_PROXY_ALLOWED_HOSTS: api.anthropic.com,api.openai.com,requests.prod.judit.io,tracking.production.judit.io
         run: |
           python scripts/validate_deploy_env.py
           docker compose -f compose.production.yaml config --format json > /tmp/rpy-production-compose.json

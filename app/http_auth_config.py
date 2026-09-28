@@ -14,5 +14,9 @@ def _required_http_token(name: str) -> str:
 
 def validate_http_auth_config() -> None:
     """Fail startup when HTTP authentication credentials are unusable."""
-    _required_http_token("JUDIT_WEBHOOK_TOKEN")
+    webhook_token = _required_http_token("JUDIT_WEBHOOK_TOKEN")
+    if any(character in webhook_token for character in "/?#%"):
+        raise RuntimeError(
+            "JUDIT_WEBHOOK_TOKEN must be a single URL path segment without '/', '?', '#', or '%'"
+        )
     _required_http_token("RPY_OPS_TOKEN")
