@@ -564,7 +564,7 @@ def test_egress_allowlist_requires_core_provider_hosts() -> None:
     )
     assert (
         "EGRESS_PROXY_ALLOWED_HOSTS is missing required provider hosts: "
-        "api.openai.com, requests.production.judit.io, tracking.production.judit.io"
+        "api.openai.com, requests.prod.judit.io, tracking.production.judit.io"
         in errors
     )
 
@@ -587,7 +587,7 @@ def test_egress_allowlist_rejects_wildcards_and_ip_literals() -> None:
 def test_legacy_embedding_requires_openai_host_in_egress_allowlist() -> None:
     values = _valid_values()
     values["EGRESS_PROXY_ALLOWED_HOSTS"] = (
-        "api.anthropic.com,requests.production.judit.io,tracking.production.judit.io"
+        "api.anthropic.com,requests.prod.judit.io,tracking.production.judit.io"
     )
     assert (
         "EGRESS_PROXY_ALLOWED_HOSTS is missing required provider hosts: api.openai.com"
@@ -599,7 +599,7 @@ def test_local_bge_does_not_require_openai_egress() -> None:
     values = _valid_values()
     _enable_bge(values)
     values["EGRESS_PROXY_ALLOWED_HOSTS"] = (
-        "api.anthropic.com,requests.production.judit.io,tracking.production.judit.io"
+        "api.anthropic.com,requests.prod.judit.io,tracking.production.judit.io"
     )
     assert preflight.validate(values) == []
 
@@ -609,7 +609,7 @@ def test_enabled_langfuse_host_must_be_explicitly_allowlisted() -> None:
     _enable_langfuse(values)
     values["EGRESS_PROXY_ALLOWED_HOSTS"] = (
         "api.anthropic.com,api.openai.com,"
-        "requests.production.judit.io,tracking.production.judit.io"
+        "requests.prod.judit.io,tracking.production.judit.io"
     )
     assert (
         "EGRESS_PROXY_ALLOWED_HOSTS is missing required provider hosts: "
