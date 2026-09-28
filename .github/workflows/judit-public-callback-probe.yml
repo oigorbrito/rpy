@@ -1,0 +1,421 @@
+name: judit-public-callback-probe
+
+on:
+  push:
+    branches:
+      - diag/judit-public-callback-probe
+    paths:
+      - .github/workflows/judit-public-callback-probe.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: rpy_callback_probe
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d rpy_callback_probe"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    env:
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/rpy_callback_probe
+      PUBLIC_TEST_CNJ: "0010153-96.2013.8.26.0597"
+      JUDIT_REQUESTS_BASE_URL: https://requests.prod.judit.io
+      JUDIT_ATTACHMENTS_ENABLED: "false"
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.14"
+          cache: pip
+          cache-dependency-path: requirements/constraints.txt
+
+      - name: Install Rpy
+        run: |
+          python -m pip install pip==26.2.1
+          python -m pip install --constraint requirements/constraints.txt -e '.[dev]'
+          python -m pip check
+
+      - name: Require provisioned Judit secret
+        env:
+          JUDIT_API_KEY: ${{ secrets.JUDIT_API_KEY }}
+        run: |
+          if [ -z "$JUDIT_API_KEY" ]; then
+            echo "::error::JUDIT_API_KEY is not provisioned."
+            exit 1
+          fi
+
+      - name: Migrate isolated probe database
+        run: python scripts/migrate.py --database-url "$TEST_DATABASE_URL"
+
+      - name: Create isolated runtime identity
+        run: |
+          set -euo pipefail
+          tenant_id="00000000-0000-0000-0000-000000000395"
+          webhook_token="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+          ops_token="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+          bearer_token="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+
+          echo "::add-mask::$webhook_token"
+          echo "::add-mask::$ops_token"
+          echo "::add-mask::$bearer_token"
+
+          {
+            echo "PROBE_TENANT_ID=$tenant_id"
+            echo "JUDIT_WEBHOOK_TOKEN=$webhook_token"
+            echo "RPY_OPS_TOKEN=$ops_token"
+            echo "RPY_PROBE_BEARER=$bearer_token"
+            printf 'RPY_BEARER_TOKENS={"%s":"%s"}\n' "$bearer_token" "$tenant_id"
+          } >> "$GITHUB_ENV"
+
+      - name: Seed isolated tenant
+        run: |
+          python - <<'PY'
+          import asyncio
+          import os
+          from uuid import UUID
+          import asyncpg
+
+          async def main() -> None:
+              conn = await asyncpg.connect(os.environ["TEST_DATABASE_URL"])
+              try:
+                  await conn.execute(
+                      "INSERT INTO tenants (id, name) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING",
+                      UUID(os.environ["PROBE_TENANT_ID"]),
+                      "Judit callback probe",
+                  )
+              finally:
+                  await conn.close()
+
+          asyncio.run(main())
+          PY
+
+      - name: Start Rpy API without access-token logging
+        run: |
+          set -euo pipefail
+          nohup env \
+            DATABASE_URL="$TEST_DATABASE_URL" \
+            JUDIT_WEBHOOK_TOKEN="$JUDIT_WEBHOOK_TOKEN" \
+            JUDIT_WEBHOOK_TENANT_ID="$PROBE_TENANT_ID" \
+            RPY_OPS_TOKEN="$RPY_OPS_TOKEN" \
+            RPY_BEARER_TOKENS="$RPY_BEARER_TOKENS" \
+            uvicorn app.api:app \
+              --host 127.0.0.1 \
+              --port 8000 \
+              --workers 1 \
+              --no-access-log \
+              >/tmp/rpy-callback-api.log 2>&1 &
+          echo "$!" >/tmp/rpy-callback-api.pid
+
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/ready >/dev/null; then
+              echo "Rpy API ready"
+              exit 0
+            fi
+            sleep 1
+          done
+
+          echo "::error::Rpy API did not become ready."
+          exit 1
+
+      - name: Install pinned cloudflared
+        run: |
+          set -euo pipefail
+          curl -fsSL \
+            -o /tmp/cloudflared \
+            https://github.com/cloudflare/cloudflared/releases/download/2026.9.3/cloudflared-linux-amd64
+          echo "77e26d8d900e0b8469f416239d14b5f296525fdf79fee6f511ef55609e3fbac2  /tmp/cloudflared" \
+            | sha256sum -c -
+          chmod 0755 /tmp/cloudflared
+          /tmp/cloudflared --version
+
+      - name: Expose temporary HTTPS callback ingress
+        run: |
+          set -euo pipefail
+          nohup /tmp/cloudflared tunnel \
+            --no-autoupdate \
+            --url http://127.0.0.1:8000 \
+            >/tmp/cloudflared.log 2>&1 &
+          echo "$!" >/tmp/cloudflared.pid
+
+          tunnel_url=""
+          for attempt in $(seq 1 60); do
+            tunnel_url="$(grep -Eo 'https://[a-z0-9-]+\.trycloudflare\.com' /tmp/cloudflared.log | head -n 1 || true)"
+            if [ -n "$tunnel_url" ]; then
+              break
+            fi
+            sleep 1
+          done
+          if [ -z "$tunnel_url" ]; then
+            echo "::error::Cloudflare Quick Tunnel did not publish an HTTPS URL."
+            exit 1
+          fi
+
+          echo "::add-mask::$tunnel_url"
+          callback_url="$tunnel_url/webhooks/judit/$JUDIT_WEBHOOK_TOKEN"
+          echo "::add-mask::$callback_url"
+          echo "JUDIT_CALLBACK_URL=$callback_url" >> "$GITHUB_ENV"
+
+          for attempt in $(seq 1 30); do
+            if curl -fsS "$tunnel_url/health" >/dev/null; then
+              echo "Temporary HTTPS ingress reachable"
+              exit 0
+            fi
+            sleep 1
+          done
+
+          echo "::error::Temporary HTTPS ingress was published but not reachable."
+          exit 1
+
+      - name: Register one acquisition through the Rpy API
+        run: |
+          set -euo pipefail
+          http_status="$(
+            curl -sS \
+              -o /tmp/rpy-request-response.json \
+              -w '%{http_code}' \
+              -X POST \
+              -H "Authorization: Bearer $RPY_PROBE_BEARER" \
+              "http://127.0.0.1:8000/processes/$PUBLIC_TEST_CNJ/request"
+          )"
+          if [ "$http_status" != "202" ]; then
+            echo "::error::Rpy acquisition registration failed with HTTP $http_status."
+            exit 1
+          fi
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          body = json.loads(Path("/tmp/rpy-request-response.json").read_text(encoding="utf-8"))
+          if body.get("created") is not True or body.get("status") != "processing":
+              raise SystemExit("Rpy acquisition registration returned an unexpected state")
+          print("Rpy acquisition registered")
+          PY
+
+      - name: Execute exactly one acquisition worker job
+        env:
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+          JUDIT_API_KEY: ${{ secrets.JUDIT_API_KEY }}
+        run: |
+          python - <<'PY'
+          import asyncio
+          import os
+
+          from app.db import create_pool
+          from app.worker import Worker, WorkerSettings
+
+          async def main() -> None:
+              database_url = os.environ["DATABASE_URL"]
+              pool = await create_pool(database_url, min_size=1, max_size=3)
+              try:
+                  worker = Worker(
+                      pool,
+                      WorkerSettings(
+                          database_url=database_url,
+                          concurrency=1,
+                          poll_interval_seconds=1,
+                          heartbeat_interval_seconds=30,
+                          stale_after_seconds=90,
+                          task_timeout_seconds=90,
+                          reclaim_interval_seconds=30,
+                          shutdown_grace_seconds=10,
+                      ),
+                  )
+                  if await worker.process_one() is not True:
+                      raise RuntimeError("expected one queued acquisition job")
+              finally:
+                  await pool.close()
+
+          asyncio.run(main())
+          PY
+
+      - name: Verify provider request correlation
+        run: |
+          python - <<'PY'
+          import asyncio
+          import hashlib
+          import json
+          import os
+          from uuid import UUID
+          import asyncpg
+
+          async def main() -> None:
+              conn = await asyncpg.connect(os.environ["TEST_DATABASE_URL"])
+              try:
+                  row = await conn.fetchrow(
+                      """
+                      SELECT judit_request_id, status
+                      FROM tenant_judit_requests
+                      WHERE tenant_id = $1 AND process_code = $2
+                      """,
+                      UUID(os.environ["PROBE_TENANT_ID"]),
+                      os.environ["PUBLIC_TEST_CNJ"],
+                  )
+                  if row is None or not row["judit_request_id"]:
+                      raise RuntimeError("Judit request id was not persisted")
+                  request_id = str(row["judit_request_id"])
+                  print(
+                      json.dumps(
+                          {
+                              "request_id_sha256": hashlib.sha256(request_id.encode()).hexdigest(),
+                              "request_status": str(row["status"]),
+                              "provider_request_registered": True,
+                          },
+                          sort_keys=True,
+                      )
+                  )
+              finally:
+                  await conn.close()
+
+          asyncio.run(main())
+          PY
+
+      - name: Wait for real Judit callback and verify ingestion
+        timeout-minutes: 6
+        run: |
+          python - <<'PY'
+          import asyncio
+          import hashlib
+          import json
+          import os
+          import time
+          from uuid import UUID
+          import asyncpg
+
+          async def snapshot(conn, request_id: str) -> dict[str, int]:
+              delivery = await conn.fetchrow(
+                  """
+                  SELECT
+                    count(*)::int AS delivery_count,
+                    count(*) FILTER (
+                      WHERE event_type = 'response_created'
+                    )::int AS response_created_count,
+                    count(*) FILTER (
+                      WHERE event_type = 'request_completed'
+                    )::int AS request_completed_count,
+                    count(*) FILTER (
+                      WHERE raw_payload->'payload'->>'response_type' = 'lawsuit'
+                    )::int AS lawsuit_delivery_count,
+                    count(*) FILTER (
+                      WHERE raw_payload->'payload'->>'response_type' = 'application_error'
+                    )::int AS application_error_count
+                  FROM judit_deliveries
+                  WHERE request_id = $1
+                  """,
+                  request_id,
+              )
+              version_count = int(
+                  await conn.fetchval(
+                      "SELECT count(*) FROM process_versions WHERE judit_request_id = $1",
+                      request_id,
+                  )
+                  or 0
+              )
+              completion_count = int(
+                  await conn.fetchval(
+                      "SELECT count(*) FROM judit_request_completions WHERE request_id = $1",
+                      request_id,
+                  )
+                  or 0
+              )
+              tenant_access_count = int(
+                  await conn.fetchval(
+                      """
+                      SELECT count(DISTINCT tp.process_id)
+                      FROM tenant_processes tp
+                      JOIN process_versions pv ON pv.process_id = tp.process_id
+                      WHERE tp.tenant_id = $1 AND pv.judit_request_id = $2
+                      """,
+                      UUID(os.environ["PROBE_TENANT_ID"]),
+                      request_id,
+                  )
+                  or 0
+              )
+              return {
+                  "delivery_count": int(delivery["delivery_count"] or 0),
+                  "response_created_count": int(delivery["response_created_count"] or 0),
+                  "request_completed_count": int(delivery["request_completed_count"] or 0),
+                  "lawsuit_delivery_count": int(delivery["lawsuit_delivery_count"] or 0),
+                  "application_error_count": int(delivery["application_error_count"] or 0),
+                  "process_version_count": version_count,
+                  "request_completion_recorded": completion_count,
+                  "tenant_access_count": tenant_access_count,
+              }
+
+          async def main() -> None:
+              conn = await asyncpg.connect(os.environ["TEST_DATABASE_URL"])
+              try:
+                  request_id = await conn.fetchval(
+                      """
+                      SELECT judit_request_id
+                      FROM tenant_judit_requests
+                      WHERE tenant_id = $1 AND process_code = $2
+                      """,
+                      UUID(os.environ["PROBE_TENANT_ID"]),
+                      os.environ["PUBLIC_TEST_CNJ"],
+                  )
+                  if not request_id:
+                      raise RuntimeError("missing persisted Judit request id")
+                  request_id = str(request_id)
+                  deadline = time.monotonic() + 300
+                  state: dict[str, int] = {}
+
+                  while time.monotonic() < deadline:
+                      state = await snapshot(conn, request_id)
+                      if state["application_error_count"] > 0:
+                          break
+                      if (
+                          state["lawsuit_delivery_count"] > 0
+                          and state["process_version_count"] > 0
+                          and state["tenant_access_count"] > 0
+                      ):
+                          break
+                      await asyncio.sleep(5)
+
+                  report = {
+                      "provider": "judit",
+                      "probe": "public_callback_ingestion",
+                      "request_id_sha256": hashlib.sha256(request_id.encode()).hexdigest(),
+                      **state,
+                  }
+                  print(json.dumps(report, indent=2, sort_keys=True))
+
+                  if state.get("application_error_count", 0) > 0:
+                      raise RuntimeError("Judit callback returned application_error")
+                  if state.get("lawsuit_delivery_count", 0) < 1:
+                      raise RuntimeError("no lawsuit callback arrived within the bounded window")
+                  if state.get("process_version_count", 0) < 1:
+                      raise RuntimeError("lawsuit callback arrived but no process version was staged")
+                  if state.get("tenant_access_count", 0) < 1:
+                      raise RuntimeError("staged callback did not grant expected tenant access")
+              finally:
+                  await conn.close()
+
+          asyncio.run(main())
+          PY
+
+      - name: Cleanup temporary ingress
+        if: always()
+        run: |
+          for pid_file in /tmp/cloudflared.pid /tmp/rpy-callback-api.pid; do
+            if [ -f "$pid_file" ]; then
+              kill "$(cat "$pid_file")" >/dev/null 2>&1 || true
+            fi
+          done
