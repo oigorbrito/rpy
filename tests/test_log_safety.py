@@ -106,7 +106,20 @@ _CREDENTIAL_ALPHABET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123
 
 @settings(max_examples=120, deadline=None)
 @given(
-    key=st.sampled_from(("api_key", "api-key", "token", "access_token", "password", "secret")),
+    key=st.sampled_from(
+        (
+            "api_key",
+            "api-key",
+            "token",
+            "access_token",
+            "password",
+            "secret",
+            "ops_token",
+            "webhook_token",
+            "client_secret",
+            "secret_key",
+        )
+    ),
     key_quote=st.sampled_from(("", '"', "'")),
     value_quote=st.sampled_from(("", '"', "'")),
     secret=st.text(alphabet=_CREDENTIAL_ALPHABET, min_size=12, max_size=48),
