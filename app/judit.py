@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import lru_cache
 import math
 import re
 import unicodedata
@@ -230,7 +231,13 @@ def _masked_personal_id(value: str) -> str:
 
 
 def _normalized_person_type(value: Any) -> str:
-    rendered = unicodedata.normalize("NFKD", str(value or "").strip())
+    rendered_str = str(value or "").strip()
+    return _cached_normalized_person_type(rendered_str)
+
+
+@lru_cache(maxsize=1024)
+def _cached_normalized_person_type(rendered_str: str) -> str:
+    rendered = unicodedata.normalize("NFKD", rendered_str)
     ascii_value = "".join(
         character
         for character in rendered

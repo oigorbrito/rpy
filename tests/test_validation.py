@@ -108,6 +108,14 @@ def test_accepts_known_party_in_free_prose() -> None:
     assert result.passed is True
 
 
+def test_normalize_party_name_handles_unhashable_input_types() -> None:
+    from app.validation import _normalize_party_name
+
+    assert _normalize_party_name({"name": "Maria da Silva"}) == "name maria da silva"
+    assert _normalize_party_name(["João", "Maria"]) == "joao maria"
+    assert _normalize_party_name(None) == ""
+
+
 def test_party_matching_tolerates_case_and_diacritic_variation() -> None:
     result = validar(
         text="O réu Joao de Souza apresentou defesa.",
