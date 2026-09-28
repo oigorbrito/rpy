@@ -120,6 +120,15 @@ request using `PROVIDER_ACCEPTANCE_JUDIT_REQUEST_ID` from repository secrets. Th
 zero provider POSTs and records only the SHA-256 of the request identifier plus sanitized status/count
 metadata.
 
+Round-trip reporting distinguishes transport/data evidence from provider completion. If one or more
+`lawsuit` payloads are already available while Judit still reports `request_status=pending`, the
+smoke reports `roundtrip_payload_received_pending_completion`. That state proves the request was
+accepted and process payloads were received, but it remains a non-zero acceptance result until Judit
+reports completion. Do not classify it as a transport/authentication failure, and do not treat it as
+full provider acceptance either. Application errors and completed-without-process outcomes are also
+reported separately so operators do not collapse distinct provider states into a generic
+`roundtrip_incomplete`.
+
 ### Controlled DataJud-only smoke
 
 While Judit acceptance is unresolved, DataJud can be validated independently without loading or
