@@ -1,10 +1,30 @@
 # Rpy
 
-Rpy é um serviço de RAG para consulta e resumo processual em Python/FastAPI, PostgreSQL 16 e pgvector. O release histórico `v0.1.0` estabeleceu o primeiro caminho offline qualificado; o `main` atual contém trabalho posterior e está sendo refinado para o próximo release, cujo identificador permanece `TBD`.
+**Legal-process RAG backend built with FastAPI, PostgreSQL 16 and pgvector, with tenant isolation, durable job processing, provenance, and a provider-free confidential path.**
 
-## Estado do projeto
+Rpy is deliberately presented first as a **backend system**, not as an LLM demo.
 
-O caminho offline está qualificado por CI e por fresh clone real em Windows. A validação canônica reconstrói a imagem, aplica as migrations, executa API/fila/worker com dados sintéticos e termina com:
+Its core engineering surface includes:
+
+- HTTP/API boundaries;
+- PostgreSQL data modeling;
+- concurrent workers;
+- durable job ownership;
+- retry / fencing / reclaim;
+- tenant authorization;
+- idempotent webhooks;
+- retrieval;
+- provenance;
+- backup / restore;
+- CI and operational validation.
+
+RAG and external providers sit inside those boundaries rather than replacing them.
+
+## Current evidence
+
+The historical `v0.1.0` release established a qualified offline path. The current `main` contains subsequent work for the next release, whose identifier remains `TBD`.
+
+The canonical offline validation rebuilds the image, applies migrations, exercises API/queue/workers with synthetic data, and finishes with:
 
 ```text
 RPY OFFLINE SMOKE: PASS
@@ -14,41 +34,89 @@ jobs=complete
 providers=0
 ```
 
-Judit, Anthropic, OpenAI e Cohere reais são uma etapa posterior de **Provider Acceptance**, controlada por ambiente e não bloqueante para a qualificação offline. BGE real também exige artifact/benchmark próprios antes de ativação. Consulte `docs/release/provider-acceptance.md`, `docs/release/offline-release-candidate.md` e `docs/release/v0.1.0.md`.
+That evidence supports the **offline/provider-free path**.
 
-## Princípios de engenharia
-
-- PostgreSQL é a fonte de verdade e também a fila de jobs.
-- Claims concorrentes usam `FOR UPDATE SKIP LOCKED` com ownership por `worker_id`.
-- Retries e callbacks externos são idempotentes em fronteiras duráveis.
-- Processos sigilosos não chamam LLM nem embeddings externos.
-- Migrations, recuperação, retenção e isolamento entre tenants são tratados como invariantes, não como detalhes de implementação.
-- Mudanças devem ser pequenas, reversíveis e sustentadas por testes/CI; o contrato completo para agentes e contribuições está em `AGENTS.md` e `CONTRIBUTING.md`.
-
-## Arquitetura
-
-- **FastAPI + frontend server-served**: consulta tenant-scoped, solicitação de CNJ e webhooks Judit.
-- **PostgreSQL 16 + pgvector**: dados processuais, embeddings, auditoria e fila.
-- **2+ workers**: claim atômico, heartbeat, retry, fencing e reclaim.
-- **1 scheduler**: expurgo periódico protegido por advisory lock.
-- **Claude Sonnet 5**: geração de resumo não sigiloso, prompt caching e validação pós-geração.
-- **Embeddings condicionais**: processos com mais de 40 movimentos usam retrieval lexical + vetorial.
-
-Fluxo simplificado:
+It does not automatically establish acceptance for real Judit, Anthropic, OpenAI, Cohere, or embedding-provider paths. Those remain separate Provider Acceptance boundaries.
 
 ```text
-Browser/API
-    |
-    v
-FastAPI -----> Judit (opcional, provider real)
-    |
-    v
-PostgreSQL/pgvector <---- workers
-    |                    |
-    |                    +---- Anthropic/OpenAI (somente quando permitido)
-    |
-    +---- scheduler/reclaimer
+OFFLINE_PASS != PROVIDER_ACCEPTANCE
+PROVIDER_ACCEPTANCE != PRODUCTION_READINESS
 ```
+
+See:
+
+- `docs/release/offline-release-candidate.md`
+- `docs/release/provider-acceptance.md`
+- `docs/release/v0.1.0.md`
+
+## Architecture
+
+```text
+Browser / API
+      │
+      ▼
+   FastAPI
+      │
+      ├──────────────> Judit (optional external acquisition)
+      │
+      ▼
+PostgreSQL 16 + pgvector
+      │
+      ├── durable job queue
+      ├── tenant/process authority
+      ├── process data + provenance
+      └── embeddings / retrieval data
+      │
+      ▼
+   workers (2+)
+      │
+      ├── retry / fencing / reclaim
+      ├── retrieval
+      └── optional external model/provider path
+
+scheduler / reclaimer
+      └── advisory-lock protected maintenance
+```
+
+### PostgreSQL as data store and coordination layer
+
+The project intentionally avoids introducing a separate broker while the current workload does not justify one.
+
+Workers claim jobs using:
+
+```sql
+FOR UPDATE SKIP LOCKED
+```
+
+with explicit ownership, heartbeat, retry, fencing, and reclaim semantics.
+
+### Retrieval
+
+For smaller process histories, the system can use the full movement set without embeddings.
+
+For larger histories, the current path combines lexical retrieval with pgvector and preserves forced-inclusion rules for recent and legally relevant movements.
+
+### Confidential path
+
+Processes under secrecy/confidentiality rules do not send their content to external LLM or embedding providers.
+
+```text
+CONFIDENTIAL
+    ↓
+provider-free deterministic path
+```
+
+## Engineering invariants
+
+- PostgreSQL is the source of truth.
+- Queue state is durable application state, not transient worker memory.
+- Concurrent claims use explicit ownership.
+- External callbacks are idempotent.
+- Tenant authority is resolved before process access.
+- Sensitive paths fail closed.
+- Migrations and recovery are tested as operational concerns.
+- Provider availability is not required to qualify the offline baseline.
+- New infrastructure is not added simply because it is conventional.
 
 ## Quickstart offline
 
