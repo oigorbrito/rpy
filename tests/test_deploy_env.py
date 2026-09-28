@@ -3,6 +3,8 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
+import pytest
+
 MODULE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "validate_deploy_env.py"
 spec = importlib.util.spec_from_file_location("validate_deploy_env", MODULE_PATH)
 assert spec is not None and spec.loader is not None
