@@ -609,6 +609,74 @@ def test_observe_existing_judit_request_never_creates_provider_request(
     assert created is False
 
 
+def test_observe_judit_reports_payload_received_while_provider_is_pending(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_status(_request_id: str):
+        return SimpleNamespace(status="pending")
+
+    async def fake_responses(_request_id: str):
+        return SimpleNamespace(
+            request_status="pending",
+            response_count=2,
+            lawsuit_response_count=2,
+            application_info_count=0,
+            application_error_count=0,
+            application_error_code=None,
+            application_error_message=None,
+            other_response_count=0,
+            direct_payload_count=0,
+        )
+
+    async def no_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setenv("JUDIT_API_KEY", "test-key")
+    monkeypatch.setenv("PROVIDER_ACCEPTANCE_AUTHORIZED", "true")
+    monkeypatch.setattr(smoke, "get_lawsuit_request_status", fake_status)
+    monkeypatch.setattr(smoke, "get_lawsuit_responses", fake_responses)
+    monkeypatch.setattr(smoke.asyncio, "sleep", no_sleep)
+
+    report = asyncio.run(
+        smoke._observe_judit_request("provider-request-existing", post_calls=1)
+    )
+
+    assert report["status"] == "observed_payload_received_pending_completion"
+    assert report["effective_request_status"] == "pending"
+    assert report["lawsuit_response_count"] == 2
+    assert report["application_error_count"] == 0
+    assert report["post_calls"] == 1
+    assert report["status_poll_attempts"] == 40
+
+
+def test_judit_roundtrip_preserves_pending_payload_outcome(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_create(_code: str):
+        return SimpleNamespace(request_id="provider-request-123")
+
+    async def fake_observe(_request_id: str, *, post_calls: int):
+        assert post_calls == 1
+        return {
+            "provider": "judit",
+            "executed": True,
+            "network_calls_performed": True,
+            "status": "observed_payload_received_pending_completion",
+            "lawsuit_response_count": 2,
+        }
+
+    monkeypatch.setenv("JUDIT_API_KEY", "test-key")
+    monkeypatch.setenv("PROVIDER_ACCEPTANCE_AUTHORIZED", "true")
+    monkeypatch.setenv("JUDIT_ATTACHMENTS_ENABLED", "false")
+    monkeypatch.setattr(smoke, "create_lawsuit_request", fake_create)
+    monkeypatch.setattr(smoke, "_observe_judit_request", fake_observe)
+
+    report = asyncio.run(smoke._smoke_judit_roundtrip("0000000-00.2026.8.21.0001"))
+
+    assert report["status"] == "roundtrip_payload_received_pending_completion"
+    assert report["lawsuit_response_count"] == 2
+
+
 def test_observe_existing_judit_request_requires_explicit_authorization(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
