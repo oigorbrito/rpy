@@ -300,6 +300,8 @@ async def _observe_judit_request(
         status = "observed_application_error"
     elif effective_status == "completed":
         status = "observed_completed_without_process"
+    elif has_process_payload:
+        status = "observed_payload_received_pending_completion"
     else:
         status = "observed_pending"
 
@@ -343,11 +345,16 @@ async def _smoke_judit_roundtrip(code: str) -> dict[str, Any]:
 
     created = await create_lawsuit_request(code)
     report = await _observe_judit_request(created.request_id, post_calls=1)
-    report["status"] = (
-        "roundtrip_completed"
-        if report["status"] == "observed_completed"
-        else "roundtrip_incomplete"
-    )
+    observed_status = str(report.get("status") or "")
+    report["status"] = {
+        "observed_completed": "roundtrip_completed",
+        "observed_payload_received_pending_completion": (
+            "roundtrip_payload_received_pending_completion"
+        ),
+        "observed_application_error": "roundtrip_application_error",
+        "observed_completed_without_process": "roundtrip_completed_without_process",
+        "observed_pending": "roundtrip_pending",
+    }.get(observed_status, "roundtrip_incomplete")
     return report
 
 
