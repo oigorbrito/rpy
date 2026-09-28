@@ -25,6 +25,8 @@ REQUIRED_KEYS = (
     *DB_URL_KEYS,
     "ANTHROPIC_API_KEY",
     "JUDIT_API_KEY",
+    "JUDIT_REQUESTS_BASE_URL",
+    "JUDIT_CALLBACK_URL",
     "JUDIT_WEBHOOK_TOKEN",
     "RPY_BEARER_TOKENS",
     "RPY_OPS_TOKEN",
@@ -39,8 +41,11 @@ LANGFUSE_ENVIRONMENT_RE = re.compile(r"^(?!langfuse)[a-z0-9_-]{1,40}$")
 EGRESS_HOST_RE = re.compile(r"^[a-z0-9.-]{1,253}$")
 _BASE_EGRESS_HOSTS = {
     "api.anthropic.com",
-    "requests.production.judit.io",
     "tracking.production.judit.io",
+}
+_JUDIT_REQUESTS_BASE_URLS = {
+    "https://requests.prod.judit.io",
+    "https://requests.production.judit.io",
 }
 
 
@@ -110,6 +115,10 @@ def _parse_egress_hosts(value: str) -> set[str]:
 
 def _required_egress_hosts(values: dict[str, str]) -> set[str]:
     required = set(_BASE_EGRESS_HOSTS)
+    requests_base_url = str(
+        values.get("JUDIT_REQUESTS_BASE_URL") or "https://requests.prod.judit.io"
+    ).strip().rstrip("/")
+    required.add(_url_hostname(requests_base_url, "JUDIT_REQUESTS_BASE_URL"))
 
     runtime_enabled = _bool_value(values, "EMBEDDING_SPACE_RUNTIME_ENABLED", False)
     if not runtime_enabled:
@@ -269,6 +278,42 @@ def _validate_attachment_ocr(values: dict[str, str], errors: list[str]) -> None:
         ),
         require_finite=True,
     )
+
+def _validate_judit(values: dict[str, str], errors: list[str]) -> None:
+    requests_base_url = str(
+        values.get("JUDIT_REQUESTS_BASE_URL") or ""
+    ).strip().rstrip("/")
+    if requests_base_url and requests_base_url not in _JUDIT_REQUESTS_BASE_URLS:
+        errors.append(
+            "JUDIT_REQUESTS_BASE_URL must use an approved Judit requests host"
+        )
+
+    callback_url = str(values.get("JUDIT_CALLBACK_URL") or "").strip()
+    webhook_token = str(values.get("JUDIT_WEBHOOK_TOKEN") or "").strip()
+    if webhook_token and any(character in webhook_token for character in "/?#%"):
+        errors.append(
+            "JUDIT_WEBHOOK_TOKEN must be a single URL path segment without '/', '?', '#', or '%'"
+        )
+    if not callback_url:
+        return
+
+    parsed = urlsplit(callback_url)
+    if parsed.scheme != "https" or not parsed.hostname:
+        errors.append("JUDIT_CALLBACK_URL must be an absolute HTTPS URL")
+        return
+    if parsed.username is not None or parsed.password is not None:
+        errors.append("JUDIT_CALLBACK_URL must not contain URL credentials")
+    if parsed.query or parsed.fragment:
+        errors.append(
+            "JUDIT_CALLBACK_URL must not contain query parameters or fragments"
+        )
+    if webhook_token:
+        expected_path = f"/webhooks/judit/{webhook_token}"
+        if parsed.path.rstrip("/") != expected_path:
+            errors.append(
+                "JUDIT_CALLBACK_URL path must match /webhooks/judit/<JUDIT_WEBHOOK_TOKEN>"
+            )
+
 
 def _validate_embedding_runtime(values: dict[str, str], errors: list[str]) -> None:
     try:
@@ -467,6 +512,7 @@ def validate(values: dict[str, str]) -> list[str]:
         non_positive_message="JUDIT_WEBHOOK_MAX_BODY_BYTES must be greater than zero",
     )
     _validate_attachment_ocr(values, errors)
+    _validate_judit(values, errors)
     _validate_embedding_runtime(values, errors)
     _validate_reranker(values, errors)
     _validate_datajud(values, errors)

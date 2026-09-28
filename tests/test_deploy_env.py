@@ -22,6 +22,8 @@ def _valid_values() -> dict[str, str]:
         "ANTHROPIC_API_KEY": "anthropic-key",
         "OPENAI_API_KEY": "openai-key",
         "JUDIT_API_KEY": "judit-api-key",
+        "JUDIT_REQUESTS_BASE_URL": "https://requests.prod.judit.io",
+        "JUDIT_CALLBACK_URL": "https://rpy.invalid/webhooks/judit/judit-token",
         "JUDIT_WEBHOOK_TOKEN": "judit-token",
         "RPY_BEARER_TOKENS": '{"tenant-token":"00000000-0000-0000-0000-000000000001"}',
         "RPY_OPS_TOKEN": "ops-token",
@@ -29,7 +31,7 @@ def _valid_values() -> dict[str, str]:
             [
                 "api.anthropic.com",
                 "api.openai.com",
-                "requests.production.judit.io",
+                "requests.prod.judit.io",
                 "tracking.production.judit.io",
             ]
         ),
@@ -216,6 +218,79 @@ def test_placeholder_values_are_rejected() -> None:
     values = _valid_values()
     values["ANTHROPIC_API_KEY"] = "replace-with-anthropic-key"
     assert "ANTHROPIC_API_KEY still contains a placeholder value" in preflight.validate(values)
+
+
+def test_judit_requests_base_url_must_use_approved_host() -> None:
+    values = _valid_values()
+    values["JUDIT_REQUESTS_BASE_URL"] = "https://example.invalid"
+    _require_error(
+        values,
+        "JUDIT_REQUESTS_BASE_URL must use an approved Judit requests host",
+    )
+
+
+def test_judit_requests_host_must_be_allowlisted() -> None:
+    values = _valid_values()
+    values["EGRESS_PROXY_ALLOWED_HOSTS"] = values["EGRESS_PROXY_ALLOWED_HOSTS"].replace(
+        "requests.prod.judit.io,", ""
+    )
+    _require_error(
+        values,
+        "EGRESS_PROXY_ALLOWED_HOSTS is missing required provider hosts: requests.prod.judit.io",
+    )
+
+
+def test_judit_compat_requests_host_can_be_selected_explicitly() -> None:
+    values = _valid_values()
+    values["JUDIT_REQUESTS_BASE_URL"] = "https://requests.production.judit.io"
+    values["EGRESS_PROXY_ALLOWED_HOSTS"] = values["EGRESS_PROXY_ALLOWED_HOSTS"].replace(
+        "requests.prod.judit.io",
+        "requests.production.judit.io",
+    )
+    assert preflight.validate(values) == []
+
+
+def test_judit_callback_url_requires_https() -> None:
+    values = _valid_values()
+    values["JUDIT_CALLBACK_URL"] = "http://rpy.invalid/webhooks/judit/judit-token"
+    _require_error(values, "JUDIT_CALLBACK_URL must be an absolute HTTPS URL")
+
+
+@pytest.mark.parametrize(
+    "callback_url",
+    [
+        "https://user:password@rpy.invalid/webhooks/judit/judit-token",
+        "https://rpy.invalid/webhooks/judit/judit-token?source=test",
+        "https://rpy.invalid/webhooks/judit/judit-token#fragment",
+    ],
+)
+def test_judit_callback_url_rejects_credential_query_or_fragment(
+    callback_url: str,
+) -> None:
+    values = _valid_values()
+    values["JUDIT_CALLBACK_URL"] = callback_url
+    errors = preflight.validate(values)
+    assert any(error.startswith("JUDIT_CALLBACK_URL must not contain") for error in errors)
+
+
+def test_judit_callback_url_path_must_match_webhook_token() -> None:
+    values = _valid_values()
+    values["JUDIT_CALLBACK_URL"] = "https://rpy.invalid/webhooks/judit/other-token"
+    _require_error(
+        values,
+        "JUDIT_CALLBACK_URL path must match /webhooks/judit/<JUDIT_WEBHOOK_TOKEN>",
+    )
+
+
+@pytest.mark.parametrize("value", ["token/slash", "token?query", "token#fragment", "token%2Fencoded"])
+def test_deploy_preflight_rejects_non_path_safe_webhook_token(value: str) -> None:
+    values = _valid_values()
+    values["JUDIT_WEBHOOK_TOKEN"] = value
+    values["JUDIT_CALLBACK_URL"] = f"https://rpy.invalid/webhooks/judit/{value}"
+    _require_error(
+        values,
+        "JUDIT_WEBHOOK_TOKEN must be a single URL path segment without '/', '?', '#', or '%'",
+    )
 
 
 def test_judit_api_key_is_required() -> None:
