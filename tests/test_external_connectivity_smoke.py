@@ -1,8 +1,20 @@
 from __future__ import annotations
 
+import importlib.util
 import json
+import sys
+from pathlib import Path
 
-from scripts.external_connectivity_smoke import PROBE_BODY, PROBE_HEADER, run_echo_probe
+MODULE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "external_connectivity_smoke.py"
+SPEC = importlib.util.spec_from_file_location("external_connectivity_smoke", MODULE_PATH)
+assert SPEC is not None and SPEC.loader is not None
+external_connectivity_smoke = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = external_connectivity_smoke
+SPEC.loader.exec_module(external_connectivity_smoke)
+
+PROBE_BODY = external_connectivity_smoke.PROBE_BODY
+PROBE_HEADER = external_connectivity_smoke.PROBE_HEADER
+run_echo_probe = external_connectivity_smoke.run_echo_probe
 
 
 class _Response:
