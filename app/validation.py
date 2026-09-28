@@ -97,9 +97,13 @@ def _normalize_digits(value: str) -> str:
     return "".join(character for character in value if character.isdigit())
 
 
-# Memoize party name normalization to avoid repeated unicodedata NFKD decomposition and regex parsing.
+def _normalize_party_name(value: Any) -> str:
+    rendered = str(value or "")
+    return _cached_normalize_party_name(rendered)
+
+
 @lru_cache(maxsize=2048)
-def _normalize_party_name(value: str) -> str:
+def _cached_normalize_party_name(value: str) -> str:
     decomposed = unicodedata.normalize("NFKD", value)
     without_marks = "".join(
         character for character in decomposed if not unicodedata.combining(character)

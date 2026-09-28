@@ -230,10 +230,14 @@ def _masked_personal_id(value: str) -> str:
     raise ValueError("personal id must contain 11 or 14 digits")
 
 
-# Memoize person type normalization to avoid repeated unicodedata NFKD decomposition and regex work.
-@lru_cache(maxsize=1024)
 def _normalized_person_type(value: Any) -> str:
-    rendered = unicodedata.normalize("NFKD", str(value or "").strip())
+    rendered_str = str(value or "").strip()
+    return _cached_normalized_person_type(rendered_str)
+
+
+@lru_cache(maxsize=1024)
+def _cached_normalized_person_type(rendered_str: str) -> str:
+    rendered = unicodedata.normalize("NFKD", rendered_str)
     ascii_value = "".join(
         character
         for character in rendered
