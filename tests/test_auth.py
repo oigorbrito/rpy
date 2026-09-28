@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi import HTTPException
 
+from app.api import _valid_ops_request
 from app.auth import configured_bearer_tokens, tenant_from_request
 
 
@@ -134,3 +135,12 @@ def test_bearer_value_trims_transport_whitespace() -> None:
     request = _request("Bearer   token-a   ", {"token-a": tenant_id})
 
     assert tenant_from_request(request) == tenant_id
+
+
+@pytest.mark.parametrize("scheme", ["Bearer", "bearer", "BEARER"])
+def test_valid_ops_request_supports_case_insensitive_bearer_scheme(
+    monkeypatch, scheme: str
+) -> None:
+    monkeypatch.setenv("RPY_OPS_TOKEN", "secret-ops-token")
+    request = _request(f"{scheme} secret-ops-token")
+    assert _valid_ops_request(request) is True
