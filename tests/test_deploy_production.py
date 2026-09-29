@@ -128,7 +128,7 @@ def test_deploy_pulls_then_starts_and_checks_ready(
     deploy.deploy(env_file, wait_seconds=240)
 
     assert commands[0][-3:] == ["pull", "--policy", "always"]
-    assert commands[1][-7:] == [
+    assert commands[1][-6:] == [
         "up",
         "--detach",
         "--wait",
