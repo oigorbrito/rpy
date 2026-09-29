@@ -22,7 +22,7 @@ def _valid_values() -> dict[str, str]:
         "ANTHROPIC_API_KEY": "anthropic-key",
         "OPENAI_API_KEY": "openai-key",
         "JUDIT_API_KEY": "judit-api-key",
-        "JUDIT_CALLBACK_URL": "https://rpy.example.test/webhooks/judit/judit-token",
+        "JUDIT_CALLBACK_URL": "https://rpy.test/webhooks/judit/judit-token",
         "JUDIT_WEBHOOK_TOKEN": "judit-token",
         "RPY_BEARER_TOKENS": '{"tenant-token":"00000000-0000-0000-0000-000000000001"}',
         "RPY_OPS_TOKEN": "ops-token",
@@ -74,19 +74,19 @@ def test_deploy_preflight_requires_judit_callback_url() -> None:
 
 def test_deploy_preflight_validates_judit_callback_contract() -> None:
     invalid = {
-        "http://rpy.example.test/webhooks/judit/judit-token":
+        "http://rpy.test/webhooks/judit/judit-token":
             "JUDIT_CALLBACK_URL must be an absolute HTTPS URL",
-        "https://user:pass@rpy.example.test/webhooks/judit/judit-token":
+        "https://user:pass@rpy.test/webhooks/judit/judit-token":
             "JUDIT_CALLBACK_URL must not contain URL credentials",
-        "https://rpy.example.test/webhooks/judit/judit-token?x=1":
+        "https://rpy.test/webhooks/judit/judit-token?x=1":
             "JUDIT_CALLBACK_URL must not contain query parameters or fragments",
-        "https://rpy.example.test:8443/webhooks/judit/judit-token":
+        "https://rpy.test:8443/webhooks/judit/judit-token":
             "JUDIT_CALLBACK_URL must use the standard HTTPS port",
         "https://localhost/webhooks/judit/judit-token":
             "JUDIT_CALLBACK_URL must use a public DNS hostname",
         "https://127.0.0.1/webhooks/judit/judit-token":
             "JUDIT_CALLBACK_URL must use a public DNS hostname",
-        "https://rpy.example.test/webhooks/judit/other-token":
+        "https://rpy.test/webhooks/judit/other-token":
             "JUDIT_CALLBACK_URL path must match /webhooks/judit/<JUDIT_WEBHOOK_TOKEN>",
     }
     for callback_url, expected in invalid.items():
