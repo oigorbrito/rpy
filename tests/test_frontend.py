@@ -77,8 +77,9 @@ def test_browser_security_headers_apply_to_frontend_api_and_errors()->None:
 
 def test_csp_matches_self_hosted_frontend_without_inline_exceptions()->None:
  html=(FRONTEND/"index.html").read_text()
- assert '<script src="/app.js" defer></script>' in html
- assert '<link rel="stylesheet" href="/app.css">' in html
+ assert '<script src="config.js" defer></script>' in html
+ assert '<script src="app.js" defer></script>' in html
+ assert '<link rel="stylesheet" href="app.css">' in html
  assert "<script>" not in html
  assert "style=" not in html
  client=TestClient(app)
