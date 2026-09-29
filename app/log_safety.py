@@ -35,7 +35,7 @@ _AUTHORIZATION_RE = re.compile(
 )
 _STRUCTURED_SECRET_RE = re.compile(
     r"""(?ix)
-    (?P<prefix>["']?(?:api[_-]?key|token|access[_-]?token|password|secret)["']?\s*[=:]\s*)
+    (?P<prefix>["']?(?:api[_-]?key|secret[_-]?key|private[_-]?key|access[_-]?key|app[_-]?key|auth[_-]?key|signing[_-]?key|encryption[_-]?key|client[_-]?secret|app[_-]?secret|auth[_-]?token|refresh[_-]?token|bearer[_-]?token|session[_-]?token|id[_-]?token|user[_-]?token|api[_-]?token|access[_-]?token|token|password|secret)["']?\s*[=:]\s*)
     (?P<quote>["']?)
     (?P<secret>[^"'\s,;&}\]]+)
     (?P=quote)
