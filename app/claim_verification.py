@@ -165,6 +165,8 @@ def _cnjs(text: str) -> frozenset[str]:
     return frozenset(_canonical_cnj(match.group(0)) for match in _CNJ_RE.finditer(text))
 
 
+# Memoize date canonicalization to avoid expensive repeated datetime.strptime calls.
+@lru_cache(maxsize=512)
 def _canonical_date(value: str) -> str | None:
     for fmt in ("%Y-%m-%d", "%d/%m/%Y"):
         try:
