@@ -210,6 +210,30 @@ Langfuse remains fail-open: tracing failures do not decide whether a summary is 
 
 ## Deploy sequence
 
+For the supported single-host Compose topology, the canonical operator entrypoint is:
+
+```bash
+chmod 600 /secure/path/staging.env
+python scripts/deploy_production.py --env-file /secure/path/staging.env
+```
+
+The env file must live outside the repository. On POSIX hosts the runner rejects group/world-readable
+secret files. It makes values from that file authoritative over inherited Rpy/provider environment
+variables, validates both the deploy environment and rendered Compose contract before mutation, pulls
+the configured images, runs the declarative Compose startup with health/dependency waiting, and
+confirms the host-local `/ready` endpoint.
+
+A no-mutation preflight is available:
+
+```bash
+python scripts/deploy_production.py --env-file /secure/path/staging.env --dry-run
+```
+
+The runner deliberately does not provision the VM, DNS/TLS ingress, secret manager, off-host backup
+destination, or registry credentials. Those remain environment responsibilities.
+
+The underlying deployment sequence is:
+
 1. Build and publish the application image in trusted CI, then record its immutable registry digest.
 2. Set `RPY_IMAGE` to that digest and inject the environment-specific configuration and secrets.
 3. Run `python scripts/validate_deploy_env.py` against the exported environment, or `python scripts/validate_deploy_env.py --env-file /secure/path/production.env` for a local secret-managed file.
