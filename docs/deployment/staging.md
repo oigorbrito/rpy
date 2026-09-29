@@ -85,6 +85,21 @@ selected. Until then, the repository contract remains portable:
 
 Quick Tunnel/trycloudflare evidence is diagnostic only and must not be reused as persistent staging.
 
+## Single-host deployment command
+
+After the VM, Docker/Compose, TLS ingress and secret source exist, deploy the same immutable image
+with the repository's canonical runner:
+
+```bash
+chmod 600 /secure/path/staging.env
+python scripts/deploy_production.py --env-file /secure/path/staging.env --dry-run
+python scripts/deploy_production.py --env-file /secure/path/staging.env
+```
+
+The staging env file must stay outside the Git checkout. The runner does not create provider requests;
+starting empty workers is not provider acceptance. Run the manual `staging-readiness` workflow only
+after the stable public ingress is serving the deployed stack.
+
 ## Target-environment acceptance
 
 After `staging-readiness` is green, perform one bounded target-environment acceptance:
