@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 from app.api import app
 FRONTEND=Path(__file__).parents[1]/"app"/"frontend"
 def test_frontend_routes_are_served_without_database_lifespan()->None:
- client=TestClient(app); index=client.get("/"); assert index.status_code==200; assert "Rpy" in index.text; assert "Número do processo" in index.text; assert "Bearer token" in index.text; assert "Ir para o conteúdo" in index.text; assert 'aria-live="polite"' in index.text; assert "Contexto do processo" in index.text; assert "Últimos acontecimentos" in index.text; assert client.get("/app.css").status_code==200; assert client.get("/app.js").status_code==200
+ client=TestClient(app); index=client.get("/"); assert index.status_code==200; assert "Rpy" in index.text; assert "Número do processo" in index.text; assert "Bearer token" in index.text; assert "Ir para o conteúdo" in index.text; assert 'aria-live="polite"' in index.text; assert "Contexto do processo" in index.text; assert "Últimos acontecimentos" in index.text; assert client.get("/app.css").status_code==200; assert client.get("/config.js").status_code==200; assert client.get("/app.js").status_code==200
 def test_frontend_does_not_persist_bearer_token_or_render_model_html()->None:
  source=(FRONTEND/"app.js").read_text(); assert "localStorage" not in source; assert "sessionStorage" not in source; assert "innerHTML" not in source; assert "textContent" in source; assert "Authorization" in source
 def test_frontend_has_explicit_accessibility_and_state_contracts()->None:
@@ -77,8 +77,9 @@ def test_browser_security_headers_apply_to_frontend_api_and_errors()->None:
 
 def test_csp_matches_self_hosted_frontend_without_inline_exceptions()->None:
  html=(FRONTEND/"index.html").read_text()
- assert '<script src="/app.js" defer></script>' in html
- assert '<link rel="stylesheet" href="/app.css">' in html
+ assert '<script src="config.js" defer></script>' in html
+ assert '<script src="app.js" defer></script>' in html
+ assert '<link rel="stylesheet" href="app.css">' in html
  assert "<script>" not in html
  assert "style=" not in html
  client=TestClient(app)
@@ -87,3 +88,18 @@ def test_csp_matches_self_hosted_frontend_without_inline_exceptions()->None:
  assert "'unsafe-eval'" not in csp
  assert "frame-ancestors 'none'" in csp
  assert "object-src 'none'" in csp
+
+
+def test_frontend_supports_project_pages_and_configurable_api_origin()->None:
+ html=(FRONTEND/"index.html").read_text()
+ source=(FRONTEND/"app.js").read_text()
+ config=(FRONTEND/"config.js").read_text()
+ assert 'href="./"' in html
+ assert 'href="app.css"' in html
+ assert 'src="config.js"' in html
+ assert 'src="app.js"' in html
+ assert "window.RPY_PUBLIC_CONFIG" in config
+ assert "apiUrl(" in source
+ assert "API_NOT_CONFIGURED" in source
+ assert "localStorage" not in source
+ assert "sessionStorage" not in source

@@ -13,6 +13,7 @@ from app.api_key_middleware import ApiKeySecurityMiddleware
 from app.api_key_auth import authorization_header
 from app.api_v1 import router as api_v1_router
 from app.auth import configured_bearer_tokens, tenant_from_request
+from app.browser_origins import BrowserProcessCorsMiddleware
 from app.claim_evidence import claim_evidence_is_publishable, load_summary_claim_evidence
 from app.db import create_pool
 from app.frontend import router as frontend_router
@@ -61,6 +62,7 @@ app.add_middleware(ApiKeySecurityMiddleware)
 app.add_middleware(InboundPostBodyLimitMiddleware)
 app.add_middleware(JuditWebhookSecretRedactionMiddleware)
 app.add_middleware(SecurityResponseHeadersMiddleware)
+app.add_middleware(BrowserProcessCorsMiddleware)
 app.include_router(api_v1_router)
 app.include_router(frontend_router)
 

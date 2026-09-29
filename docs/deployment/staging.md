@@ -100,6 +100,32 @@ The staging env file must stay outside the Git checkout. The runner does not cre
 starting empty workers is not provider acceptance. Run the manual `staging-readiness` workflow only
 after the stable public ingress is serving the deployed stack.
 
+## GitHub Pages staging UI
+
+The frontend is static HTML/CSS/JavaScript and may be published independently on GitHub Pages.
+Pages is the browser shell only; FastAPI, workers, PostgreSQL and Judit callbacks remain on the
+persistent backend.
+
+Expected project-site URL:
+
+```text
+https://oigorbrito.github.io/rpy/
+```
+
+The Pages artifact uses relative asset URLs so the `/rpy/` project path is preserved. A generated
+`config.js` contains only the public backend origin. No bearer token, provider key, webhook token,
+database credential or other secret is embedded in Pages.
+
+Repository variable `PAGES_API_BASE_URL` controls that public backend origin. It must be a bare
+HTTPS origin. When unset, the UI still publishes but process lookup fails closed and performs no
+network request.
+
+The backend uses `RPY_BROWSER_ORIGINS=https://oigorbrito.github.io`. CORS is disabled by default
+and applies only to browser-facing process routes; `/ops` and Judit webhook routes are excluded.
+
+The Pages workflow is manual. Enable GitHub Pages with **GitHub Actions** as the deployment source
+before dispatching it.
+
 ## Target-environment acceptance
 
 After `staging-readiness` is green, perform one bounded target-environment acceptance:

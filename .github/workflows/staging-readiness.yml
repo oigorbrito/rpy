@@ -21,6 +21,7 @@ jobs:
     env:
       RPY_IMAGE: ${{ vars.RPY_IMAGE }}
       STAGING_BASE_URL: ${{ vars.STAGING_BASE_URL }}
+      RPY_BROWSER_ORIGINS: ${{ vars.RPY_BROWSER_ORIGINS }}
 
       POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
       MIGRATION_DATABASE_URL: ${{ secrets.MIGRATION_DATABASE_URL }}
