@@ -94,6 +94,22 @@ def test_deploy_preflight_validates_judit_callback_contract() -> None:
         values["JUDIT_CALLBACK_URL"] = callback_url
         _require_error(values, expected)
 
+def test_deploy_preflight_accepts_github_pages_browser_origin() -> None:
+    values = _valid_values()
+    values["RPY_BROWSER_ORIGINS"] = "https://oigorbrito.github.io"
+    assert preflight.validate(values) == []
+
+
+def test_deploy_preflight_rejects_invalid_browser_origins() -> None:
+    values = _valid_values()
+    values["RPY_BROWSER_ORIGINS"] = "https://oigorbrito.github.io/rpy"
+    _require_error(values, "RPY_BROWSER_ORIGINS entries must be bare HTTPS origins")
+
+    values = _valid_values()
+    values["RPY_BROWSER_ORIGINS"] = "https://*.github.io"
+    _require_error(values, "RPY_BROWSER_ORIGINS must not contain wildcards")
+
+
 def test_deploy_preflight_validates_inbound_post_body_limit() -> None:
     for value, expected in (
         ("not-an-integer", "JUDIT_WEBHOOK_MAX_BODY_BYTES must be an integer"),
