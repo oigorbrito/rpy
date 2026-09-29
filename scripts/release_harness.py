@@ -13,6 +13,54 @@ def read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _validate_release_state(
+    *,
+    version: str,
+    tag: str,
+    versioning_text: str,
+    next_release_text: str,
+) -> list[str]:
+    errors: list[str] = []
+
+    for required in ("Release tags are immutable", "`v0.1.0`", f"`{tag}`"):
+        if required not in versioning_text:
+            errors.append(
+                f"release versioning policy missing required marker: {required}"
+            )
+
+    unselected = "**Release version: not yet selected**" in next_release_text
+    selected = f"**Release version: {version}**" in next_release_text
+    if unselected == selected:
+        errors.append(
+            "next release readiness must declare exactly one release state: "
+            "not yet selected or the current package version"
+        )
+    elif unselected:
+        marker = "The next release identifier has **not** been selected."
+        if marker not in versioning_text:
+            errors.append(
+                f"release versioning policy missing required marker: {marker}"
+            )
+    else:
+        marker = f"selected `{version}`"
+        if marker not in versioning_text:
+            errors.append(
+                f"release versioning policy missing selected-version marker: {marker}"
+            )
+
+    for required in (
+        "## Next artifact gate",
+        "## Release vs activation",
+        "create the immutable tag only after",
+    ):
+        if required not in next_release_text:
+            errors.append(
+                f"next release readiness missing required marker: {required}"
+            )
+
+    return errors
+
+
 def main() -> int:
     errors: list[str] = []
 
@@ -80,20 +128,14 @@ def main() -> int:
             if marker not in provider_acceptance_text:
                 errors.append(f"provider acceptance runbook missing required section: {marker}")
 
-        for marker in (
-            "The historical first release is:",
-            "Do not move, recreate or retarget `v0.1.0`.",
-            f"selected `{version}` for the next release",
-        ):
-            if marker not in versioning_text:
-                errors.append(f"release versioning policy missing required marker: {marker}")
-        for marker in (
-            f"**Release version: {version}**",
-            "## Release blockers vs activation blockers",
-            "create a **new** tag; never retarget `v0.1.0`.",
-        ):
-            if marker not in next_release_text:
-                errors.append(f"next release readiness missing required marker: {marker}")
+        errors.extend(
+            _validate_release_state(
+                version=version,
+                tag=tag,
+                versioning_text=versioning_text,
+                next_release_text=next_release_text,
+            )
+        )
 
         for command in ("./scripts/smoke_offline.sh", ".\\scripts\\smoke_offline.ps1"):
             if command not in readme_text:
