@@ -109,13 +109,14 @@ Production has no fallback values for:
 - `BACKUP_DATABASE_URL`;
 - `ANTHROPIC_API_KEY`;
 - `JUDIT_API_KEY`;
+- `JUDIT_CALLBACK_URL`;
 - `JUDIT_WEBHOOK_TOKEN`;
 - `RPY_BEARER_TOKENS`;
 - `RPY_OPS_TOKEN`.
 
 `OPENAI_API_KEY` is conditional: it is required only while `EMBEDDING_SPACE_RUNTIME_ENABLED=false`, which preserves the historical OpenAI `vector(1536)` retrieval path. With the isolated runtime enabled, BGE is the default self-hosted provider. Cohere is accepted only when the deployment explicitly selects `EMBEDDING_PROVIDER=cohere`, sets `ALLOW_EXTERNAL_EMBEDDINGS=true`, pins `COHERE_EMBEDDING_MODEL=embed-v4.0`, and supplies `COHERE_API_KEY`. Cohere is never an automatic fallback.
 
-Inject secrets from the deployment platform's secret manager or equivalent environment mechanism. Do not place populated values in the repository or bake them into the image. `.env.production.example` is a shape-only template. Staging and production must use separate secret sources; do not point both environments at the same PostgreSQL credentials or reuse HTTP/provider secrets between them.
+Inject secrets from the deployment platform's secret manager or equivalent environment mechanism. Do not place populated values in the repository or bake them into the image. `JUDIT_CALLBACK_URL` is sensitive configuration because its path contains the webhook token; it must be a stable public HTTPS URL whose path exactly matches `/webhooks/judit/<JUDIT_WEBHOOK_TOKEN>`. The production preflight rejects loopback/IP-literal callback hosts, URL credentials, query strings, fragments and non-standard HTTPS ports. `.env.production.example` is a shape-only template. Staging and production must use separate secret sources; do not point both environments at the same PostgreSQL credentials or reuse HTTP/provider secrets between them.
 
 Database credentials are split by responsibility. The five URLs must use distinct PostgreSQL login roles and target the same application database:
 

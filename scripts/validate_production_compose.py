@@ -47,6 +47,7 @@ API_REQUIRED_ENV = {
 WORKER_REQUIRED_ENV = {
     "DATABASE_URL",
     "JUDIT_API_KEY",
+    "JUDIT_CALLBACK_URL",
     "JUDIT_TIMEOUT_SECONDS",
     "DATAJUD_ENABLED",
     "DATAJUD_AUTHORIZED_USE",
@@ -129,6 +130,7 @@ PROVIDER_SECRETS = {
     "OPENAI_API_KEY",
     "COHERE_API_KEY",
     "JUDIT_API_KEY",
+    "JUDIT_CALLBACK_URL",
     "DATAJUD_API_KEY",
     "LANGFUSE_SECRET_KEY",
 }
@@ -496,6 +498,7 @@ def _validate_worker_shutdown(services: dict[str, Any]) -> None:
 
 def _validate_worker_embedding_contract(services: dict[str, Any]) -> None:
     fields = (
+        "JUDIT_CALLBACK_URL",
         "EMBEDDING_SPACE_RUNTIME_ENABLED",
         "EMBEDDING_PROVIDER",
         "BGE_EMBEDDING_MODEL",

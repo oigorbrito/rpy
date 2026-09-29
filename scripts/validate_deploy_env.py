@@ -25,6 +25,7 @@ REQUIRED_KEYS = (
     *DB_URL_KEYS,
     "ANTHROPIC_API_KEY",
     "JUDIT_API_KEY",
+    "JUDIT_CALLBACK_URL",
     "JUDIT_WEBHOOK_TOKEN",
     "RPY_BEARER_TOKENS",
     "RPY_OPS_TOKEN",
@@ -371,6 +372,40 @@ def _validate_reranker(values: dict[str, str], errors: list[str]) -> None:
 
 
 
+def _validate_judit_callback(values: dict[str, str], errors: list[str]) -> None:
+    value = str(values.get("JUDIT_CALLBACK_URL") or "").strip()
+    if not value:
+        return
+
+    parsed = urlsplit(value)
+    if parsed.scheme != "https" or not parsed.hostname:
+        errors.append("JUDIT_CALLBACK_URL must be an absolute HTTPS URL")
+        return
+    if parsed.username is not None or parsed.password is not None:
+        errors.append("JUDIT_CALLBACK_URL must not contain URL credentials")
+    if parsed.query or parsed.fragment:
+        errors.append("JUDIT_CALLBACK_URL must not contain query parameters or fragments")
+    if parsed.port not in {None, 443}:
+        errors.append("JUDIT_CALLBACK_URL must use the standard HTTPS port")
+
+    hostname = parsed.hostname.rstrip(".").casefold()
+    if hostname == "localhost" or hostname.endswith(".localhost"):
+        errors.append("JUDIT_CALLBACK_URL must use a public DNS hostname")
+    else:
+        try:
+            ipaddress.ip_address(hostname)
+        except ValueError:
+            pass
+        else:
+            errors.append("JUDIT_CALLBACK_URL must use a public DNS hostname")
+
+    webhook_token = str(values.get("JUDIT_WEBHOOK_TOKEN") or "")
+    if webhook_token and parsed.path != f"/webhooks/judit/{webhook_token}":
+        errors.append(
+            "JUDIT_CALLBACK_URL path must match /webhooks/judit/<JUDIT_WEBHOOK_TOKEN>"
+        )
+
+
 def _validate_datajud(values: dict[str, str], errors: list[str]) -> None:
     try:
         enabled = _bool_value(values, "DATAJUD_ENABLED", False)
@@ -469,6 +504,7 @@ def validate(values: dict[str, str]) -> list[str]:
     _validate_attachment_ocr(values, errors)
     _validate_embedding_runtime(values, errors)
     _validate_reranker(values, errors)
+    _validate_judit_callback(values, errors)
     _validate_datajud(values, errors)
     _validate_langfuse(values, errors)
     _validate_positive_numeric(
