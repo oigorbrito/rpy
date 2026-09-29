@@ -23,6 +23,11 @@ async def frontend_css() -> FileResponse:
     return FileResponse(_FRONTEND_DIR / "app.css", media_type="text/css")
 
 
+@router.get("/config.js", include_in_schema=False)
+async def frontend_config() -> FileResponse:
+    return FileResponse(_FRONTEND_DIR / "config.js", media_type="text/javascript")
+
+
 @router.get("/app.js", include_in_schema=False)
 async def frontend_js() -> FileResponse:
     return FileResponse(_FRONTEND_DIR / "app.js", media_type="text/javascript")

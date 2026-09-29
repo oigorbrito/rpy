@@ -116,7 +116,7 @@ function readyPayload(overrides = {}) {
   };
 }
 
-function createHarness(fetchResponses) {
+function createHarness(fetchResponses, { apiBase = "same-origin" } = {}) {
   const elements = Object.fromEntries(ids.map(id => [id, new Element(id)]));
   const requests = [];
   const timers = new Map();
@@ -148,6 +148,7 @@ function createHarness(fetchResponses) {
       },
     },
     window: {
+      RPY_PUBLIC_CONFIG: { apiBase },
       matchMedia: () => ({ matches: false }),
       addEventListener: (type, handler) => {
         windowListeners[type] = handler;
@@ -207,6 +208,25 @@ async function scenario(name, body) {
     throw error;
   }
 }
+
+await scenario("configured Pages API base uses the backend origin", async () => {
+  const ui = createHarness(
+    [jsonResponse(200, readyPayload())],
+    { apiBase: "https://api-staging.rpy.test" },
+  );
+  await ui.search();
+  assert.equal(
+    ui.requests[0].url,
+    `https://api-staging.rpy.test/processes/${encodeURIComponent(VALID_CODE)}`,
+  );
+});
+
+await scenario("unconfigured Pages API fails closed without network I/O", async () => {
+  const ui = createHarness([jsonResponse(500, {})], { apiBase: null });
+  await ui.search();
+  assert.equal(ui.requests.length, 0);
+  assert.ok(ui.elements["status-title"].textContent.includes("API de staging"));
+});
 
 await scenario("successful lookup renders public data, focuses result and uses bearer header", async () => {
   const ui = createHarness([jsonResponse(200, readyPayload())]);

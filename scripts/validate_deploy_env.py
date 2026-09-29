@@ -8,6 +8,8 @@ import os
 import re
 from pathlib import Path
 from typing import Callable
+
+from app.browser_origins import parse_browser_origins
 from urllib.parse import urlsplit
 from uuid import UUID
 
@@ -446,6 +448,13 @@ def _validate_datajud(values: dict[str, str], errors: list[str]) -> None:
 
 
 
+def _validate_browser_origins(values: dict[str, str], errors: list[str]) -> None:
+    try:
+        parse_browser_origins(values.get("RPY_BROWSER_ORIGINS"))
+    except ValueError as exc:
+        errors.append(str(exc))
+
+
 def _validate_langfuse(values: dict[str, str], errors: list[str]) -> None:
     try:
         enabled = _bool_value(values, "LANGFUSE_ENABLED", False)
@@ -505,6 +514,7 @@ def validate(values: dict[str, str]) -> list[str]:
     _validate_embedding_runtime(values, errors)
     _validate_reranker(values, errors)
     _validate_judit_callback(values, errors)
+    _validate_browser_origins(values, errors)
     _validate_datajud(values, errors)
     _validate_langfuse(values, errors)
     _validate_positive_numeric(
