@@ -92,8 +92,9 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           annotations: ${{ steps.meta.outputs.annotations }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Release candidates must refresh Debian security packages instead of
+          # reusing a cached apt-get upgrade layer.
+          no-cache: true
           provenance: mode=max
           sbom: true
 
