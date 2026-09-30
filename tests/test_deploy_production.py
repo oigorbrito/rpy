@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -143,3 +144,31 @@ def test_deploy_pulls_then_starts_and_checks_ready(
 def test_deploy_rejects_out_of_range_wait(value: int, tmp_path: Path) -> None:
     with pytest.raises(deploy.DeployError, match="between 1 and 1800"):
         deploy.deploy(tmp_path / "missing.env", wait_seconds=value)
+
+
+def test_deploy_tools_import_without_site_packages() -> None:
+    for script in (
+        "scripts/validate_deploy_env.py",
+        "scripts/validate_production_compose.py",
+        "scripts/deploy_production.py",
+    ):
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-S",
+                "-c",
+                (
+                    "import runpy; "
+                    + f"runpy.run_path({script!r}, run_name='rpy_import_probe')"
+                ),
+            ],
+            cwd=deploy.ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert completed.returncode == 0, (
+            script,
+            completed.stdout,
+            completed.stderr,
+        )
