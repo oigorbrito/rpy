@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 from typing import Callable
 
-from app.browser_origins import parse_browser_origins
+from app.browser_origin_config import parse_browser_origins
 from urllib.parse import urlsplit
 from uuid import UUID
 
