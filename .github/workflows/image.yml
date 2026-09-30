@@ -2,6 +2,8 @@ name: image
 
 on:
   push:
+    branches:
+      - "image-candidate/**"
     tags:
       - "v*"
   workflow_dispatch:
