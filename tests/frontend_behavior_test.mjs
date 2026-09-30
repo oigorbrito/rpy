@@ -440,4 +440,31 @@ await scenario("CNJ heading uses sans-serif tabular numerals for legibility", as
   assert.match(css, /\.process-header h2\{[^}]*ui-sans-serif[^}]*font-variant-numeric:tabular-nums/);
 });
 
+await scenario("bearer token field supports submission via Enter key and toggle-token references token field", async () => {
+  const html = fs.readFileSync("app/frontend/index.html", "utf8");
+  assert.match(html, /id="toggle-token"[^>]*aria-controls="bearer-token"/);
+
+  const ui = createHarness([jsonResponse(200, readyPayload())]);
+  ui.elements["process-code"].value = VALID_CODE;
+  ui.elements["bearer-token"].value = TOKEN;
+  await ui.elements["bearer-token"].listeners.keydown({ key: "Enter", preventDefault() {} });
+
+  assert.equal(ui.requests.length, 1);
+  assert.equal(ui.requests[0].url, `/processes/${encodeURIComponent(VALID_CODE)}`);
+});
+
+await scenario("copy button resets label cleanly on rapid repeated clicks", async () => {
+  const ui = createHarness([jsonResponse(200, readyPayload())]);
+  await ui.search();
+
+  await ui.click("copy-summary");
+  assert.equal(ui.elements["copy-summary"].textContent, "Resumo copiado");
+
+  await ui.click("copy-summary");
+  assert.equal(ui.elements["copy-summary"].textContent, "Resumo copiado");
+
+  await ui.tick();
+  assert.equal(ui.elements["copy-summary"].textContent, "Copiar resumo");
+});
+
 console.log("frontend behavior harness: PASS");
