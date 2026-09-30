@@ -64,6 +64,7 @@ def test_browser_security_headers_apply_to_frontend_api_and_errors()->None:
   "content-security-policy":"default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; frame-src 'none'; form-action 'self'",
   "x-content-type-options":"nosniff",
   "x-frame-options":"DENY",
+  "x-xss-protection":"0",
   "referrer-policy":"no-referrer",
   "permissions-policy":"camera=(), microphone=(), geolocation=(), payment=(), usb=()",
   "cross-origin-opener-policy":"same-origin",
