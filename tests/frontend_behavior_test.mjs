@@ -440,4 +440,17 @@ await scenario("CNJ heading uses sans-serif tabular numerals for legibility", as
   assert.match(css, /\.process-header h2\{[^}]*ui-sans-serif[^}]*font-variant-numeric:tabular-nums/);
 });
 
+await scenario("credential toggle updates accessible label and markup includes field error alert roles", async () => {
+  const html = fs.readFileSync("app/frontend/index.html", "utf8");
+  assert.match(html, /id="process-code-error"[^>]*role="alert"/);
+  assert.match(html, /id="token-error"[^>]*role="alert"/);
+  assert.match(html, /id="toggle-token"[^>]*aria-controls="bearer-token"/);
+
+  const ui = createHarness([jsonResponse(200, readyPayload())]);
+  await ui.click("toggle-token");
+  assert.equal(ui.elements["toggle-token"].getAttribute("aria-label"), "Ocultar token de acesso");
+  await ui.click("toggle-token");
+  assert.equal(ui.elements["toggle-token"].getAttribute("aria-label"), "Mostrar token de acesso");
+});
+
 console.log("frontend behavior harness: PASS");
