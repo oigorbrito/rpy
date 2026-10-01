@@ -165,7 +165,7 @@ async def provision(database_url: str) -> None:
             await conn.execute(
                 f"GRANT SELECT, INSERT ON judit_tracking_refreshes TO {scheduler}"
             )
-            await conn.execute(f"GRANT DELETE ON judit_deliveries, jobs TO {scheduler}")
+            await conn.execute(f"GRANT SELECT, DELETE ON judit_deliveries, jobs TO {scheduler}")
             await conn.execute(
                 f"GRANT SELECT, DELETE ON judit_request_completions TO {scheduler}"
             )
