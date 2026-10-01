@@ -104,9 +104,28 @@ def test_sanitize_error_message_redacts_authorization_schemes(scheme: str) -> No
 _CREDENTIAL_ALPHABET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
 
 
+def test_sanitize_error_message_redacts_compound_secret_keys() -> None:
+    rendered = sanitize_error_message(
+        "failed with secret_key=secret_val_123, private_key=priv_val_456, "
+        "client_secret=client_val_789 and refresh_token=refresh_val_012"
+    )
+
+    assert "secret_val_123" not in rendered
+    assert "priv_val_456" not in rendered
+    assert "client_val_789" not in rendered
+    assert "refresh_val_012" not in rendered
+    assert "secret_key=[REDACTED]" in rendered
+    assert "private_key=[REDACTED]" in rendered
+    assert "client_secret=[REDACTED]" in rendered
+    assert "refresh_token=[REDACTED]" in rendered
+
+
 @settings(max_examples=120, deadline=None)
 @given(
-    key=st.sampled_from(("api_key", "api-key", "token", "access_token", "password", "secret")),
+    key=st.sampled_from((
+        "api_key", "api-key", "token", "access_token", "password", "secret",
+        "secret_key", "private_key", "client_secret", "refresh_token", "auth_token", "access_key",
+    )),
     key_quote=st.sampled_from(("", '"', "'")),
     value_quote=st.sampled_from(("", '"', "'")),
     secret=st.text(alphabet=_CREDENTIAL_ALPHABET, min_size=12, max_size=48),
