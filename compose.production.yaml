@@ -170,6 +170,7 @@ services:
       start_period: 5s
     networks:
       - backend
+      - api-public
     restart: unless-stopped
 
   egress-proxy:
@@ -287,6 +288,7 @@ services:
 networks:
   backend:
     internal: true
+  api-public: {}
   provider-gateway:
     internal: true
   egress: {}
