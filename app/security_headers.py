@@ -18,6 +18,7 @@ SECURITY_RESPONSE_HEADERS = {
     "content-security-policy": CONTENT_SECURITY_POLICY,
     "x-content-type-options": "nosniff",
     "x-frame-options": "DENY",
+    "x-xss-protection": "0",
     "referrer-policy": "no-referrer",
     "permissions-policy": PERMISSIONS_POLICY,
     "cross-origin-opener-policy": "same-origin",
