@@ -75,9 +75,10 @@ def _valid_webhook_token(token: str) -> bool:
 def _valid_ops_request(request: Request) -> bool:
     expected = os.environ.get("RPY_OPS_TOKEN", "")
     authorization = authorization_header(request) or ""
-    if not expected or not authorization.startswith("Bearer "):
+    scheme, _, supplied = authorization.partition(" ")
+    supplied = supplied.strip()
+    if not expected or scheme.casefold() != "bearer":
         return False
-    supplied = authorization.removeprefix("Bearer ").strip()
     return bool(supplied) and hmac.compare_digest(supplied, expected)
 
 

@@ -78,3 +78,15 @@ def test_comma_merged_authorization_header_is_rejected() -> None:
         raise AssertionError(
             f"expected merged Authorization to return 401, got {exc_info.value.status_code}"
         )
+
+
+@pytest.mark.parametrize("scheme", ["Bearer", "bearer", "BEARER", "BeArEr"])
+def test_ops_accepts_case_insensitive_bearer_scheme(
+    monkeypatch: pytest.MonkeyPatch,
+    scheme: str,
+) -> None:
+    token = uuid4().hex
+    monkeypatch.setenv("RPY_OPS_TOKEN", token)
+    request = _request(f"{scheme} {token}")
+    if not _valid_ops_request(request):
+        raise AssertionError(f"ops request rejected valid token with scheme {scheme}")
