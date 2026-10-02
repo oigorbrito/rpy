@@ -440,4 +440,9 @@ await scenario("CNJ heading uses sans-serif tabular numerals for legibility", as
   assert.match(css, /\.process-header h2\{[^}]*ui-sans-serif[^}]*font-variant-numeric:tabular-nums/);
 });
 
+await scenario("toggle-token button has aria-controls referencing bearer-token", async () => {
+  const html = fs.readFileSync("app/frontend/index.html", "utf8");
+  assert.match(html, /id="toggle-token"[^>]*aria-controls="bearer-token"/);
+});
+
 console.log("frontend behavior harness: PASS");
