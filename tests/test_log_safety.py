@@ -91,6 +91,17 @@ def test_sanitize_error_message_redacts_demo_bearer_token(monkeypatch) -> None:
     assert REDACTED in rendered
 
 
+def test_sanitize_error_message_redacts_structured_bearer_credentials() -> None:
+    rendered = sanitize_error_message(
+        'request failed with bearer: opaque-bearer-token-123 and "bearer": "opaque-bearer-token-456"'
+    )
+
+    assert "opaque-bearer-token-123" not in rendered
+    assert "opaque-bearer-token-456" not in rendered
+    assert f'bearer: {REDACTED}' in rendered
+    assert f'"bearer": "{REDACTED}"' in rendered
+
+
 @pytest.mark.parametrize("scheme", ["Bearer", "APIKey", "Basic", "Token", "Digest", "Negotiate", "OAuth"])
 def test_sanitize_error_message_redacts_authorization_schemes(scheme: str) -> None:
     rendered = sanitize_error_message(
@@ -106,7 +117,7 @@ _CREDENTIAL_ALPHABET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123
 
 @settings(max_examples=120, deadline=None)
 @given(
-    key=st.sampled_from(("api_key", "api-key", "token", "access_token", "password", "secret")),
+    key=st.sampled_from(("api_key", "api-key", "token", "access_token", "bearer", "password", "secret")),
     key_quote=st.sampled_from(("", '"', "'")),
     value_quote=st.sampled_from(("", '"', "'")),
     secret=st.text(alphabet=_CREDENTIAL_ALPHABET, min_size=12, max_size=48),
