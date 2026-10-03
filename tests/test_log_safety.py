@@ -91,6 +91,15 @@ def test_sanitize_error_message_redacts_demo_bearer_token(monkeypatch) -> None:
     assert REDACTED in rendered
 
 
+def test_sanitize_error_message_redacts_pgpassword(monkeypatch) -> None:
+    monkeypatch.setenv("PGPASSWORD", "pg-secret-pass-789")
+
+    rendered = sanitize_error_message("failed connection with pg-secret-pass-789")
+
+    assert "pg-secret-pass-789" not in rendered
+    assert REDACTED in rendered
+
+
 @pytest.mark.parametrize("scheme", ["Bearer", "APIKey", "Basic", "Token", "Digest", "Negotiate", "OAuth"])
 def test_sanitize_error_message_redacts_authorization_schemes(scheme: str) -> None:
     rendered = sanitize_error_message(
